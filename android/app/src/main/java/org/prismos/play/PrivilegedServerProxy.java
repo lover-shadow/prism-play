@@ -159,7 +159,7 @@ public final class PrivilegedServerProxy extends BridgeWebViewClient {
                 : connection.getErrorStream();
         // The WebView owns and closes the returned stream; disconnecting here would truncate it.
         if (status == HttpURLConnection.HTTP_OK) {
-            return new WebResourceResponse(mime == null ? "application/octet-stream" : mime, null, headers, stream);
+            return new WebResourceResponse(mime == null ? "application/octet-stream" : mime, null, 200, "OK", headers, stream);
         }
         String phrase = connection.getResponseMessage();
         // The status-code constructor requires a non-empty reason phrase; upstreams do omit it.
