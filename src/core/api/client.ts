@@ -17,6 +17,7 @@ import type {
   TitleDetail,
   VersionResponse
 } from '../../../edge/src/types/api';
+import { logger } from '../diagnostics';
 
 /**
  * Typed client for the edge contract. DTOs are imported from `edge/src/types/api.ts` on purpose: one
@@ -95,16 +96,21 @@ export class PrismApiClient {
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const targetUrl = `${this.baseUrl}${path}`;
+    logger.net('api', `${init.method ?? 'GET'} ${targetUrl}`);
     let response: Response;
     try {
-      response = await this.fetchImpl(`${this.baseUrl}${path}`, init);
-    } catch {
+      response = await this.fetchImpl(targetUrl, init);
+    } catch (err) {
+      logger.error('api', `网络请求失败: ${init.method ?? 'GET'} ${targetUrl}`, err);
       throw new ApiError('NETWORK_ERROR', 0, '网络不可用，请检查连接后重试');
     }
     const text = await response.text();
     if (!response.ok) {
+      logger.warn('api', `HTTP ${response.status} 响应: ${targetUrl}`, text.slice(0, 300));
       throw new ApiError(errorCodeOf(text), response.status, errorMessageOf(text));
     }
+    logger.info('api', `HTTP ${response.status} 成功: ${targetUrl}`);
     if (response.status === 204 || text === '') throw new ApiError('UNEXPECTED_RESPONSE', response.status, '服务端返回空响应');
     return JSON.parse(text) as T;
   }

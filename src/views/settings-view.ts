@@ -16,6 +16,7 @@ import { bridgeSource } from '../core/native/bridge';
 import { ApiError } from '../core/api/client';
 import { applyTheme, readThemePreference, writeThemePreference, type PreferenceStore, type ThemeMode } from '../core/state/theme';
 import { attempt, band, button, errorCopy, glyphInto, make, readyBand, rowLine, stateBand, type Band, type ViewState } from './history-view';
+import { createDiagnosticsBand } from './diagnostics-band';
 import './views.css';
 
 /** 注入的短时凭据持有者：必须与 `PrismApiClient.bindSessionHolder` 绑的是同一个 RAM holder。 */
@@ -42,6 +43,7 @@ export interface SettingsViewDeps {
   onPrivateSessionChange?: (active: boolean) => void;
   tierSource?: TierReader;
   deviceIdSource?: DeviceIdReader;
+  apiBaseUrl?: string;
   /** 可注入便于测试；默认 `bridgeSource()`，避免把 Web 宿主说成原生能力已生效。 */
   bridgeSourceOf?: () => BridgeSource;
   now?(): number;
@@ -55,24 +57,15 @@ const NO_DEVICE_ID_COPY = '本机暂无可用设备标识（需安全凭证域�
 /** 闭集错误码逐条自有文案（导出以便测试证明「每条各有文案且互不重复」）；一律不回显服务端 message，
  *  卡密设备计数因此没有第二条通路能被带到界面上。 */
 export const ERROR_COPY: Readonly<Record<ErrorCode | 'NETWORK_ERROR' | 'UNEXPECTED_RESPONSE', string>> = {
-  COUPON_NOT_FOUND: '卡密不存在，请核对后重试。',
-  COUPON_REVOKED: '该卡密已被作废，无法核销。',
+  COUPON_NOT_FOUND: '卡密不存在，请核对后重试。', COUPON_REVOKED: '该卡密已被作废，无法核销。',
   COUPON_DEVICE_LIMIT_EXCEEDED: '该卡密可绑定的设备数已达上限，请在已绑定设备上观看或联系发卡方。',
-  COUPON_INVALID_FORMAT: '卡密格式不正确，应按 GY- 开头分段填写。',
-  DEVICE_ID_INVALID: '本机设备标识不合法，请重新安装或稍后重试。',
-  RATE_LIMITED: '核销尝试过于频繁，请稍后再试。',
-  PRIVATE_SESSION_REQUIRED: '当次私密探索授权未被确认，请重新勾选并确认免责声明。',
-  TIER_INSUFFICIENT: '当前档位不在云端开放的准入档位内，无法开启个人探索。',
-  NOT_FOUND: '请求的内容不存在或已下架。',
-  SERVICE_UNAVAILABLE: '服务端暂时不可用，请稍后重试。',
-  PLATFORM_UNSUPPORTED: '本期仅支持 Android 端核销。',
-  CREDENTIAL_EXPIRED: '授权已过期，请重新核销卡密。',
-  VALIDATION_ERROR: '提交内容未通过校验，请检查卡密格式。',
-  PROXY_SIGNATURE_INVALID: '取流地址已过期或被篡改，请重新选集后再试。',
-  CATALOG_REVISION_CONFLICT: '公开目录刚刚发生变化，请重新拉取后再试。',
-  CATALOG_CURSOR_EXPIRED: '本机目录游标已过期，将改拉完整快照。',
-  NETWORK_ERROR: NETWORK_COPY,
-  UNEXPECTED_RESPONSE: '服务端返回了无法识别的响应，请稍后重试。'
+  COUPON_INVALID_FORMAT: '卡密格式不正确，应按 GY- 开头分段填写。', DEVICE_ID_INVALID: '本机设备标识不合法，请重新安装或稍后重试。',
+  RATE_LIMITED: '核销尝试过于频繁，请稍后再试。', PRIVATE_SESSION_REQUIRED: '当次私密探索授权未被确认，请重新勾选并确认免责声明。',
+  TIER_INSUFFICIENT: '当前档位不在云端开放的准入档位内，无法开启个人探索。', NOT_FOUND: '请求的内容不存在或已下架。',
+  SERVICE_UNAVAILABLE: '服务端暂时不可用，请稍后重试。', PLATFORM_UNSUPPORTED: '本期仅支持 Android 端核销。',
+  CREDENTIAL_EXPIRED: '授权已过期，请重新核销卡密。', VALIDATION_ERROR: '提交内容未通过校验，请检查卡密格式。',
+  PROXY_SIGNATURE_INVALID: '取流地址已过期或被篡改，请重新选集后再试。', CATALOG_REVISION_CONFLICT: '公开目录刚刚发生变化，请重新拉取后再试。',
+  CATALOG_CURSOR_EXPIRED: '本机目录游标已过期，将改拉完整快照。', NETWORK_ERROR: NETWORK_COPY, UNEXPECTED_RESPONSE: '服务端返回了无法识别的响应，请稍后重试。'
 };
 function copyFor(error: unknown): string {
   return error instanceof ApiError ? ERROR_COPY[error.code] : errorCopy(error, NETWORK_COPY);
@@ -119,8 +112,13 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
   const redeemRow = rowLine('row-redeem', '卡密核销', '核销成功后由宿主写入安全凭证域，本视图不留 JWT 副本。', [codeInput, button('核销', () => void submitRedeem(), { icon: 'check', cls: 'pv-btn-primary', el: 'redeem-submit' })]);
   const privateRow = rowLine('row-private', '个人探索（当次手动开启）', '冷启动默认关闭；开启态只存内存，不写历史、不可分享。', [privateSwitch]);
   ota.head.append(button('检查更新', () => void checkVersion(), { icon: 'refresh', cls: 'pv-btn-ghost', el: 'ota-check' }));
+  const diagController = createDiagnosticsBand({
+    apiBaseUrl: deps.apiBaseUrl ?? '',
+    nativeSource: nativeOnly,
+    paintRows
+  });
   deps.root.classList.add('pv-view', 'set-view');
-  deps.root.append(make('h2', 'pv-head-title', '系统设置中枢'), appearance.wrap, playback.wrap, redeem.wrap, ota.wrap);
+  deps.root.append(make('h2', 'pv-head-title', '系统设置中枢'), appearance.wrap, playback.wrap, redeem.wrap, ota.wrap, diagController.wrap);
   // AC-02-2：构造即「关」，并丢弃任何遗留的当次凭据，绝不允许「界面已关但凭据仍在飞」。
   deps.tokens.write(null);
 
@@ -273,6 +271,7 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
     if (deps.deviceIdSource === undefined) paintRows(redeem, 'disabled', NO_DEVICE_ID_COPY, [redeemRow]);
     else paintRows(redeem, 'ready', '核销请求只提交 Android 端；离线可验证授权，但点播仍需联网。', [redeemRow]);
     await paintPrivateSection();
+    await diagController.paint();
     // 视图级五态：loading → ready；偏好域不可读则整视图 error（其余态在各分区上如实呈现）。
     deps.root.dataset.state = theme.ok ? 'ready' : 'error';
   }

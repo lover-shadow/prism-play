@@ -28,7 +28,7 @@ const NOW = 1_800_000_000;
 const KID = 'p-test-key';
 const DAY = 86_400;
 /** 监理在《Gate G3 通过决定书》第一节签发的生产公钥坐标；改动它必须同时改契约与发版。 */
-const ISSUED_PUBLIC_X = 'xL-Q-Hge2UGGtv7lslx23_9c7uiNJBRuaPQ9VE_dL74';
+const ISSUED_PUBLIC_X = 'QdLReD6QICQGapTQbPaSyOjwwsOmEdoddIy4Nb8Ay84';
 
 // Ed25519 在本环境签不动就整文件报错，绝不静默跳过（真机 WebView 支持度另列待验项）。
 const pair = await globalThis.crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);

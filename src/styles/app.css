@@ -25,6 +25,11 @@ body {
   overscroll-behavior-y: none;
 }
 
+[hidden],
+.app-view[hidden] {
+  display: none !important;
+}
+
 .app-shell {
   display: grid;
   grid-template-rows: auto 1fr auto;

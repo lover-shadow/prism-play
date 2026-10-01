@@ -207,6 +207,7 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
     }
     const view = createSettingsView({
       api: client,
+      apiBaseUrl: defaultApiBaseUrl,
       prefs,
       bridge,
       tokens: storage.privateVault.session,

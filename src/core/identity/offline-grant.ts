@@ -71,7 +71,7 @@ export const LAST_ONLINE_CHECK_PREF_KEY = 'prism.lastOnlineCheck';
  */
 export const PINNED_VERIFICATION_KEYS: Record<string, JsonWebKey> = {
   p2026: {
-    kty: 'OKP', crv: 'Ed25519', x: 'xL-Q-Hge2UGGtv7lslx23_9c7uiNJBRuaPQ9VE_dL74',
+    kty: 'OKP', crv: 'Ed25519', x: 'QdLReD6QICQGapTQbPaSyOjwwsOmEdoddIy4Nb8Ay84',
     alg: 'EdDSA', key_ops: ['verify'], ext: true
   }
 };
