@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Adaptive launcher icon background (API 26+). Value MUST equal the dark-mode `--bg` token
+  Adaptive launcher icon background (API 26+). Value MUST equal the dark-mode bg token
   (黑曜石夜空) in src/styles/design-tokens.css; `tests/verify_android_assets.py` asserts this
   file's colours are a subset of design-tokens.json, so a token change that forgets the icon
   fails the gate instead of shipping a mismatched brand mark.
