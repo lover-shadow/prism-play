@@ -28,8 +28,11 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: 设置 Android SDK 工具链
-        uses: android-actions/setup-android@v3
+      - name: 接受 Android SDK 协议许可
+        run: |
+          echo "ANDROID_HOME: $ANDROID_HOME"
+          yes | sdkmanager --licenses 2>/dev/null || true
+
 
       - name: 安装项目依赖
         run: |
@@ -38,6 +41,10 @@ jobs:
       - name: 运行契约与数据模型静态复核
         run: |
           python tests/verify_contracts.py
+
+      - name: 运行 Android 原生资产与组件声明复核
+        run: |
+          python tests/verify_android_assets.py
 
       - name: 运行 P0 工程红线扫描
         run: |

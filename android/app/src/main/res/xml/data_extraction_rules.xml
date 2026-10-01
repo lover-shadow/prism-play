@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ============================================================================
+  《光影Play》(Prism Play) v2.0 - Android 12+ backup / device-transfer rules
+  (SPEC 6.1 four-domain table, ARCHITECTURE 3.6, Master ruling M-8)
+
+  FILE NAME: the Stage 3 brief asked for `dataExtractionRules.xml`. AAPT2 rejects
+  uppercase letters in file-based resource names ("'E' is not a valid file-based
+  resource name character"), so the delivered file is `data_extraction_rules.xml`
+  - the same name Google's own template uses. The manifest attribute keeps its
+  documented camelCase spelling and points here.
+
+  INCLUDE-ONLY WHITELIST, ON PURPOSE: for a domain that has any `include` rule,
+  Android backs up ONLY the listed paths of that domain. `sharedpref` therefore
+  has exactly one include (the plain preferences file), which is what keeps every
+  keystore artifact out of the backup even if the concrete file names of the
+  encrypted store change between androidx.security versions. The `exclude` entries
+  below are documentation and defence-in-depth, not the primary guarantee.
+
+  WHY CREDENTIALS ARE EXCLUDED (M-8): the MasterKey material is hardware-/process-
+  bound and cannot migrate. Backing up the ciphertext to Google One and restoring
+  it onto another device yields a file that cannot be decrypted, i.e. an installed
+  app whose authorization is permanently unverifiable - strictly worse than never
+  having backed it up. The new device redeems/re-pings and writes its own store.
+  WHY HISTORY IS INCLUDED (M-8): 换机可接着看, watch progress has no key material.
+  WHY THE PUBLIC CACHE IS EXCLUDED (AC-18): posters and catalog snapshots are
+  rebuildable from the network; shipping them would only spend the user's quota.
+
+  REAL FILE NAMES THIS FILE CLAIMS (integration contract with src/core/storage):
+    databases/prism_local.db ............ @capacitor-community/sqlite, created as
+                                          createConnection("prism_local.db") - the plugin
+                                          passes the name to Context.getDatabasePath()
+                                          verbatim, so no prefix and no suffix are added.
+    shared_prefs/CapacitorStorage.xml ... @capacitor/preferences default group
+                                          "CapacitorStorage"; re-grouping via
+                                          Preferences.configure({ group }) breaks this rule.
+    shared_prefs/prism_credentials_encrypted.xml
+                                        .... EncryptedSharedPreferences file owned by
+                                          SecureCredentialStore.PREFS_FILE (must stay in sync).
+    databases/prism_catalog.db .......... public catalog snapshot DB (Domain 3, cache-sized).
+    cache/posters/ ...................... thumbnail posters (Domain 3, 128 MiB ceiling).
+  ============================================================================
+-->
+<data-extraction-rules>
+
+    <!-- Google One / auto-backup to cloud. -->
+    <cloud-backup>
+        <!-- Domain 2: watch history and resume breakpoints. The side files matter: a
+             WAL/journal left out of the archive can restore an older committed state. -->
+        <include domain="database" path="prism_local.db" />
+        <include domain="database" path="prism_local.db-wal" />
+        <include domain="database" path="prism_local.db-shm" />
+        <include domain="database" path="prism_local.db-journal" />
+
+        <!-- Domain 2 preferences half: theme, poster mode, background-playback flag,
+             as long as they are written through @capacitor/preferences. -->
+        <include domain="sharedpref" path="CapacitorStorage.xml" />
+
+        <!-- Domain 1: keystore-bound ciphertext. Never migratable, never restorable. -->
+        <exclude domain="sharedpref" path="prism_credentials_encrypted.xml" />
+        <exclude domain="sharedpref" path="__androidx_security_master_key_.xml" />
+
+        <!-- Domain 3: rebuildable cache. `root`/cache also covers the WebView HTTP cache,
+             which is where a private thumbnail would otherwise linger (AC-02 zero-disk). -->
+        <exclude domain="database" path="prism_catalog.db" />
+        <exclude domain="database" path="prism_catalog.db-wal" />
+        <exclude domain="database" path="prism_catalog.db-journal" />
+        <exclude domain="root" path="cache" />
+        <exclude domain="root" path="code_cache" />
+        <exclude domain="file" path="cache" />
+        <exclude domain="file" path="cache/posters" />
+
+        <!-- Domain 4 has no file to exclude: 个人探索 is RAM-only by construction
+             (assertWritable in src/core/storage/storage-domains.ts blocks the write). -->
+    </cloud-backup>
+
+    <!-- Device-to-device transfer. Same whitelist: the history must arrive, the
+         keystore blob must not. Android 12+ reads this section independently of
+         cloud-backup, so both are spelled out rather than inherited. -->
+    <device-transfer>
+        <include domain="database" path="prism_local.db" />
+        <include domain="database" path="prism_local.db-wal" />
+        <include domain="database" path="prism_local.db-shm" />
+        <include domain="database" path="prism_local.db-journal" />
+        <include domain="sharedpref" path="CapacitorStorage.xml" />
+
+        <exclude domain="sharedpref" path="prism_credentials_encrypted.xml" />
+        <exclude domain="sharedpref" path="__androidx_security_master_key_.xml" />
+        <exclude domain="database" path="prism_catalog.db" />
+        <exclude domain="database" path="prism_catalog.db-wal" />
+        <exclude domain="database" path="prism_catalog.db-journal" />
+        <exclude domain="root" path="cache" />
+        <exclude domain="root" path="code_cache" />
+        <exclude domain="file" path="cache" />
+        <exclude domain="file" path="cache/posters" />
+    </device-transfer>
+</data-extraction-rules>

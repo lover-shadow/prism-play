@@ -1,7 +1,41 @@
 <?xml version='1.0' encoding='utf-8'?>
+<!--
+  ============================================================================
+  《光影Play》(Prism Play) v2.0 - app module strings (merged)
+
+  Two halves, and the split matters:
+    * `app_name` / `title_activity_main` / `package_name` / `custom_url_scheme` are written by
+      `npx cap add android` from capacitor.config.ts. `npx cap sync` / `cap update` never rewrite
+      this file, so committing our keys alongside them is stable; a future `cap add` would
+      regenerate only the four scaffold names.
+    * `prism_*` are the strings the *platform* renders (notification shade, channel settings).
+      Everything inside the WebView is HTML and comes from src/ plus cloud-pushed copy.
+
+  P0-1: zero emoji. Every glyph in the notification is a 2px-stroke vector under res/drawable.
+  ============================================================================
+-->
 <resources>
     <string name="app_name">光影Play</string>
     <string name="title_activity_main">光影Play</string>
     <string name="package_name">org.prismos.play</string>
     <string name="custom_url_scheme">org.prismos.play</string>
+
+    <string name="prism_playback_channel_name">后台播放</string>
+    <string name="prism_playback_channel_description">锁屏或切到桌面时继续播放音频，并在通知栏提供上一集、播放暂停、下一集与停止控制。</string>
+
+    <string name="prism_playback_action_previous">上一集</string>
+    <string name="prism_playback_action_play">播放</string>
+    <string name="prism_playback_action_pause">暂停</string>
+    <string name="prism_playback_action_next">下一集</string>
+    <!--
+      No "停止" action label on purpose: ACTION_STOP exists inside the service, but surfacing it as a
+      shade button before the window.PrismNativeMedia hook is in place would stop the *service* while the
+      WebView keeps playing, i.e. a control that lies. It returns together with that hook.
+    -->
+
+    <!-- Fallbacks for empty caller labels: the shade must still read as our own app rather than
+         an unnamed media channel. -->
+    <string name="prism_playback_default_title">光影Play</string>
+    <string name="prism_playback_default_episode">正在播放</string>
+    <string name="prism_playback_ongoing_hint">点按返回应用继续观看</string>
 </resources>

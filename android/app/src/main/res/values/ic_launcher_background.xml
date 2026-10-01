@@ -1,4 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adaptive launcher icon background (API 26+). Value MUST equal the dark-mode `--bg` token
+  (黑曜石夜空) in src/styles/design-tokens.css; `tests/verify_android_assets.py` asserts this
+  file's colours are a subset of design-tokens.json, so a token change that forgets the icon
+  fails the gate instead of shipping a mismatched brand mark.
+
+  Replaces the CLI template's `#FFFFFF`. The foreground (mipmap-*/ic_launcher_foreground.png)
+  is still the Capacitor placeholder robot: a branded foreground needs artwork, and no image
+  pipeline exists in this repo - recorded as a G4 delivery limitation rather than papered over.
+-->
 <resources>
-    <color name="ic_launcher_background">#FFFFFF</color>
+    <color name="ic_launcher_background">#080A10</color>
 </resources>

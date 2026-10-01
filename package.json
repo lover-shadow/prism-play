@@ -12,6 +12,7 @@
     "cap:open": "cap open android",
     "verify:contracts": "python tests/verify_contracts.py",
     "verify:acceptance": "python tests/verify_acceptance.py",
+    "verify:android": "python tests/verify_android_assets.py",
     "scan:p0": "python tests/scan_p0.py",
     "typecheck": "tsc -p edge/tsconfig.json",
     "test": "vitest run",

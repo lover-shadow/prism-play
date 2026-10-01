@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ============================================================================
+  《光影Play》(Prism Play) v2.0 - legacy backup rules (android:fullBackupContent)
+  Applies to API 23..30 only; API 31+ reads res/xml/data_extraction_rules.xml instead.
+  Same four-domain policy (SPEC 6.1 / M-8), expressed with the older vocabulary.
+
+  KNOWN RESIDUAL RISK, UNVERIFIABLE OFF-DEVICE: the legacy parser's support for
+  domain="database" is taken from the documented domain list (file / database /
+  sharedpref / external / root), not from a build here. If an OEM ROM logs
+  "Error parsing fullBackupContent" on an API < 31 device, the whole backup set is
+  dropped silently - the fallback is to delete the two `database` lines below and
+  let databases/ ride the default include (which still satisfies M-8 for the history
+  DB, at the cost of also backing up the rebuildable catalog snapshot). Verify on a
+  real API 29 or lower device before G3 is signed (device checklist item 9).
+  ============================================================================
+-->
+<full-backup-content>
+    <!-- Domain 2: watch history + resume breakpoints (换机可接着看). -->
+    <include domain="database" path="prism_local.db" />
+    <include domain="database" path="prism_local.db-journal" />
+    <include domain="database" path="prism_local.db-wal" />
+    <include domain="database" path="prism_local.db-shm" />
+    <include domain="sharedpref" path="CapacitorStorage.xml" />
+
+    <!-- Domain 1: keystore-bound ciphertext, unrestorable on any other device. -->
+    <exclude domain="sharedpref" path="prism_credentials_encrypted.xml" />
+    <exclude domain="sharedpref" path="__androidx_security_master_key_.xml" />
+
+    <!-- Domain 3: rebuildable public cache (catalog snapshot + posters). -->
+    <exclude domain="database" path="prism_catalog.db" />
+    <exclude domain="database" path="prism_catalog.db-journal" />
+    <exclude domain="database" path="prism_catalog.db-wal" />
+    <exclude domain="root" path="cache" />
+    <exclude domain="file" path="cache" />
+    <exclude domain="file" path="cache/posters" />
+
+    <!-- Domain 4: 个人探索 has no file to exclude - it never reaches disk. -->
+</full-backup-content>

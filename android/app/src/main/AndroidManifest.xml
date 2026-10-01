@@ -1,29 +1,94 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<!--
+  ============================================================================
+  《光影Play》(Prism Play) v2.0 - Android host manifest (app module)
+
+  Started as the Stage 3 hand-authored manifest and was merged with the CLI scaffold's
+  manifest during Stage 4 (Gate G4), when the sources moved from android/src/main to the
+  standard android/app/src/main layout. Two deliberate differences from the raw scaffold:
+
+  1. The FileProvider IS declared. Stage 3 omitted it on the grounds that the MVP has no
+     camera and no share-to-file flow - that reasoning missed a real consumer: the
+     @capacitor/filesystem plugin is in our build (Domain 3's cache disk), and its
+     getUri() answers through `androidx.core.content.FileProvider` with the
+     `${applicationId}.fileprovider` authority. Without the provider, the future
+     "cache bytes -> displayable address" bridge for cached posters would throw a
+     FileUriExposedException instead of returning a URI. `res/xml/file_paths.xml` ships
+     with the scaffold and stays as generated.
+  2. Permissions, the media foreground service and the call-state receiver are ours
+     (AC-10 / AC-11); nothing here is inherited from the template.
+
+  NOTHING IN THIS FILE HAS RUN ON A DEVICE. Static review only: no JDK / SDK on the
+  authoring machine; evidence comes from the GitHub Actions build, not from this box.
+  ============================================================================
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Network: TLS to the single edge origin only (res/xml/network_security_config.xml). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- AC-10 / F-05 foreground playback. Android 14 (API 34) requires BOTH the generic
+         permission and the type-specific one once targetSdk >= 34. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- API 33+: denied means the shade card is hidden, not that playback fails.
+         PrismNativePlugin declares it as a Capacitor permission alias so the TS side can
+         request it through the plugin's built-in requestPermissions() without a contract change. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- AC-11 call auto-pause. Runtime permission, dynamically registered receiver only.
+         Denial degrades AC-11 (no auto-pause) and must not block playback: the phone still
+         rings, the video just keeps talking over it, and the TS settings row has to say so. -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+
+    <!-- F-05 says 息屏保活: a bounded partial wake lock keeps the CPU awake while audio plays
+         with the screen off. PlaybackService acquires it with a hard timeout, never forever. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- Wi-Fi tablets and telephony-less devices stay installable. -->
+    <uses-feature
+        android:name="android.hardware.telephony"
+        android:required="false" />
+    <uses-feature
+        android:name="android.software.picture_in_picture"
+        android:required="false" />
 
     <application
         android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/AppTheme">
+        android:theme="@style/AppTheme"
+        android:usesCleartextTraffic="false"
+        android:enableOnBackInvokedCallback="true"
+        tools:targetApi="34">
+        <!-- enableOnBackInvokedCallback hands back navigation to androidx.activity's
+             OnBackPressedDispatcher, which @capacitor/app already registers into (its
+             back-button handler posts the "backButton" event and honours canGoBack). Without
+             the App plugin in the build this flag would degrade to plain activity-finish. -->
 
         <activity
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation"
             android:name=".MainActivity"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation"
+            android:exported="true"
             android:label="@string/title_activity_main"
-            android:theme="@style/AppTheme.NoActionBarLaunch"
             android:launchMode="singleTask"
-            android:exported="true">
-
+            android:theme="@style/AppTheme.NoActionBarLaunch"
+            android:windowSoftInputMode="adjustResize">
+            <!-- adjustResize + the WebView's own inset handling is what makes the search box
+                     survive a soft keyboard; SPEC 12.1 reserves that for real-device evidence. -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-
         </activity>
 
+        <!-- @capacitor/filesystem.getUri() answers through this provider; see header note 1. -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -31,11 +96,25 @@
             android:grantUriPermissions="true">
             <meta-data
                 android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/file_paths"></meta-data>
+                android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- AC-10 media foreground service. exported=false: reached only by in-app PendingIntents.
+             foregroundServiceType must match ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+             passed to startForeground, or API 34 throws at startForeground time. -->
+        <service
+            android:name=".PlaybackService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
+        <!-- AC-11. Declared for lint/discoverability and kept exported=false with no intent-filter:
+             a statically registered PHONE_STATE receiver would have to be exported, which is exactly
+             the surface we do not want (any app could spoof a call state and pause our playback).
+             The live path is CallStateReceiver.register() from PrismNativePlugin, i.e. dynamic,
+             non-exported and scoped to the lifetime of the JS subscription. -->
+        <receiver
+            android:name=".CallStateReceiver"
+            android:enabled="true"
+            android:exported="false" />
     </application>
-
-    <!-- Permissions -->
-
-    <uses-permission android:name="android.permission.INTERNET" />
 </manifest>

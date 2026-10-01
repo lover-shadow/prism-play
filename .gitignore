@@ -10,4 +10,7 @@ android/build/
 .vscode/
 .workbuddy/
 *.log
+__pycache__/
+*.pyc
+
 

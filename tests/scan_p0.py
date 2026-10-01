@@ -17,8 +17,15 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 SCAN_DIRS = ["src", "edge/src", "android", "tests", "."]
 SCAN_SUFFIXES = {".ts", ".tsx", ".js", ".mjs", ".cjs", ".css", ".html", ".vue", ".svelte", ".java", ".kt", ".xml"}
 SKIP_NAMES = {"node_modules", "dist", "build", ".git", ".workbuddy", "docs", "coverage"}
+# `npx cap sync android` 会把 dist/ 逐字节拷进 app/src/main/assets/public；那是一份构建产物，
+# 与 SKIP_NAMES 里的 dist/build 同类，不应被当作业务源码判定（否则第三方 bundle 的色值会冒充我们的红线）。
+SKIP_PATH_PREFIXES = ("android/app/src/main/assets/",)
 # 唯一允许出现裸 Hex 的真相源；SPEC §8 与 design-tokens.json 同源。
 HEX_ALLOWED = {"design-tokens.css", "design-tokens.json"}
+# 自适应启动图标底色（Android 资源层没有 CSS 变量这种机制，颜色只能落在 colors 资源里）。
+# 允许它出现裸 Hex 的前提是 tests/verify_android_assets.py 会断言该值 ∈ design-tokens.json，
+# 即"原生侧同样只有一个颜色真相源"；换品牌图标时必须连同本豁免一起评审。
+HEX_ALLOWED_ANDROID = {"ic_launcher_background.xml"}
 # 边缘直出的分享/下载 H5 按 SPEC §10「不引入站点级 CSS/JS 资产」必须内联样式，
 # 因此允许裸 Hex —— 但必须配一条与 src/styles/design-tokens.json 逐值对账的测试，
 # 否则此处就是紫粉渐变与色值漂移的逃生门。
@@ -102,6 +109,8 @@ def iter_files():
                 continue
             if any(part in SKIP_NAMES for part in path.parts):
                 continue
+            if path.relative_to(ROOT).as_posix().startswith(SKIP_PATH_PREFIXES):
+                continue
             if path.name in SELF_EXCLUDED:
                 continue
             if path.suffix not in SCAN_SUFFIXES and path.name not in {"vite.config.ts", "capacitor.config.ts"}:
@@ -116,6 +125,8 @@ def iter_files():
 def hex_allowed_for(rel: str) -> bool:
     name = rel.rsplit("/", 1)[-1]
     if name in HEX_ALLOWED:
+        return True
+    if name in HEX_ALLOWED_ANDROID and rel.startswith("android/"):
         return True
     return any(rel.startswith(f"{directory}/") for directory in HEX_ALLOWED_DIRS)
 
