@@ -150,7 +150,13 @@ function isMissing(reason: unknown): boolean {
 
 export async function createCacheDisk(deps: CacheDiskDeps = {}): Promise<CacheDisk | null> {
   if (!isNativeHost(deps.platform)) return null;
-  const fs: FilesystemLike = deps.fs ?? (await import('@capacitor/filesystem')).Filesystem;
+  let fs: FilesystemLike;
+  try {
+    fs = deps.fs ?? (await import('@capacitor/filesystem')).Filesystem;
+  } catch (err) {
+    console.warn('Filesystem plugin unavailable, falling back to MemoryCacheDisk', err);
+    return null;
+  }
   const at = (path: string): { path: string; directory: string } => ({ path, directory: CACHE_DIRECTORY });
 
   async function collect(dir: string, found: Array<{ key: string; bytes: number }>): Promise<void> {
@@ -282,7 +288,12 @@ function nativeSqlite(driver: SqliteDriverLike): SqliteLike {
 export async function createHistorySqlite(deps: HistorySqliteDeps = {}): Promise<SqliteLike> {
   if (!isNativeHost(deps.platform)) return unavailableSqlite();
   if (deps.driver !== undefined) return nativeSqlite(deps.driver);
-  // v7 的库名寻址在 `SQLiteConnection` 包装对象上；裸插件实例只收 options 对象，两者不可混用。
-  const { CapacitorSQLite, SQLiteConnection } = await import('@capacitor-community/sqlite');
-  return nativeSqlite(new SQLiteConnection(CapacitorSQLite));
+  try {
+    // v7 的库名寻址在 `SQLiteConnection` 包装对象上；裸插件实例只收 options 对象，两者不可混用。
+    const { CapacitorSQLite, SQLiteConnection } = await import('@capacitor-community/sqlite');
+    return nativeSqlite(new SQLiteConnection(CapacitorSQLite));
+  } catch (err) {
+    console.warn('CapacitorSQLite unavailable, falling back to unavailableSqlite', err);
+    return unavailableSqlite();
+  }
 }

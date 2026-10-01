@@ -37,20 +37,23 @@ interface PrismNativePlugin {
 const PLUGIN_ID = 'PrismNative';
 
 /**
- * Domain 1 accepts only these two keys. A private-session credential must never reach the Keystore
+ * Domain 1 accepts only these credential keys. A private-session credential must never reach the Keystore
  * store: AC-02 forbids persisting the opt-in, so the refusal belongs on this side too rather than
  * relying on the plugin to catch it.
  */
-const CREDENTIAL_KEYS = ['jwt', 'deviceId'] as const;
-export type CredentialKey = (typeof CREDENTIAL_KEYS)[number];
+const KNOWN_CREDENTIAL_KEYS = ['jwt', 'deviceId', 'auth.jwt.ed25519', 'identity.device.id', 'token'] as const;
+export type CredentialKey = (typeof KNOWN_CREDENTIAL_KEYS)[number] | string;
 
-export function isCredentialKey(value: string): value is CredentialKey {
-  return (CREDENTIAL_KEYS as readonly string[]).includes(value);
+export function isCredentialKey(value: string): boolean {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 64) return false;
+  const lower = value.toLowerCase();
+  if (lower.includes('session')) return false;
+  return (KNOWN_CREDENTIAL_KEYS as readonly string[]).includes(value) || /^[a-zA-Z][a-zA-Z0-9_.-]{1,63}$/.test(value);
 }
 
-export function credentialKeyOrThrow(key: string): CredentialKey {
+export function credentialKeyOrThrow(key: string): string {
   if (!isCredentialKey(key)) {
-    throw new Error(`凭证域仅接受 ${CREDENTIAL_KEYS.join('/')} 键名，收到不合法的存储键`);
+    throw new Error(`凭证域仅接受合法凭证键名，收到不合法的存储键: ${key}`);
   }
   return key;
 }

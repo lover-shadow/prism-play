@@ -20,7 +20,7 @@ import { createCatalogCacheService } from './core/catalog-cache';
 import { createGrantProbe, grantAdaptersFor } from './core/identity/offline-grant';
 import { bindNotificationActions, installBridgeForPlatform } from './core/native/capacitor-bridge';
 import { bridgeSource, getBridge } from './core/native/bridge';
-import { createCacheDisk, createHistorySqlite, createPreferenceStore } from './core/native/platform-adapters';
+import { createCacheDisk, createHistorySqlite, createPreferenceStore, isNativeHost } from './core/native/platform-adapters';
 import { applyTheme, readPosterMode, readThemePreference, writePosterMode } from './core/state/theme';
 import { createAppShell } from './app-shell';
 import { createNotice } from './components/notice';
@@ -72,7 +72,8 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
   // 冷启动即焚：上一次进程的私密痕迹不该存在于本进程（AC-02-2 每次进入默认关闭）。
   storage.privateVault.clear();
 
-  const client = new PrismApiClient({ baseUrl: options.apiBaseUrl ?? '', fetchImpl: options.fetchImpl });
+  const defaultApiBaseUrl = options.apiBaseUrl ?? (isNativeHost() ? 'https://play.prismos.org' : '');
+  const client = new PrismApiClient({ baseUrl: defaultApiBaseUrl, fetchImpl: options.fetchImpl });
   client.bindSessionHolder(storage.privateVault.session);
   const grant = createGrantProbe({ credentials: storage.credentials, prefs, nowSeconds: now });
   const identity = grantAdaptersFor(grant, storage.credentials);
@@ -276,6 +277,20 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
 
 /** 自动启动只在真实页面里发生：单测直接调用 `boot()`，不依赖导入副作用。 */
 if (typeof document !== 'undefined' && import.meta.env?.MODE !== 'test') {
-  // 组合根失败必须可见：此时没有任何已装配的 UI 可承载提示，退回控制台。
-  boot().catch((error: unknown) => console.error('光影Play 启动失败', error));
+  boot().catch((error: unknown) => {
+    console.error('光影Play 启动失败', error);
+    const appEl = document.getElementById('app');
+    if (appEl) {
+      const errMsg = error instanceof Error ? error.stack || error.message : String(error);
+      appEl.innerHTML = `
+        <div style="padding: 48px 24px; color: var(--text); font-family: -apple-system, BlinkMacSystemFont, sans-serif; text-align: center;">
+          <div style="width: 56px; height: 56px; line-height: 56px; border-radius: 28px; background: rgba(229,169,60,0.15); color: var(--accent); font-size: 26px; margin: 0 auto 16px auto;">!</div>
+          <h2 style="color: var(--accent); margin-bottom: 12px; font-size: 20px; font-weight: 600;">光影Play 初始化未完成</h2>
+          <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 24px; line-height: 1.6;">移动端环境装配异常，已自动拦截保护。错误详情如下：</p>
+          <pre style="text-align: left; background: rgba(255,255,255,0.06); padding: 14px; border-radius: 8px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; color: var(--accent); margin-bottom: 24px; line-height: 1.5; border: 1px solid rgba(255,255,255,0.1);">${errMsg}</pre>
+          <button onclick="window.location.reload()" style="background: var(--accent); color: var(--bg); border: none; padding: 14px 32px; font-size: 15px; font-weight: bold; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 12px rgba(229,169,60,0.3);">重新加载应用</button>
+        </div>
+      `;
+    }
+  });
 }
