@@ -144,10 +144,10 @@ public final class PlaybackService extends Service {
         // API 34 rejects startForeground without the type the manifest declares; on 29+ ServiceCompat
         // passes it, and below 29 the two-arg call is the only form that exists.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification(),
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification().build(),
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
         } else {
-            startForeground(NOTIFICATION_ID, buildNotification());
+            startForeground(NOTIFICATION_ID, buildNotification().build());
         }
         postNotification();
         return START_STICKY;
