@@ -82,13 +82,28 @@ function methodNotAllowed(allow: readonly string[]): Response {
   return new Response(null, { status: 405, headers: { Allow: allow.join(', ') } });
 }
 
+function withCors(response: Response, origin: string | null): Response {
+  const headers = new Headers(response.headers);
+  headers.set('Access-Control-Allow-Origin', origin || '*');
+  headers.set('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Private-Session, Range');
+  headers.set('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length');
+  headers.set('Access-Control-Max-Age', '86400');
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
 export function routeRequest(request: Request, env: Env, clock: Clock): Response | Promise<Response> {
+  const origin = request.headers.get('Origin');
+  if (request.method === 'OPTIONS') {
+    return withCors(new Response(null, { status: 204 }), origin);
+  }
   const segments = segmentsOf(new URL(request.url).pathname);
-  if (segments === null) return notFound();
+  if (segments === null) return withCors(notFound(), origin);
   const route = ROUTES.find((candidate) => matches(candidate.pattern, segments));
-  if (route === undefined) return notFound();
-  if (!route.allow.includes(request.method)) return methodNotAllowed(route.allow);
-  return route.handle(request, env, clock);
+  if (route === undefined) return withCors(notFound(), origin);
+  if (!route.allow.includes(request.method)) return withCors(methodNotAllowed(route.allow), origin);
+  const outcome = route.handle(request, env, clock);
+  return outcome instanceof Promise ? outcome.then((r) => withCors(r, origin)) : withCors(outcome, origin);
 }
 
 /**
@@ -113,12 +128,13 @@ export async function runScheduledWork(env: Env, clock: Clock = systemClock): Pr
 
 export default {
   async fetch(request: Request, env: Env, _ctx: RequestContext): Promise<Response> {
+    const origin = request.headers.get('Origin');
     try {
       return await routeRequest(request, env, systemClock);
     } catch (error) {
       // A thrown defect must not answer 200 or leak a stack trace to the client.
       console.error('unhandled edge failure', request.method, new URL(request.url).pathname, error);
-      return errorResponse('SERVICE_UNAVAILABLE');
+      return withCors(errorResponse('SERVICE_UNAVAILABLE'), origin);
     }
   },
 
