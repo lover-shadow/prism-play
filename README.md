@@ -68,7 +68,7 @@ D:\DEV\prism-play\
 ├── docs/                            # 【DDAD 文档驱动开发单源事实库】
 │   ├── 00-index/                    # 文档全景索引
 │   ├── 01-prd/                      # 产品需求规格书 (含 EARS 验收标准 + AI 路线图) + UI/UX 规范
-│   ├── 02-architecture/             # 总体架构规格书 + ADR-001 ~ ADR-005 决策集 + CLOUDFLARE-BACKEND-FACTS (云端事实白皮书)
+│   ├── 02-architecture/             # 总体架构规格书 + ADR-001 ~ 005 + CLOUDFLARE-BACKEND-FACTS + GITHUB-DEVOPS-FACTS (事实白皮书)
 │   ├── 03-contracts/                # OpenAPI 3.0.3 (openapi.yaml) + API 契约
 │   └── 04-spec/                     # Phase 1.5 团队总契约 (SPEC-v2.0.md)
 │
