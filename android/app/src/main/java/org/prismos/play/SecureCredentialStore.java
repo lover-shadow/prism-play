@@ -97,7 +97,7 @@ final class SecureCredentialStore {
                     masterKey,
                     EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                     EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM);
-            if (!masterKeyAliasResolvable(masterKey.getAlias())) {
+            if (!masterKeyAliasResolvable(masterKey.getKeyAlias())) {
                 Logger.warn(Logger.tags("PrismSecureStore"), "master key alias not resolvable in AndroidKeyStore");
                 return new SecureCredentialStore(null, false);
             }

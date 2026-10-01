@@ -3,6 +3,7 @@ package org.prismos.play;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
@@ -15,6 +16,7 @@ import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 import androidx.core.app.ServiceCompat;
 import androidx.core.content.ContextCompat;
+import androidx.media.app.NotificationCompat.MediaStyle;
 import com.getcapacitor.Logger;
 
 /**
@@ -204,7 +206,7 @@ public final class PlaybackService extends Service {
                         broadcast(ACTION_TOGGLE, 12))
                 .addAction(R.drawable.ic_media_next,
                         getString(R.string.prism_playback_action_next), broadcast(ACTION_NEXT, 13))
-                .setStyle(new NotificationCompat.MediaStyle().setShowActionsInCompactView(0, 1, 2));
+                .setStyle(new MediaStyle().setShowActionsInCompactView(0, 1, 2));
         Intent open = new Intent(this, MainActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         builder.setContentIntent(PendingIntent.getActivity(this, 14, open, immutableFlags()));

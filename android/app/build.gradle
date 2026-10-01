@@ -63,6 +63,7 @@ dependencies {
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core:$androidxCoreVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation "androidx.media:media:1.7.0"
     // [re-apply after cap add] Domain 1 keystore-backed credential store; see root file for the
     // deprecation note that explains why this artifact is still pinned at 1.1.0.
     implementation "androidx.security:security-crypto:$androidxSecurityCryptoVersion"
