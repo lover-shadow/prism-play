@@ -12,5 +12,7 @@ android/build/
 *.log
 __pycache__/
 *.pyc
+outputs/
+
 
 
