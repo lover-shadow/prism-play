@@ -22,11 +22,11 @@ jobs:
           node-version: 22
           cache: 'npm'
 
-      - name: 设置 JDK 17 (Temurin)
+      - name: 设置 JDK 21 (Temurin)
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
 
       - name: 接受 Android SDK 协议许可
         run: |
