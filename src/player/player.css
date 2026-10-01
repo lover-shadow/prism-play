@@ -1,0 +1,151 @@
+/**
+ * 全手势播放器样式（SPEC §7 / §8 / §10）。
+ *
+ * 每个取值都来自 `src/styles/design-tokens.css`，本文件零裸色值（P0-2 / P0-3）。ArtPlayer 自带样式，
+ * 这里只写我们叠加上去的层：手势面、两个 HUD、状态浮层、控件条与选集抽屉。声明按 SPEC §10 的 300 行
+ * 上限做了同行聚合（只聚合、不省略），可访问性下限保持独立成行：触点 ≥44px、相邻 ≥8px、`:focus-visible`
+ * 焦点环可见、安全区用 `env(safe-area-inset-*)`。
+ */
+
+.prism-player {
+  /* 几何常量（非颜色）：控件条与底部控制带决定手势面剩余的区域。 */
+  --prism-chrome-h: calc(var(--space-12) + env(safe-area-inset-top, 0px));
+  --prism-lower-h: var(--space-16);
+  position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden;
+  background: var(--player-bg); color: var(--fg); border-radius: var(--radius-md);
+}
+.prism-player--fullscreen { position: fixed; inset: 0; z-index: 90; width: 100%; height: 100%; aspect-ratio: auto; }
+.prism-player__stage { position: absolute; inset: 0; }
+
+/* 手势接收面：位于视频之上、控件之下；上下控制带由布局本身排除，因此 classifyTouch 看到的带宽为 0。 */
+.prism-player__body { position: absolute; inset: var(--prism-chrome-h) 0 var(--prism-lower-h); background: transparent; touch-action: none; }
+
+.prism-player__chrome {
+  position: absolute; inset-inline: 0; top: 0; z-index: 3; display: flex; align-items: center; gap: var(--space-2);
+  min-height: var(--prism-chrome-h); padding: env(safe-area-inset-top, 0px) var(--space-3) 0;
+  background: var(--surface-overlay); border-bottom: 1px solid var(--player-hud-border);
+  opacity: 0; pointer-events: none; transform: translateY(-100%);
+  transition: transform var(--duration-normal) var(--ease-out), opacity var(--duration-normal) var(--ease-out);
+}
+.prism-player__chrome.is-visible { opacity: 1; pointer-events: auto; transform: translateY(0); }
+.prism-player__chrome-title {
+  flex: 1 1 auto; min-width: 0; margin: 0; font-size: var(--text-sm); font-weight: 600; color: var(--fg);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.prism-player__pill, .prism-player__button {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1);
+  min-height: 44px; font: inherit; color: var(--fg); cursor: pointer;
+  border: 1px solid var(--player-hud-border); border-radius: var(--radius-sm); background: var(--player-hud-bg);
+  transition: color var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard);
+}
+.prism-player__pill { padding: 0 var(--space-3); font-size: var(--text-xs); white-space: nowrap; border-radius: var(--radius-pill); }
+.prism-player__button { width: 44px; padding: 0; }
+.prism-player__pill:hover, .prism-player__button:hover { color: var(--player-accent); border-color: var(--player-accent); }
+.prism-player__pill[aria-pressed='true'] { color: var(--player-accent); border-color: var(--player-accent); }
+
+/* ==========================================================================
+   手势 HUD：音量（水滴冰蓝 --player-vol-accent）与亮度（暖阳金芒 --player-bri-accent）
+   ========================================================================== */
+
+.prism-hud-layer { position: absolute; inset: 0; pointer-events: none; }
+.prism-hud {
+  position: absolute; top: 50%; display: flex; flex-direction: column; align-items: center; gap: var(--space-2);
+  min-width: 108px; padding: var(--space-3) var(--space-4); opacity: 0;
+  border: 1px solid var(--player-hud-border); border-radius: var(--radius-lg);
+  background: var(--player-hud-bg); box-shadow: var(--elev-hud);
+  transform: translateY(-50%) scale(0.96);
+  transition: opacity var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
+}
+.prism-hud.is-visible { opacity: 1; transform: translateY(-50%) scale(1); }
+.prism-hud--volume { left: var(--space-6); }
+.prism-hud--brightness { right: var(--space-6); }
+.prism-hud__icon { display: block; line-height: 0; color: var(--player-vol-accent); }
+.prism-hud--brightness .prism-hud__icon { color: var(--player-bri-accent); }
+.prism-hud__value { font-size: var(--text-sm); font-weight: 700; font-variant-numeric: tabular-nums; color: var(--fg); }
+.prism-hud__track { display: block; width: 88px; height: 6px; overflow: hidden; border-radius: var(--radius-pill); background: var(--player-track-bg); }
+.prism-hud__fill { display: block; width: 0; height: 100%; border-radius: var(--radius-pill); background: var(--player-vol-accent); }
+.prism-hud--brightness .prism-hud__fill { background: var(--player-bri-accent); }
+.prism-hud__notice { max-width: 168px; font-size: var(--text-2xs); line-height: var(--leading-snug); text-align: center; color: var(--warn); }
+.prism-hud__notice[hidden] { display: none; }
+
+/* ==========================================================================
+   状态浮层：解析中 / 可重试 / 需网络 / 内容不存在
+   ========================================================================== */
+
+.prism-player__state {
+  position: absolute; inset: 0; z-index: 4; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: var(--space-3); padding: var(--space-6) var(--space-4); text-align: center;
+  background: var(--player-hud-bg); color: var(--fg);
+}
+.prism-player__state[hidden] { display: none; }
+.prism-player__state-icon { display: block; line-height: 0; color: var(--warn); }
+.prism-player__state--offline .prism-player__state-icon, .prism-player__state--missing .prism-player__state-icon { color: var(--info); }
+.prism-player__state-title { margin: 0; font-size: var(--text-md); font-weight: 600; }
+.prism-player__state-copy { margin: 0; max-width: 320px; font-size: var(--text-sm); line-height: var(--leading-snug); color: var(--muted); }
+.prism-player__retry {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);
+  min-height: 44px; padding: 0 var(--space-5); border: 0; border-radius: var(--radius-pill);
+  background: var(--accent); color: var(--accent-on); font: inherit; font-size: var(--text-sm); font-weight: 600; cursor: pointer;
+}
+.prism-player__retry:hover { background: var(--accent-hover); }
+
+/* ==========================================================================
+   选集抽屉
+   ========================================================================== */
+
+.prism-drawer {
+  position: absolute; inset-block: 0; right: 0; z-index: 5; display: flex; flex-direction: column;
+  width: min(320px, 78%); background: var(--surface-raised); border-left: 1px solid var(--player-hud-border);
+  box-shadow: var(--elev-float); transform: translateX(100%); transition: transform var(--duration-normal) var(--ease-out);
+}
+.prism-drawer.is-open { transform: translateX(0); }
+.prism-drawer[hidden] { display: none; }
+.prism-drawer__bar {
+  display: flex; align-items: center; gap: var(--space-2); min-height: 48px; padding: var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.prism-drawer__title {
+  flex: 1 1 auto; min-width: 0; margin: 0; font-size: var(--text-md); color: var(--fg);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.prism-drawer__close {
+  display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px;
+  border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--fg-2); cursor: pointer;
+}
+.prism-drawer__list { flex: 1 1 auto; margin: 0; padding: var(--space-2) var(--space-3); overflow-y: auto; overscroll-behavior: contain; list-style: none; }
+.prism-drawer__row + .prism-drawer__row { margin-top: var(--space-2); }
+.prism-drawer__item {
+  display: flex; align-items: center; width: 100%; min-height: 44px; padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--surface); color: var(--fg-2);
+  font: inherit; font-size: var(--text-sm); text-align: start; cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard);
+}
+.prism-drawer__item:hover { color: var(--fg); border-color: var(--border-strong); }
+.prism-drawer__item.is-current { color: var(--accent-on); background: var(--accent); border-color: var(--accent); font-weight: 600; }
+.prism-drawer__actions {
+  display: flex; align-items: center; gap: var(--space-2); min-height: 52px;
+  padding: var(--space-2) var(--space-3) calc(var(--space-2) + var(--safe-area-bottom)); border-top: 1px solid var(--border-subtle);
+}
+.prism-drawer__action {
+  display: inline-flex; align-items: center; gap: var(--space-2); min-height: 44px; padding: 0 var(--space-4);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-pill); background: transparent;
+  color: var(--fg); font: inherit; font-size: var(--text-sm); cursor: pointer;
+}
+.prism-drawer__action:hover { border-color: var(--player-accent); color: var(--player-accent); }
+.prism-drawer__glyph { display: inline-flex; line-height: 0; }
+.prism-drawer__switch { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 44px; font-size: var(--text-xs); color: var(--fg-2); }
+.prism-drawer__checkbox { width: 20px; height: 20px; accent-color: var(--accent); }
+
+/* ==========================================================================
+   焦点可见性与动效降级（SPEC §10）
+   ========================================================================== */
+
+.prism-player button:focus-visible, .prism-player [tabindex]:focus-visible {
+  outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-sm);
+}
+.prism-player__body:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .prism-hud, .prism-drawer, .prism-player__chrome { transition-duration: 0ms; }
+}

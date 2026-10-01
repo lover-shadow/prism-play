@@ -1,0 +1,32 @@
+name = "prism-play-edge"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+
+# 自定义路由与主域绑定 (play.prismos.org)
+# routes = [
+#   { pattern = "play.prismos.org/*", zone_name = "prismos.org" }
+# ]
+
+# Scheduled Cron 使用 UTC：每日 04:00 / 16:00 UTC（北京时间 12:00 / 次日 00:00），分栏目轮询健康巡检与测速。
+[triggers]
+crons = ["0 4,16 * * *"]
+
+# Cloudflare D1 分布式关系数据库绑定
+[[d1_databases]]
+binding = "DB"
+database_name = "prism-play-db"
+database_id = "e54f7f0b-1be7-4d40-89bd-b91c8faf576b"
+migrations_dir = "migrations"
+
+# Cloudflare KV 毫秒级键值缓存绑定 (动态频道拓扑、健康源列表、最新版本号)
+[[kv_namespaces]]
+binding = "KV"
+id = "7a8d672743d6462f8d2ae13d9416f0da"
+
+# Cloudflare R2 发布产物绑定（本期仅 Android APK；套餐与实际费用另行核验）
+[[r2_buckets]]
+binding = "APK_BUCKET"
+bucket_name = "prism-play-releases"
+
+# Workers AI 与 Vectorize 属 v2.1+ 演进储备，本期不绑定、不纳入契约。
+# D1/KV 真实 ID 已由监理 Agent 完成亚太区云端拨备并回填，开发与测试可直接消费真实绑定。

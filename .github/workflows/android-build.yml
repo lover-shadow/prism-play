@@ -1,0 +1,79 @@
+name: Android APK Build & Artifact Packaging
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    name: Build Android APK on Cloud CI
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码仓库
+        uses: actions/checkout@v4
+
+      - name: 设置 Node.js 环境 (v22)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: 设置 JDK 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 设置 Android SDK 工具链
+        uses: android-actions/setup-android@v3
+
+      - name: 安装项目依赖
+        run: |
+          npm ci
+
+      - name: 运行契约与数据模型静态复核
+        run: |
+          python tests/verify_contracts.py
+
+      - name: 运行 P0 工程红线扫描
+        run: |
+          python tests/scan_p0.py
+
+      - name: 运行全量单元与集成测试
+        run: |
+          npm test
+
+      - name: 执行前端生产构建 (tsc + Vite)
+        run: |
+          npm run build
+
+      - name: 组织 Android 原生工程与 Capacitor 同步
+        run: |
+          # 1. 备份手写原生源码与配置
+          cp -r android android.handauthored
+          # 2. 如果不存在 gradlew 引导脚手架，调用 cap add 生成基础工程结构
+          if [ ! -f "android/gradlew" ]; then
+            npx cap add android || true
+          fi
+          # 3. 将手写原生源码反向覆盖回填，确保手写逻辑绝对优先
+          cp -rf android.handauthored/* android/
+          rm -rf android.handauthored
+          # 4. 执行 Capacitor 资源同步
+          npx cap sync android
+
+      - name: 编译构建 Android Debug APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
+
+      - name: 归档上传 APK 构建产物至 GitHub Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: prism-play-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          retention-days: 14

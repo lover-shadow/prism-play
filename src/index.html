@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <title>光影Play</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no"
+    />
+    <meta name="color-scheme" content="dark light" />
+    <!--
+      Intentionally empty: a meta tag cannot read a CSS variable, and hard-coding the hex here would
+      put a second source of truth next to design-tokens.css (P0-3). `main.ts` fills it from the
+      resolved `--bg` at boot and on every theme switch, so the status-bar tint follows the theme.
+    -->
+    <meta name="theme-color" content="" />
+    <meta name="description" content="光影Play — 大视界全景流媒体终端" />
+    <link rel="stylesheet" href="./styles/design-tokens.css" />
+    <link rel="stylesheet" href="./styles/app.css" />
+  </head>
+  <body>
+    <!-- viewport-fit=cover + safe-area env() is what keeps the notch from covering the channel bar;
+         the native side must set overlaysWebView, or these insets resolve to 0. -->
+    <div id="app" class="app-shell">
+      <header id="app-header" class="app-header"></header>
+      <main id="app-main" class="app-main" tabindex="-1"></main>
+      <nav id="app-tabbar" class="app-tabbar" aria-label="主导航"></nav>
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

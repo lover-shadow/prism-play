@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">光影Play</string>
+    <string name="title_activity_main">光影Play</string>
+    <string name="package_name">org.prismos.play</string>
+    <string name="custom_url_scheme">org.prismos.play</string>
+</resources>

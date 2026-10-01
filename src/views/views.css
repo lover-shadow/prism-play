@@ -1,0 +1,83 @@
+/**
+ * Styles shared by the three secondary views (【追剧】/ 设置中心 / 搜索).
+ *
+ * Every value is a design token (P0-3): no literal colours, no gradients, no invented shadows. The
+ * accessibility floor from SPEC §10 (>=44px targets, >=8px gaps, visible focus ring) is owned by
+ * `app.css`; this file only lays out what the three views render and never re-declares a token.
+ * Rules are kept one-per-line so the file stays inside the §10 length limit without losing coverage.
+ */
+
+.pv-view { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-3) var(--space-3) var(--space-8); color: var(--fg); font-size: var(--text-base); }
+.pv-head, .pv-band-head, .pv-row, .pv-field { display: flex; align-items: center; gap: var(--space-2); }
+.pv-head, .pv-band-head { justify-content: space-between; }
+.pv-head { min-height: var(--header-height); }
+.pv-head-title { margin: 0; font-size: var(--text-lg); font-weight: 700; letter-spacing: var(--tracking-tight); }
+.pv-band { display: flex; flex-direction: column; gap: var(--space-2); }
+.pv-band-title { margin: 0; font-size: var(--text-md); font-weight: 700; }
+.pv-band-note, .pv-hint, .pv-meta { font-size: var(--text-xs); color: var(--muted); }
+.pv-band-body, .pv-card-body, .set-list, .srch-suggest, .srch-group { display: flex; flex-direction: column; }
+.pv-band-body, .srch-suggest { gap: var(--space-2); }
+.pv-card-body, .pv-row-text, .srch-group { gap: var(--space-1); }
+.pv-card-body, .pv-row-text { min-width: 0; }
+
+.pv-state { margin: 0; padding: var(--space-3); border-radius: var(--radius-md); background: var(--surface-subtle); font-size: var(--text-sm); color: var(--muted); }
+.pv-state[data-state='error'], .pv-band[data-state='error'] > .pv-band-body > .pv-state { background: var(--danger-subtle); color: var(--danger); }
+.pv-band[data-state='disabled'] > .pv-band-body > .pv-state { background: var(--surface-warm); }
+.pv-state[data-state='loading']::before { content: ''; display: inline-block; width: 14px; height: 14px; margin-right: var(--space-2); border: 2px solid var(--border-strong); border-top-color: var(--accent); border-radius: var(--radius-pill); animation: pv-spin var(--duration-slow) linear infinite; }
+@keyframes pv-spin { to { transform: rotate(360deg); } }
+
+.pv-btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); min-height: 44px; padding: 0 var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-warm); color: var(--fg); cursor: pointer; transition: background var(--duration-fast) var(--ease-standard); }
+.pv-btn:hover { background: var(--surface-raised); }
+.pv-btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-on); font-weight: 600; }
+.pv-btn-primary:hover { background: var(--accent-hover); }
+.pv-btn-ghost { min-height: 44px; padding: 0 var(--space-2); background: transparent; border-color: var(--border-subtle); color: var(--accent); }
+.pv-btn-danger { background: var(--danger-subtle); border-color: var(--danger); color: var(--danger); }
+
+.pv-chip { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 44px; padding: 0 var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface-warm); color: var(--fg-2); font-size: var(--text-xs); cursor: pointer; }
+.pv-chip-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+.pv-card { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--surface); }
+.pv-card-thumb { position: relative; flex: 0 0 auto; width: 64px; height: 84px; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: var(--radius-sm); background: var(--surface-subtle); color: var(--accent); }
+.pv-card-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.pv-card-title { font-size: var(--text-base); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-card-progress, .pv-progress { height: 4px; border-radius: var(--radius-pill); background: var(--surface-subtle); overflow: hidden; }
+.pv-progress-fill { height: 100%; border-radius: var(--radius-pill); background: var(--accent); }
+
+.pv-rail { display: flex; gap: var(--space-3); overflow-x: auto; scrollbar-width: none; padding-bottom: var(--space-1); }
+.pv-rail::-webkit-scrollbar { display: none; }
+.pv-rail-card { flex: 0 0 auto; width: 96px; display: flex; flex-direction: column; gap: var(--space-1); min-height: 44px; padding: var(--space-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--surface); color: var(--fg); text-align: left; cursor: pointer; }
+.pv-rail-poster { display: block; width: 100%; aspect-ratio: var(--poster-ratio); overflow: hidden; border-radius: var(--radius-sm); background: var(--surface-subtle); }
+.pv-rail-poster img { width: 100%; height: 100%; object-fit: cover; }
+.pv-rail-label { font-size: var(--text-xs); color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.pv-row { justify-content: space-between; min-height: 44px; padding: var(--space-2) var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--surface); }
+.pv-row-actions { display: flex; align-items: center; gap: var(--space-2); }
+
+.pv-switch { flex: 0 0 auto; position: relative; width: 52px; height: 44px; min-width: 44px; border: 1px solid var(--border-strong); border-radius: var(--radius-pill); background: var(--surface-subtle); cursor: pointer; transition: background var(--duration-fast) var(--ease-standard); }
+.pv-switch::after { content: ''; position: absolute; top: 7px; left: 6px; width: 28px; height: 28px; border-radius: var(--radius-pill); background: var(--fg-2); transition: transform var(--duration-fast) var(--ease-standard); }
+.pv-switch[aria-checked='true'] { background: var(--accent-subtle); border-color: var(--accent); }
+.pv-switch[aria-checked='true']::after { transform: translateX(18px); background: var(--accent); }
+
+.pv-input { flex: 1 1 auto; min-width: 0; min-height: 44px; padding: 0 var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-warm); color: var(--fg); }
+.pv-input::placeholder { color: var(--muted); }
+
+.pv-note { margin: 0; padding: var(--space-2) var(--space-3); border-left: 2px solid var(--border-strong); border-radius: var(--radius-xs); background: var(--surface-subtle); font-size: var(--text-xs); color: var(--fg-2); }
+.pv-note[data-tone='warn'] { border-left-color: var(--warn); background: var(--warn-subtle); color: var(--warn); }
+.pv-badge { display: inline-flex; align-items: center; padding: 2px var(--space-2); border-radius: var(--radius-xs); background: var(--accent-subtle); color: var(--accent); font-size: var(--text-2xs); letter-spacing: var(--tracking-caps); }
+
+.pv-overlay { position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center; padding: var(--space-4); background: var(--surface-overlay); }
+.pv-dialog { display: flex; flex-direction: column; gap: var(--space-3); max-width: var(--container-max-mobile); padding: var(--space-5); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-raised); box-shadow: var(--elev-float); }
+.pv-dialog-title { display: flex; align-items: center; gap: var(--space-2); margin: 0; font-size: var(--text-md); font-weight: 700; color: var(--danger); }
+.pv-dialog-body { margin: 0; font-size: var(--text-sm); line-height: var(--leading-normal); color: var(--fg-2); }
+.pv-dialog-actions { display: flex; justify-content: flex-end; gap: var(--space-3); }
+
+.srch-suggest-item { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 44px; padding: 0 var(--space-3); border: 0; border-radius: var(--radius-sm); background: var(--surface-warm); color: var(--fg); text-align: left; cursor: pointer; }
+
+@media (min-width: 768px) {
+  .pv-view { padding: var(--space-5) var(--space-6) var(--space-12); gap: var(--space-5); }
+  .pv-rail-card { width: 132px; }
+}
+
+@media (min-width: 1024px) {
+  .pv-view { max-width: var(--container-max-desktop); margin: 0 auto; }
+}

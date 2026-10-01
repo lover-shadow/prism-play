@@ -1,0 +1,42 @@
+{
+  "name": "prism-play",
+  "version": "2.0.0",
+  "description": "《光影Play》(Prism Play) - 工业级流媒体全景终端 (Capacitor 7 + Vite + TypeScript + ArtPlayer)",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "cap:sync": "cap sync android",
+    "cap:open": "cap open android",
+    "verify:contracts": "python tests/verify_contracts.py",
+    "verify:acceptance": "python tests/verify_acceptance.py",
+    "scan:p0": "python tests/scan_p0.py",
+    "typecheck": "tsc -p edge/tsconfig.json",
+    "test": "vitest run",
+    "test:edge": "vitest run tests/edge"
+  },
+  "dependencies": {
+    "@capacitor-community/sqlite": "^7.0.3",
+    "@capacitor/app": "^7.0.0",
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/filesystem": "^7.1.8",
+    "@capacitor/preferences": "^7.0.0",
+    "@capacitor/screen-orientation": "^7.0.0",
+    "@capacitor/status-bar": "^7.0.0",
+    "artplayer": "^5.2.1",
+    "hls.js": "^1.5.17"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/cli": "^7.0.0",
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "@types/node": "^22.10.1",
+    "jsdom": "^26.1.0",
+    "lucide-static": "^1.48.0",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.0",
+    "vitest": "^2.1.0"
+  }
+}

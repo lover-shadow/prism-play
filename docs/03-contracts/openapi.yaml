@@ -1,0 +1,1078 @@
+openapi: 3.0.3
+info:
+  title: 光影Play (Prism Play) Cloudflare Edge API
+  description: |
+    《光影Play》（Prism Play）客户端与 Cloudflare Serverless 边缘云脑（Workers + Cron + D1 + KV + R2）标准通信契约。
+    遵循三条硬原则：
+    1. 零外部站源名与零真实上游地址暴露——客户端只拿同源代理地址与不透明句柄；
+    2. 动态“大视界”拓扑下发，私密频道在「授权 + 当次开启」双重条件未满足时物理不可见；
+    3. 预制卡密条件原子核销 + 非对称签名凭证（Ed25519），客户端仅持公钥。
+    本文件为接口机读正本；文字说明见 `API-SPEC.md`，施工总契约见 `docs/04-spec/SPEC-v2.0.md`。
+  version: 2.0.0
+  contact:
+    name: PrismOS Architecture Team
+    url: https://play.prismos.org
+
+servers:
+  - url: https://play.prismos.org
+    description: 生产环境 Cloudflare 全球边缘网关
+  - url: http://localhost:8787
+    description: 本地 Wrangler 开发模拟环境
+
+tags:
+  - name: 频道与内容
+  - name: 商业化
+  - name: 私密探索
+  - name: 分享与下载
+  - name: 系统
+  - name: 搜索与同步
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        卡密核销后由边缘以 Ed25519(EdDSA) 私钥签发；`kid` 指定密钥版本。
+        客户端仅内置公钥用于离线验签，**绝不下发签名私钥**。
+        最长 14 天离线仅代表「授权可离线验证」，不代表可离线播放任意在线剧集。
+    PrivateSession:
+      type: apiKey
+      in: header
+      name: X-Private-Session
+      description: |
+        当次私密探索的短时凭据，由 `POST /api/private-sessions` 在已具备有效 B/Y/S 授权时签发；使用限于本次应用进程会话，不可跨重启恢复。
+        该凭据**不落盘**：客户端仅驻内存，冷启动/完全退出即失效；缺失时所有私密数据一律不返回。
+
+  schemas:
+    ChannelItem:
+      type: object
+      required: [id, name, order, categories]
+      properties:
+        id:
+          type: string
+          enum: [drama, movie, anime, documentary, private]
+          description: 频道唯一标识；仅 private 允许 ADVANCED 权限映射
+          example: drama
+        name:
+          type: string
+          example: 短剧精选
+        order:
+          type: integer
+          example: 1
+        requiresTier:
+          type: array
+          description: |
+            访问该频道所需档位；未满足时边缘网关直接物理剥离该节点。
+            空数组表示全员可见；`private` 频道为 ["B","Y","S"]（Q/A 不具备探索资格）。
+            映射规则：`channels.requires_tier='0'` → []；`'ADVANCED'` → [B,Y,S]，另须当次会话。
+          items:
+            type: string
+            enum: [B, Y, S]
+          example: ["B", "Y", "S"]
+        categories:
+          type: array
+          items:
+            type: string
+          example: ["最新上线", "都市", "战神", "逆袭", "甜宠", "古装", "悬疑"]
+
+    ContentItem:
+      type: object
+      description: 剧目卡片。`isPrivate` 由服务端依据内容目录判定，客户端传入的任何私密标志一律忽略。
+      required: [id, channelId, title, category, isPrivate]
+      properties:
+        id:
+          type: string
+          description: 稳定 content_id（即分享短链中的 drama_id）
+          example: d_8f31c2
+        channelId:
+          type: string
+          example: drama
+        title:
+          type: string
+          example: 剧名示例
+        category:
+          type: string
+          example: 逆袭
+        coverUrl:
+          type: string
+          description: 封面代理 URL；公开资源可缓存，个人探索资源逐次双重鉴权并 no-store
+          example: https://play.prismos.org/proxy/img/d_8f31c2
+        synopsis:
+          type: string
+        episodeCount:
+          type: integer
+          example: 68
+        isPrivate:
+          type: boolean
+          example: false
+        enabled:
+          type: boolean
+          description: 在线复核后的当前可见状态；入库默认 false，下架/授权失效不应作为可见卡返回
+          example: true
+        coverVersion:
+          type: string
+          description: 对应 content_items.cover_version；封面修改时变化，客户端据此更新文件缓存。没有封面时省略
+        shareable:
+          type: boolean
+          description: 经单独确认可分享才为 true；入库默认 false，私密恒 false
+          example: true
+
+    EpisodeItem:
+      type: object
+      required: [episodeId, episodeNumber]
+      properties:
+        episodeId:
+          type: integer
+          description: 分集内部 ID，用于换取播放地址
+          example: 10231
+        episodeNumber:
+          type: integer
+          example: 1
+        title:
+          type: string
+        durationSeconds:
+          type: integer
+          example: 132
+
+    TitleDetail:
+      type: object
+      required: [item, episodes]
+      properties:
+        item:
+          $ref: "#/components/schemas/ContentItem"
+        episodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/EpisodeItem"
+
+    PlaybackInfo:
+      type: object
+      description: 播放解析结果。只返回同源代理地址，**严禁**返回真实上游地址。
+      required: [episodeId, url]
+      properties:
+        episodeId:
+          type: integer
+          example: 10231
+        url:
+          type: string
+          description: 同源代理播放地址
+          example: https://play.prismos.org/proxy/media/e_10231
+        mimeType:
+          type: string
+          example: application/vnd.apple.mpegurl
+        durationSeconds:
+          type: integer
+          example: 132
+        expiresInSeconds:
+          type: integer
+          description: 代理地址有效期，避免长期可复制的直链
+          example: 7200
+
+    SourceProvider:
+      type: object
+      required: [id, name, channelId, apiBase, priority, latencyMs, healthy]
+      properties:
+        id:
+          type: string
+          description: 去平台化抽象源编号，严禁暴露上游真实品牌名
+          example: provider_s1
+        name:
+          type: string
+          example: 光影极速专线A
+        channelId:
+          type: string
+          example: drama
+        apiBase:
+          type: string
+          description: "同源受控代理地址基准（`play.prismos.org/proxy/media/{handle}`），不是真实上游域名；代理仅放行白名单目标并需鉴权"
+          example: https://play.prismos.org/proxy/media/provider_s1
+        priority:
+          type: integer
+          example: 1
+        latencyMs:
+          type: integer
+          description: Cloudflare Scheduled Cron 最近一次健康探针实测延迟（毫秒）
+          example: 68
+        healthy:
+          type: boolean
+          example: true
+
+    RedeemRequest:
+      type: object
+      required: [code, deviceId, platform]
+      properties:
+        code:
+          type: string
+          pattern: "^GY-(?:Q|A|B|Y|S)[A-Z0-9]{3,4}-[A-Z0-9]{4}-[A-Z0-9]{4}$"
+          description: |
+            历史卡密实例 GY-Q90D-A7F2-8899 的第二段为 4 字符；兼容旧批次可为 5 字符。档位以第二段首字符与服务端记录核验，不仅凭客户端格式授予权限：`Q` 季度畅享（初期公开主推，90天，不含个人探索）、
+            `A` 历史普通兼容、`B` 高级全源、`Y` 年度尊享、`S` 内部赠予（不对外售卖）。
+            仅 B/Y/S 具备个人探索资格。
+          example: GY-Q90D-A7F2-8899
+        deviceId:
+          type: string
+          pattern: "^GY-[A-Z0-9]{8}$"
+          example: GY-800DF614
+          description: 客户端持久化的随机安装标识；可被重装或恶意客户端伪造，不能当作不可变硬件身份
+        platform:
+          type: string
+          enum: [android]
+          example: android
+        appVersion:
+          type: string
+          example: 2.0.0
+        inviteRef:
+          type: string
+          pattern: "^GY-[A-Z0-9]{8}$"
+          description: 用户显式输入的邀请码；网页 ref 无法保证跨 APK 安装，首次成功兑换且非自邀才唯一结算；无可靠归因时不结算
+          example: GY-1024ABCD
+
+    RedeemSuccessResponse:
+      type: object
+      required: [success, tier, tierName, expiresAt, token, message]
+      properties:
+        success:
+          type: boolean
+          example: true
+        tier:
+          type: string
+          enum: ["Q", "A", "B", "Y", "S"]
+          example: Q
+        tierName:
+          type: string
+          example: 季度畅享卡
+        expiresAt:
+          type: integer
+          description: Unix 秒级到期时间戳（-1 表示永久有效，仅 S 档）
+          example: 1823456789
+        token:
+          type: string
+          description: Ed25519 签名的 JWT；客户端用内置公钥离线验签
+          example: eyJhbGciOiJFZERTQSIsImtpZCI6InAyMDI2In0...
+        message:
+          type: string
+          example: 激活成功（有效期至 2027-03-30）
+
+    PrivateSessionRequest:
+      type: object
+      required: [acknowledged]
+      properties:
+        acknowledged:
+          type: boolean
+          description: 必须为 true，表示用户已阅读并接受成人内容免责提示；为 false 时返回 400
+          example: true
+
+    PrivateSessionResponse:
+      type: object
+      required: [sessionToken, expiresInSeconds]
+      properties:
+        sessionToken:
+          type: string
+          description: 短时凭据，随请求头 `X-Private-Session` 使用；冷启动即失效
+        expiresInSeconds:
+          type: integer
+          example: 7200
+
+    DevicePingResponse:
+      type: object
+      required: [tier, expiresAt, token]
+      properties:
+        tier:
+          type: string
+          description: 当前档位；'0' 表示未激活/试用
+          enum: ["0", "Q", "A", "B", "Y", "S"]
+          example: Q
+        expiresAt:
+          type: integer
+          example: 1823456789
+        token:
+          type: string
+          description: 本次在线校验后重新签发的 Ed25519 JWT；若授权已撤销则返回 401，不签新凭证
+        message:
+          type: string
+
+    SearchSuggestion:
+      type: object
+      required: [text, type]
+      properties:
+        text:
+          type: string
+        type:
+          type: string
+          enum: [title, alias, pinyin, category, correction]
+        contentId:
+          type: string
+          description: 仅作品类联想返回；公共目录有效 ID，不能包含私密或已撤片内容
+    SearchResult:
+      type: object
+      required: [item, matchType]
+      properties:
+        item:
+          $ref: '#/components/schemas/ContentItem'
+        matchType:
+          type: string
+          enum: [exact, alias, pinyin, fuzzy, related]
+    CatalogChange:
+      oneOf:
+        - type: object
+          required: [revision, contentId, operation, item]
+          properties:
+            revision: { type: integer, format: int64 }
+            contentId: { type: string }
+            operation: { type: string, enum: [upsert] }
+            item: { $ref: '#/components/schemas/ContentItem' }
+          additionalProperties: false
+        - type: object
+          required: [revision, contentId, operation]
+          properties:
+            revision: { type: integer, format: int64 }
+            contentId: { type: string }
+            operation: { type: string, enum: [delete] }
+          additionalProperties: false
+      description: upsert 必须有当前可公开 item；delete 仅 ID 与版本，不得返回被撤内容元数据
+
+
+    ErrorResponse:
+      type: object
+      required: [success, code, message]
+      properties:
+        success:
+          type: boolean
+          example: false
+        code:
+          type: string
+          enum:
+            - COUPON_NOT_FOUND
+            - COUPON_REVOKED
+            - COUPON_DEVICE_LIMIT_EXCEEDED
+            - COUPON_INVALID_FORMAT
+            - DEVICE_ID_INVALID
+            - RATE_LIMITED
+            - PRIVATE_SESSION_REQUIRED
+            - TIER_INSUFFICIENT
+            - NOT_FOUND
+            - SERVICE_UNAVAILABLE
+            - PLATFORM_UNSUPPORTED
+            - CREDENTIAL_EXPIRED
+            - VALIDATION_ERROR
+            - PROXY_SIGNATURE_INVALID
+            - CATALOG_REVISION_CONFLICT
+            - CATALOG_CURSOR_EXPIRED
+          description: 闭集机器可判别错误码
+          example: COUPON_DEVICE_LIMIT_EXCEEDED
+        message:
+          type: string
+          example: 该卡密绑定的共享设备已达上限（最多允许 10 台）
+
+    MonetizationTier:
+      type: object
+      required: [tier, name, durationDays, priceYuan]
+      properties:
+        tier:
+          type: string
+          enum: ["Q", "A", "B", "Y", "S"]
+          example: Q
+        name:
+          type: string
+          example: 季度畅享卡
+        durationDays:
+          type: integer
+          example: 90
+        priceYuan:
+          type: number
+          example: 9.9
+        desc:
+          type: string
+          example: 90 天免打扰纯净畅看
+
+    NudgePolicy:
+      type: object
+      required: [freeTrialSeconds, stage1IntervalSeconds, stage2IntervalSeconds, stage3IntervalSeconds, stage1UntilSeconds, stage2UntilSeconds, dialogTitle, dialogBody]
+      properties:
+        stage1UntilSeconds:
+          type: integer
+          minimum: 1
+          description: 累计播放不足此值使用第一阶段间隔，必须大于 freeTrialSeconds
+          example: 108000
+        stage2UntilSeconds:
+          type: integer
+          minimum: 1
+          description: 累计播放不足此值使用第二阶段间隔，必须大于 stage1UntilSeconds
+          example: 180000
+        freeTrialSeconds:
+          type: integer
+          minimum: 0
+          example: 54000
+          description: 初始免打扰时长（例 15 小时；不按日历或集数折算）
+        stage1IntervalSeconds:
+          type: integer
+          minimum: 1
+          example: 3600
+        stage2IntervalSeconds:
+          type: integer
+          minimum: 1
+          example: 2700
+        stage3IntervalSeconds:
+          type: integer
+          minimum: 1
+          example: 1800
+        dialogTitle:
+          type: string
+          example: 老板，看剧辛苦，借一步说话
+        dialogBody:
+          type: string
+          example: 一个人维护全网多源与边缘服务器，不接广告不偷扣费。如果看爽了，赏小弟一听可乐钱。
+
+    MonetizationConfig:
+      type: object
+      required: [activeTiers, nudgePolicy]
+      properties:
+        activeTiers:
+          type: array
+          items:
+            $ref: '#/components/schemas/MonetizationTier'
+        nudgePolicy:
+          $ref: '#/components/schemas/NudgePolicy'
+        privateAccessTiers:
+          type: array
+          description: 云端动态下发具备个人探索准入资格的档位集合，供客户端设置中心判断是否露出模式开关（解决露出判据与私密频道隐形互锁难题）
+          items:
+            type: string
+            enum: ["B", "Y", "S"]
+          example: ["B", "Y", "S"]
+
+    VersionResponse:
+      type: object
+      required: [android]
+      properties:
+        android:
+          type: object
+          required: [versionCode, versionName, downloadUrl]
+          properties:
+            versionCode:
+              type: integer
+              example: 200
+            versionName:
+              type: string
+              example: v2.0.0
+            changelog:
+              type: string
+              example: "1. 大视界频道架构升级\n2. 琥珀金日夜双模与四模海报\n3. 手势播放与定时关闭"
+            downloadUrl:
+              type: string
+              example: https://play.prismos.org/dl/latest/android
+            minVersionCode:
+              type: integer
+              description: 低于该版本码时客户端应提示强制更新
+              example: 100
+            force:
+              type: boolean
+              example: false
+
+paths:
+  /api/channels:
+    get:
+      tags: [频道与内容]
+      summary: 获取云端动态“大视界”频道拓扑
+      description: |
+        按授权等级与**当次私密开启状态**双重条件返回可见频道。
+        未同时满足「有效 B/Y/S 授权」与「携带有效 `X-Private-Session`」时，
+        响应中不含 `private` 节点及其二级分类。
+      security:
+        - BearerAuth: []
+        - BearerAuth: []
+          PrivateSession: []
+        - {}
+      responses:
+        "200":
+          description: 成功返回动态频道拓扑
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version, channels]
+                properties:
+                  version:
+                    type: integer
+                    example: 20260930
+                  channels:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ChannelItem"
+
+  /api/sources:
+    get:
+      tags: [频道与内容]
+      summary: 获取经云端健康巡检排序后的播放源列表
+      description: |
+        返回由 Cron 每天 2 次（UTC 04:00 / 16:00）测速并剔除故障节点后的健康抽象源。
+        私密频道的源同样需要高级授权与当次会话；`apiBase` 一律为同源代理地址。
+      security:
+        - BearerAuth: []
+        - BearerAuth: []
+          PrivateSession: []
+        - {}
+      parameters:
+        - name: channel
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 按频道筛选（drama, movie, anime, documentary, private）
+      responses:
+        "200":
+          description: 成功返回可用播放源
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updatedAt:
+                    type: integer
+                    example: 1759238400
+                  providers:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SourceProvider"
+
+  /api/search/suggestions:
+    get:
+      tags: [搜索与同步]
+      summary: 公开目录输入补全（不调用在线生成模型）
+      description: 仅包含当前可公开的作品/标签及纠错候选；私密及失效内容永不出现。客户端缓存只允许公开建议。中文单字、双字、多音字和拼音召回通过写入侧词元及样本检验，不把 unicode61 当作中文分词。
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 80
+      responses:
+        '200':
+          description: 最多 10 条公开候选；AI 不可用时仍返回词法候选
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [query, suggestions]
+                properties:
+                  query:
+                    type: string
+                  suggestions:
+                    type: array
+                    maxItems: 10
+                    items:
+                      $ref: '#/components/schemas/SearchSuggestion'
+  /api/search:
+    get:
+      tags: [搜索与同步]
+      summary: 公开目录关键词/拼音/模糊词法检索
+      description: 本期专注高响应词法搜索（包含精确剧名、拼音缩写、错字纠偏与题材同类关联），所有候选直接通过 D1 全文索引与表联合检索。混合排序在每次请求内先精确/别名，再拼音/首字母，再模糊纠偏，按内容 ID 去重；当前 page 为尽力分页，客户端跨页去重。
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 80
+        - name: channel
+          in: query
+          schema:
+            type: string
+        - name: tag
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+            default: 20
+      responses:
+        '200':
+          description: 检索结果列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SearchResult'
+                  page:
+                    type: integer
+  /api/titles/{titleId}/related:
+    get:
+      tags: [搜索与同步]
+      summary: 同类公开作品推荐
+      parameters:
+        - name: titleId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 基于同题材与分类标签的关联作品推荐列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ContentItem'
+        '404':
+          description: 未知、下架或未获准的作品
+  /api/catalog/changes:
+    get:
+      tags: [搜索与同步]
+      summary: 四公开频道的版本化增量目录（永不返回个人探索）
+      description: |
+        客户端先取完整公开快照，再顺序应用变更。发布/撤片及日志必须原子提交；客户端每页增量与游标同事务写入，中断重读同一游标幂等重放；游标过期返回 410 重拉快照。
+        返回窗口内按 revision 升序，可存在数字空洞（如失败的写入）；不可将“无连续数字”误判为缺页。
+        服务端不得在此返回私密内容或私密墓碑。
+      parameters:
+        - name: after
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: 一页已提交的变更，revision 严格递增但不要求整数连续
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [changes, nextRevision, hasMore]
+                properties:
+                  changes:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CatalogChange'
+                  nextRevision:
+                    type: integer
+                    format: int64
+                    description: 当前页最后一条变更 revision；空页等于 after。客户端用此值继续请求，不按数字加 1
+                  hasMore:
+                    type: boolean
+        '410':
+          description: 游标早于变更日志保留窗口，请重新获取公开目录快照
+        '400':
+          description: 游标大于当前修订号或参数无效，不得伪装成正常空页
+  /api/catalog:
+    get:
+      tags: [频道与内容]
+      summary: 分页获取剧目卡片列表
+      description: |
+        首页与频道页数据来源。私密频道的条目仅在同时具备高级授权与当次会话时返回；
+        请求私密分类但未同时满足有效 B/Y/S 授权与当次会话时，返回不含私密元数据的 404；公开频道可缓存，私密响应不得落持久缓存。
+      security:
+        - BearerAuth: []
+        - BearerAuth: []
+          PrivateSession: []
+        - {}
+      parameters:
+        - name: channel
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [drama, movie, anime, documentary, private]
+          example: drama
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+          example: 逆袭
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+        - name: revision
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+          description: 首页面返回全局公开修订号；后续页必须携带该修订号，不一致返回 409 并重拉快照。D1 不提供跨请求历史快照；客户端仅提交完整同修订分页。
+      responses:
+        "200":
+          description: 成功返回剧目列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page, pageSize, total, revision]
+                properties:
+                  revision:
+                    type: integer
+                    format: int64
+                    description: 当前公开快照的全局修订号，增量同步从此值开始
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ContentItem"
+                  page:
+                    type: integer
+                    example: 1
+                  pageSize:
+                    type: integer
+                    example: 20
+                  total:
+                    type: integer
+                    example: 137
+        "409":
+          description: 请求分页时公开目录修订号已变化，客户端须重新拉公开快照
+        "404":
+          description: 请求未获当次准入的私密频道时表现为不存在，响应不含内容元数据
+
+  /api/titles/{titleId}:
+    get:
+      tags: [频道与内容]
+      summary: 剧目详情与分集清单
+      description: |
+        未同时满足「有效 B/Y/S 授权」与「有效 X-Private-Session」的私密剧目，以及不存在或未上架的剧目，一律返回 404，不区分差异以防探测；
+        公开剧目或已获双重准入的私密剧目正常返回 200 及完整 TitleDetail。
+      security:
+        - BearerAuth: []
+        - BearerAuth: []
+          PrivateSession: []
+        - {}
+      parameters:
+        - name: titleId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 成功返回剧目详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TitleDetail"
+        "404":
+          description: 剧目不存在、已下架，或属于未获当次授权的私密内容
+
+  /api/episodes/{episodeId}/playback:
+    get:
+      tags: [频道与内容]
+      summary: 解析分集可播地址
+      description: |
+        由服务端从有效候选中选一个同源短时代理地址；源失败时客户端以同一 episodeId 最多重取 2 次，并尝试恢复播放进度；候选穷尽返回 503，不无限重试。
+        私密未开启或分集不存在一律返回不含元信息的 404，且**绝不**返回真实上游媒体地址。
+      security:
+        - BearerAuth: []
+        - BearerAuth: []
+          PrivateSession: []
+        - {}
+      parameters:
+        - name: episodeId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功返回播放解析结果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlaybackInfo"
+        "404":
+          description: 分集不存在、所属剧目不可播或私密未获当次授权；不泄露差异
+        "503":
+          description: 分集存在且准入有效，但当前无可用来源；不得泄露上游地址
+
+  /api/private-sessions:
+    post:
+      tags: [私密探索]
+      summary: 申请当次私密探索授权
+      description: |
+        仅在请求者持有有效 B/Y/S 授权且 `acknowledged = true` 时签发短时凭据。
+        **客户端凭据与开启状态均不落盘**：只驻本次进程内存，冷启动/完全退出即失效；服务端只可留不可逆摘要撤销墓碑。
+        **诚实边界**：服务端只能证明“收到了一次显式开启请求”，无法验证用户是否真的在设备上完成点击；
+        客户端若被完全控制，无法阻止其自行发起该请求。此局限须写入交付说明，不得宣称绝对不可绕过。
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrivateSessionRequest"
+      responses:
+        "201":
+          description: 成功签发当次私密会话凭据
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivateSessionResponse"
+        "400":
+          description: 未确认免责提示
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 授权档位不足（非 B/Y/S 或已过期）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      tags: [私密探索]
+      summary: 主动结束当次私密探索
+      description: 客户端关闭开关时调用；服务端仅持久化 token 摘要撤销墓碑（不含开启状态/内容 ID），直到原凭据过期；每次后续私密请求查撤销记录。
+      security:
+        - BearerAuth: []
+          PrivateSession: []
+      responses:
+        "204":
+          description: 已结束
+
+  /api/config/monetization:
+    get:
+      tags: [商业化]
+      summary: 获取云端动态商业策略与软提醒配置
+      description: |
+        动态下发当前展示的档位、价格、试用阈值与文案，客户端零硬编码。
+        初期仅公开 Q 档季卡 ¥9.9 / 90 天；B/Y 暂隐展示但权限保留。
+      responses:
+        "200":
+          description: 成功返回动态商业与提醒配置
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MonetizationConfig"
+
+  /api/redeem:
+    post:
+      tags: [商业化]
+      summary: 预制卡密条件原子核销与设备绑定
+      description: |
+        绑定规则（唯一口径；仅支持本期 Android 客户端）：
+        1. 同一 `deviceId` 重复提交同一卡密且当前卡密/设备仍有效 → 幂等返回当前授权，`device_count` 不重复累加；撤销/到期不返回旧成功凭证；
+        2. 新设备 → 仅当 `device_count < max_devices`（默认 10）时成功；第 11 台起拒绝；
+        3. 被拒绝的**不同**设备记入去重流水，累计 > 20 时置 `is_abnormal = 1`；
+        4. 条件更新同时约束 status 为 UNUSED/ACTIVE，绑定流水与设备写入同一原子单元；跨请求并发须用真实 D1 证明第 10/11 台结果。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RedeemRequest"
+      responses:
+        "200":
+          description: 核销成功（含幂等复用场景）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RedeemSuccessResponse"
+        "400":
+          description: 卡密无效、已吊销、格式错误或设备绑定数超限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: 单 IP 兑换尝试过于频繁（口径：1 分钟超过 10 次）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/device/ping:
+    get:
+      tags: [系统]
+      summary: 校验授权状态并续期
+      description: 设备重新联网后验证撤销/过期状态并签发新的 Ed25519 JWT；失效凭证返回 401，不得在仅靠离线公钥验证的情况下自发续期。
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: 成功返回当前授权状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DevicePingResponse"
+        "401":
+          description: 凭证无效或已过期，需要重新核销
+
+  /api/version:
+    get:
+      tags: [系统]
+      summary: OTA 在线版本检测公告牌
+      responses:
+        "200":
+          description: 成功返回各平台最新版本信息
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VersionResponse"
+
+  /s/{drama_id}:
+    get:
+      tags: [分享与下载]
+      summary: 极简分享落地页（当前单集、播完截流）
+      description: |
+        无论来源 UA 为何，一律直接渲染当前单集播放页，不做微信跳出引导。
+        自动播放仅作“尝试”，被浏览器策略拒绝时必须提供单次点击播放兜底。
+        【安全铁律】私密剧目与未知剧目一律 404，且响应体不得泄露任何剧目元信息。
+      parameters:
+        - name: drama_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: ep
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: ref
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 返回极简原生 HTML5 单集播放页面（零外部网络与脚本依赖，极速秒开）；当前集 `ended` 时展示下载引导卡
+          content:
+            text/html:
+              schema:
+                type: string
+        "404":
+          description: 剧目不存在、已下架，或属于禁止分享的私密内容
+
+  /dl:
+    get:
+      tags: [分享与下载]
+      summary: 软件下载引导页（微信环境指引 + Android 下载）
+      description: |
+        1. UA 含 `MicroMessenger` → 返回合规引导页，提示“点击右上角在浏览器中打开”；
+        2. Android 浏览器 → 引导至 `/dl/latest/android`；
+        3. Windows 浏览器 → 仅说明本期提供 Android 版本，不展示或跳转到不存在的 PC 安装包。
+        下载引导只在此路由承担，`/s` 不承担该职责。
+      parameters:
+        - name: ref
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 邀请提示参数；浏览器下载 APK 后不会天然传入 App，不能凭此参数自动结算奖励
+      responses:
+        "200":
+          description: 微信环境下的合规操作指引或 Android 下载卡片 HTML；不承诺绕过平台限制
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /dl/latest/{platform}:
+    get:
+      tags: [分享与下载]
+      summary: 已发布 Android 安装包版本化下载入口（无产物返回 404）
+      parameters:
+        - name: platform
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [android]
+      responses:
+        "302":
+          description: 仅 android，302 重定向至 Cloudflare R2 已发布的最新 APK；pc 等值返回 404
+        "404":
+          description: 未支持的平台或尚无可用安装包
+
+  /proxy/{kind}/{handle}:
+    get:
+      tags: [系统]
+      summary: 同源受控媒体与图片代理 (多段合规路由)
+      description: |
+        客户端唯一可访问的媒体入口。仅放行白名单内的目标，禁止任意 URL 转发（防 SSRF）。
+        对每次请求（含 HLS 清单、分片、封面和 Range）校验短时签名对应的内容 ID、公开/私密类别、当前 D1 发布状态；私密请求必须与当前 B/Y/S 授权和未结束的 X-Private-Session 绑定，禁止仅凭可复制的 URL 访问。
+        私密响应 Cache-Control: no-store，公开海报可用 ETag/版本指纹缓存；不得把私密元信息写入边缘公共缓存。真实上游地址只在服务端使用，永不下发。原生 HLS 子请求未必携带自定义 X-Private-Session，私密播放需同进程受控请求转发逐次注入 Bearer 与会话；如改用可撤销等效凭据，须先另行更新此机读契约并真机验证，当前不能直接放开私密取流。
+        HLS 清单中的相对/绝对分片、密钥 URI 和字幕引用必须重写为同源受控 URL；每个子请求保留内容身份并复核权限，Range/206、Content-Type 与跨域策略需使用真实授权 HLS 样本验证。
+      security:
+        - BearerAuth: []
+          PrivateSession: []
+        - BearerAuth: []
+        - {}
+      parameters:
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [img, media]
+          description: "代理资源类别（img: 缩略海报，media: HLS 流与媒体分片）"
+        - name: handle
+          in: path
+          required: true
+          schema:
+            type: string
+          description: "不透明资源标识符（如 content_id 或短时流 token）"
+        - name: exp
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: 代理地址过期时间戳，作为短时签名声明的一部分；不得单凭 exp 放行
+        - name: sig
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 服务端下发的防篡改签名（针对媒体分片与短时代理 URL）
+      responses:
+        "200":
+          description: 清单、完整媒体或图片内容；私密响应 no-store
+        "206":
+          description: 有效 Range 分片，返回 Content-Range 与 Accept-Ranges；逐次复核准入
+        "403":
+          description: 公开内容的代理签名失效或请求目标不在白名单（不得泄露上游位置）
+        "404":
+          description: 目标不存在、已撤片，或私密内容未获当次双重授权；响应体不区分原因

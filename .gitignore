@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.DS_Store
+*.local
+.wrangler/
+android/app/build/
+android/.gradle/
+android/build/
+.idea/
+.vscode/
+.workbuddy/
+*.log
+
