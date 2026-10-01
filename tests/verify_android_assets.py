@@ -99,8 +99,8 @@ def check_wrapper(problems, checked):
         if not path.exists():
             problems.append(f"Gradle wrapper 缺件：android/{name}")
     properties = ROOT / "android" / "gradle" / "wrapper" / "gradle-wrapper.properties"
-    if properties.exists() and WRAPPER_EXPECTED not in properties.read_text(encoding="utf-8"):
-        problems.append(f"gradle-wrapper.properties 未指向 {WRAPPER_EXPECTED}")
+    if properties.exists() and not re.search(r"gradle-8\.11\.1-(?:all|bin)\.zip", properties.read_text(encoding="utf-8")):
+        problems.append(f"gradle-wrapper.properties 未指向 gradle-8.11.1-(all|bin).zip")
 
 
 def check_plugin_name(problems, checked):
