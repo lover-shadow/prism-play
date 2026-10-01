@@ -30,9 +30,8 @@ bucket_name = "prism-play-releases"
 
 [vars]
 JWT_KID = "p2026"
-JWT_PRIVATE_KEY_JWK = '{"key_ops":["sign"],"ext":true,"alg":"EdDSA","crv":"Ed25519","d":"UOE7t7LGBoMzNQb6xUm3wY9t2mBexdDN1KygCuOvBvY","x":"QdLReD6QICQGapTQbPaSyOjwwsOmEdoddIy4Nb8Ay84","kty":"OKP"}'
-PRIVATE_SESSION_SECRET = "544553542d414243442d454647482d30313233"
-PROXY_SIGNING_SECRET = "30313233343536373839616263646566"
+# 敏感密钥已由 wrangler secret 管道以加密方式注入云端，严禁明文入库：
+# JWT_PRIVATE_KEY_JWK / PRIVATE_SESSION_SECRET / PROXY_SIGNING_SECRET
 
 # Workers AI 与 Vectorize 属 v2.1+ 演进储备，本期不绑定、不纳入契约。
 # D1/KV 真实 ID 已由监理 Agent 完成亚太区云端拨备并回填，开发与测试可直接消费真实绑定。

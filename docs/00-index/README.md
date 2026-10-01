@@ -13,7 +13,7 @@
 | **`02-architecture/`** | 系统架构与 ADR 决策集 | • `ARCHITECTURE.md`：总体架构设计规格书（Capacitor 7 + Vite + TS + ArtPlayer + Cloudflare 边缘计算）<br>• `CLOUDFLARE-BACKEND-FACTS.md`：**Cloudflare 边缘云脑白皮书与事实正本**（资产总账、密钥体系、D1表结构、Cron定时、CORS代理与运维手册）<br>• `GITHUB-DEVOPS-FACTS.md`：**GitHub 运维与 CI/CD 事实正本**（免密鉴权、Playwriter接管、Actions云端打包全工序与实战避坑）<br>• `ADR-001-capacitor-ts.md`：采用 Capacitor 7 工业跨端容器与纯 TS 架构<br>• `ADR-002-artplayer-core.md`：采用成熟开源播放器 ArtPlayer.js 作为手势播放内核<br>• `ADR-003-cloudflare-edge.md`：采用 Cloudflare Serverless 边缘云脑统一收口与动态源调度<br>• `ADR-004-brand-prism-play.md`：产品全称《光影Play》(Prism Play) 与统一主域 play.prismos.org<br>• `ADR-005-design-tokens-svg.md`：锁定 Lucide SVG 图标库与日夜双模 Design Tokens |
 | **`03-contracts/`** | 机器可读接口契约 | • `openapi.yaml`：OpenAPI 3.0.3 规范正本（基础域名：`https://play.prismos.org`）<br>• `API-SPEC.md`：客户端与 Cloudflare 边缘 API 详细协议规范 |
 | **`04-spec/`** | Phase 1.5 团队刚性总契约 | • `SPEC-v2.0.md`：施工与验收的**唯一法定依据**（含功能范围、API、数据模型、设计 Token、EARS 验收、已知坑与端到端验证步骤）。任一份其它文档与本文件冲突时，以本文件为准并同步修正冲突方。 |
-| **`05-audit/`** | 独立审计与施工指令包 | • `G0-REDTEAM-2026-10-01.md`：独立红队对抗性复核报告<br>• `MASTER-DECISIONS-2026-10-01.md`：Master 决策台账与变更批次<br>• `BUILDER-DISPATCH-PACKAGE.md`：**工程实施总包指令包**（施工分工、阶段任务、避坑铁律与汇报报文模板） |
+| **`05-audit/`** | 独立审计与施工指令包 | • `G0-REDTEAM-2026-10-01.md`：独立红队对抗性复核报告<br>• `MASTER-DECISIONS-2026-10-01.md`：Master 决策台账与变更批次<br>• `BUILDER-DISPATCH-PACKAGE.md`：**工程实施总包指令包**（施工分工、阶段任务、避坑铁律与汇报报文模板）<br>• `G1 ~ G4-*.md`：五级阶段门禁审查与准出签发决定书正本<br>• `DUAL-AGENT-COLLABORATION-METHODOLOGY.md`：**双 Agent 协同监理模式与工程治理方法论**（跨项目通用多代理编排体系） |
 
 ---
 
