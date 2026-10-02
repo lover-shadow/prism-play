@@ -99,12 +99,23 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
       if (input.channel === 'private') return page;
       const items = page.items.filter((entry) => !isPrivateSubject(entry));
       return items.length === page.items.length ? page : { ...page, items };
-    }
+    },
+    cachedSnapshot: () => ({
+      channels: storage.cache.getChannels(),
+      items: (channel: string) => storage.cache.list(channel).filter((entry) => !isPrivateSubject(entry))
+    })
   };
 
   let privateChannel = false;
   let privatePlayback = false;
-  const syncSecure = (): void => void bridge.setSecureScreen(privateChannel || privatePlayback);
+  let lastSecure: boolean | null = null;
+  const syncSecure = (): void => {
+    const next = privateChannel || privatePlayback;
+    if (next !== lastSecure) {
+      lastSecure = next;
+      void bridge.setSecureScreen(next);
+    }
+  };
 
   const report = createNotice(app);
 

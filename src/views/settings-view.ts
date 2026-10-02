@@ -244,9 +244,11 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
   }
   /** 资格判定：云端下发的档位集合 ∩ 本机档位，任一未知即「开关不存在」而不是 disabled。 */
   async function paintPrivateSection(): Promise<void> {
-    const config = await attempt(() => deps.api.monetization());
+    const [config, tierResult] = await Promise.all([
+      attempt(() => deps.api.monetization()),
+      deps.tierSource === undefined ? Promise.resolve(null) : attempt(() => deps.tierSource?.currentTier() ?? Promise.resolve(null))
+    ]);
     const tiers = config.ok && Array.isArray(config.value.privateAccessTiers) ? config.value.privateAccessTiers : [];
-    const tierResult = deps.tierSource === undefined ? null : await attempt(() => deps.tierSource?.currentTier() ?? Promise.resolve(null));
     const deviceTier = tierResult !== null && tierResult.ok ? tierResult.value : null;
     privateBand.wrap.remove();
     if (deviceTier === null || tiers.length === 0) return;
@@ -260,11 +262,13 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
     if (disposed) return;
     deps.root.dataset.state = 'loading';
     stateBand(ota, 'empty', '尚未检测：点击分区内按钮获取云端版本公告。');
-    const theme = await attempt(() => readThemePreference(deps.prefs));
+    const [theme, keep, callPause] = await Promise.all([
+      attempt(() => readThemePreference(deps.prefs)),
+      attempt(() => deps.prefs.get(SETTINGS_PREF_KEYS.keepScreenOn)),
+      attempt(() => deps.prefs.get(SETTINGS_PREF_KEYS.callAutoPause))
+    ]);
     if (theme.ok) setSwitch(themeSwitch, theme.value === 'light');
     paintRows(appearance, theme.ok ? 'ready' : 'error', theme.ok ? '主题即时生效，偏好写入可备份的偏好域。' : copyFor(theme.error), [themeRow]);
-    const keep = await attempt(() => deps.prefs.get(SETTINGS_PREF_KEYS.keepScreenOn));
-    const callPause = await attempt(() => deps.prefs.get(SETTINGS_PREF_KEYS.callAutoPause));
     if (keep.ok) setSwitch(keepScreenSwitch, keep.value === '1');
     if (callPause.ok) setSwitch(callPauseSwitch, callPause.value === '1');
     paintRows(playback, 'ready', `后台 / 息屏播放当前：${keep.ok && keep.value === '1' ? '允许' : '禁止'}。`, [keepRow, pauseRow]);

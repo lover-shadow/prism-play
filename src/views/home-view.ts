@@ -32,6 +32,8 @@ const DEFAULT_PAGE_SIZE = 24;
 export interface HomeApi {
   channels(): Promise<ChannelsResponse>;
   catalog(input: { channel: string; category?: string; page?: number; pageSize?: number; revision?: number }): Promise<CatalogResponse>;
+  /** 可选的本地快照读取门面：0ms 同步读取已持久化的频道与剧目，供启动立刻展示 */
+  cachedSnapshot?(): { channels: ChannelsResponse | null; items(channel: string): ContentItem[] };
 }
 
 export interface HomeViewDeps {
@@ -214,8 +216,7 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
         });
         return;
       }
-      if (targetPage === 1) {
-        items = [];
+      if (targetPage === 1 && items.length === 0) {
         grid.showSkeleton();
       }
       const query = {
@@ -260,9 +261,32 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
       }
     }
 
+    function hydrateFromLocalCache(): boolean {
+      const snapshot = deps.api.cachedSnapshot?.();
+      if (!snapshot?.channels?.channels?.length) return false;
+      channels = [...snapshot.channels.channels];
+      const target = currentChannel() ?? pickDefaultChannel(channels);
+      selectedChannelId = target?.id ?? null;
+      if (!target?.categories.includes(selectedCategory)) selectedCategory = ALL_CATEGORIES_LABEL;
+      bar.render(channels, selectedChannelId);
+      rail.render(target?.categories ?? [], selectedCategory);
+      paintHeading();
+      deps.onChannelChange?.(target);
+      modeSwitch.paint();
+      const local = selectedChannelId ? snapshot.items(selectedChannelId) : [];
+      if (local.length > 0) {
+        items = local.slice(0, pageSize);
+        total = local.length;
+        grid.render(items);
+        renderMore();
+        return true;
+      }
+      return false;
+    }
+
     async function refreshTopology(): Promise<void> {
       const nextToken = ++token;
-      grid.showSkeleton();
+      if (items.length === 0 && !hydrateFromLocalCache()) grid.showSkeleton();
       // 续播卡与拓扑并行拉取；`mount()` resolve 时两者都已落定，测试与组合根都不必再等空转的微任务。
       const continueTask = loadContinue(nextToken);
       try {

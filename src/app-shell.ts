@@ -130,17 +130,19 @@ export function createAppShell(deps: AppShellDeps): AppShell {
 
   async function run(tab: ShellTab): Promise<void> {
     if (destroyed || !isShellTab(tab)) return;
-    active = tab;
     const view = viewFor(tab);
-    if (!hosts.get(tab)?.dataset.mounted) {
-      const host = hostFor(tab);
+    const host = hostFor(tab);
+    active = tab;
+    // 0ms 乐观响应：先刷新界面高亮与容器可见性，杜绝网络与 I/O 阻塞切屏手感
+    paint();
+    deps.onTabChange?.(tab);
+
+    if (!host.dataset.mounted) {
       host.dataset.mounted = '1';
       await view.mount();
     } else {
       await view.reload?.();
     }
-    paint();
-    deps.onTabChange?.(tab);
   }
 
   function activate(tab: ShellTab): Promise<void> {

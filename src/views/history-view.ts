@@ -229,8 +229,9 @@ export function createHistoryView(deps: HistoryViewDeps): HistoryView {
     const seen = new Set(rows.map((row) => row.content_id));
     const items: ContentItem[] = [];
     let failures = 0;
-    for (const seed of rows.slice(0, RELATED_SEED_LIMIT).map((row) => row.content_id)) {
-      const result = await attempt(() => deps.api.related(seed));
+    const seeds = rows.slice(0, RELATED_SEED_LIMIT).map((row) => row.content_id);
+    const results = await Promise.all(seeds.map((seed) => attempt(() => deps.api.related(seed))));
+    for (const result of results) {
       if (!result.ok) { failures += 1; continue; }
       for (const item of result.value.items) {
         if (isPrivateSubject(item) || seen.has(item.id)) continue;
@@ -251,14 +252,18 @@ export function createHistoryView(deps: HistoryViewDeps): HistoryView {
     deps.root.dataset.state = 'loading';
     stateBand(resume, 'loading', '正在读取本机追剧记录…');
     stateBand(finished, 'loading', '正在整理往期完播…');
-    await paintCache();
     if (deps.history.available !== undefined && !(await deps.history.available())) {
       deps.root.dataset.state = 'disabled';
       stateBand(resume, 'disabled', '本机历史库尚未就绪，追剧记录暂时不可用。');
       stateBand(finished, 'disabled', '本机历史库尚未就绪。');
+      await paintCache();
       return stateBand(related, 'disabled', '无历史记录时不启动同类召回。');
     }
-    const history = await attempt(() => deps.history.list());
+    const [history, grant] = await Promise.all([
+      attempt(() => deps.history.list()),
+      attempt(() => deps.credentials.readGrant()),
+      paintCache()
+    ]);
     if (disposed) return;
     if (!history.ok) {
       deps.root.dataset.state = 'error';
@@ -277,7 +282,6 @@ export function createHistoryView(deps: HistoryViewDeps): HistoryView {
       button('重温', () => deps.onResume({ ...row, position_seconds: 0 }), { icon: 'refresh', cls: 'pv-btn-ghost' }),
       button('详情', () => deps.onOpenTitle(row.content_id), { icon: 'chevronRight', cls: 'pv-btn-ghost' })
     ])));
-    const grant = await attempt(() => deps.credentials.readGrant());
     grantNote.textContent = !grant.ok ? `授权状态暂时无法读取：${errorCopy(grant.error, NETWORK_COPY)}`
       : grant.value === null ? '本机暂无授权凭证记录：公开目录可浏览，点播需联网核销后取流。'
         : '本机授权凭证可离线验证，但断网时点播仍需联网重新取流。';
