@@ -10,6 +10,7 @@ import type { PlayerEngine } from '../../src/player/prism-player';
 import type { CallState, PrismNativeBridge } from '../../src/core/native/bridge';
 import type { TitleDetail } from '../../edge/src/types/api';
 import type { WatchHistoryRow } from '../../src/core/storage/storage-domains';
+import { dispatchBackButtonForTest } from '../../src/core/native/back-button';
 import { detailOf, settle } from './player-harness';
 
 type FakeEngine = PlayerEngine & { sources: string[]; times: number[]; volumes: number[] };
@@ -146,6 +147,13 @@ describe('player-host 装配', () => {
     expect(h.mount.querySelector('.prism-player-host')).toBeNull();
     await h.player.open('c1'); await settle();
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(h.player.isOpen()).toBe(false);
+
+    // 验证原生系统 Back 键 / 全面屏侧滑手势自动拦截并关闭播放器
+    await h.player.open('c1'); await settle();
+    expect(h.player.isOpen()).toBe(true);
+    const handled = await dispatchBackButtonForTest();
+    expect(handled).toBe(true);
     expect(h.player.isOpen()).toBe(false);
   });
 

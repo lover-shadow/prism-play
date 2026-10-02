@@ -9,6 +9,7 @@ import { icon } from './components/icons';
 import type { ContentItem, EpisodeItem, TitleDetail } from '../edge/src/types/api';
 import type { PrismNativeBridge } from './core/native/bridge';
 import type { WatchHistoryRow } from './core/storage/storage-domains';
+import { registerBackHandler } from './core/native/back-button';
 import { createPlayer } from './player/prism-player';
 import type { EngineFactory, PlayerApi, PlayerFailure, PrismPlayer } from './player/prism-player';
 import type { ProgressContext } from './player/episode-drawer';
@@ -58,6 +59,8 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
   let player: PrismPlayer | null = null;
   let detail: TitleDetail | null = null;
   let keyup: ((event: KeyboardEvent) => void) | null = null;
+  let unregisterBack: (() => void) | null = null;
+  let detailBodyRef: { markEpisode(id: number): void } | null = null;
 
   /** 播放器是异步构造的（ArtPlayer/hls.js 动态导入），动作必须始终打在"当前那一个"实例上。 */
   const act = (action: (current: PrismPlayer) => void): void => { if (player !== null) action(player); };
@@ -66,6 +69,140 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
   const failure = (event: PlayerFailure): void => {
     if (event.kind === 'progress-blocked') deps.onBlocked?.(event.message);
   };
+
+  function buildDetailBody(
+    info: TitleDetail,
+    currentEpisodeId: number,
+    onSelectEpisode: (id: number) => void,
+    onOpenDrawer: () => void,
+    onShare?: (ep: EpisodeItem) => void
+  ): { body: HTMLElement; markEpisode: (id: number) => void } {
+    const body = document.createElement('div');
+    body.className = 'prism-player-host__body';
+
+    const infoCard = document.createElement('div');
+    infoCard.className = 'prism-player-info';
+
+    const header = document.createElement('div');
+    header.className = 'prism-player-info__header';
+
+    const titleEl = document.createElement('h1');
+    titleEl.className = 'prism-player-info__title';
+    titleEl.textContent = info.item.title;
+
+    const meta = document.createElement('div');
+    meta.className = 'prism-player-info__meta';
+    const epCount = info.episodes.length || info.item.episodeCount || 0;
+    const countTag = document.createElement('span');
+    countTag.className = 'prism-player-info__tag is-accent';
+    countTag.textContent = `全 ${epCount} 集`;
+
+    const catTag = document.createElement('span');
+    catTag.className = 'prism-player-info__tag';
+    catTag.textContent = info.item.category || '精选';
+
+    meta.append(countTag, catTag);
+    header.append(titleEl, meta);
+
+    const synopsisWrap = document.createElement('div');
+    synopsisWrap.className = 'prism-player-info__synopsis-wrap';
+    const synopsis = document.createElement('p');
+    synopsis.className = 'prism-player-info__synopsis is-collapsed';
+    synopsis.textContent = info.item.synopsis || '暂无详细剧目简介，敬请沉浸观赏精彩剧情。';
+
+    const expandBtn = document.createElement('button');
+    expandBtn.type = 'button';
+    expandBtn.className = 'prism-player-info__expand-btn';
+    expandBtn.textContent = '展开简介 ›';
+    expandBtn.addEventListener('click', () => {
+      const isCollapsed = synopsis.classList.toggle('is-collapsed');
+      expandBtn.textContent = isCollapsed ? '展开简介 ›' : '收起简介 ‹';
+    });
+
+    synopsisWrap.append(synopsis, expandBtn);
+    infoCard.append(header, synopsisWrap);
+
+    const actionBar = document.createElement('div');
+    actionBar.className = 'prism-player-actions';
+
+    const favBtn = document.createElement('button');
+    favBtn.type = 'button';
+    favBtn.className = 'prism-player-action-btn';
+    favBtn.innerHTML = `${icon('bookmark', { size: 16 })}<span>追剧</span>`;
+    favBtn.addEventListener('click', () => {
+      favBtn.classList.toggle('is-active');
+      const active = favBtn.classList.contains('is-active');
+      const textSpan = favBtn.querySelector('span');
+      if (textSpan) textSpan.textContent = active ? '已追剧' : '追剧';
+    });
+
+    const cacheBtn = document.createElement('button');
+    cacheBtn.type = 'button';
+    cacheBtn.className = 'prism-player-action-btn';
+    cacheBtn.innerHTML = `${icon('download', { size: 16 })}<span>缓存</span>`;
+
+    actionBar.append(favBtn, cacheBtn);
+
+    if (onShare && info.item.shareable !== false && !info.item.isPrivate) {
+      const shareBtn = document.createElement('button');
+      shareBtn.type = 'button';
+      shareBtn.className = 'prism-player-action-btn';
+      shareBtn.innerHTML = `${icon('share', { size: 16 })}<span>分享</span>`;
+      shareBtn.addEventListener('click', () => {
+        const cur = info.episodes.find((e) => e.episodeId === currentEpisodeId) ?? info.episodes[0];
+        if (cur) onShare(cur);
+      });
+      actionBar.append(shareBtn);
+    }
+
+    const railSection = document.createElement('div');
+    railSection.className = 'prism-player-rail';
+
+    const railHead = document.createElement('div');
+    railHead.className = 'prism-player-rail__head';
+    const railTitle = document.createElement('span');
+    railTitle.className = 'prism-player-rail__title';
+    railTitle.textContent = `选集 · 共 ${epCount} 集`;
+
+    const allEpisodesBtn = document.createElement('button');
+    allEpisodesBtn.type = 'button';
+    allEpisodesBtn.className = 'prism-player-rail__all-btn';
+    allEpisodesBtn.textContent = '全部选集 ›';
+    allEpisodesBtn.addEventListener('click', onOpenDrawer);
+
+    railHead.append(railTitle, allEpisodesBtn);
+
+    const railList = document.createElement('div');
+    railList.className = 'prism-player-rail__list';
+
+    const pills: Map<number, HTMLElement> = new Map();
+    for (const ep of info.episodes) {
+      const epPill = document.createElement('button');
+      epPill.type = 'button';
+      epPill.className = 'prism-player-rail__pill';
+      if (ep.episodeId === currentEpisodeId) {
+        epPill.classList.add('is-current');
+      }
+      epPill.textContent = `${ep.episodeNumber}`;
+      epPill.addEventListener('click', () => {
+        onSelectEpisode(ep.episodeId);
+      });
+      pills.set(ep.episodeId, epPill);
+      railList.append(epPill);
+    }
+
+    railSection.append(railHead, railList);
+    body.append(infoCard, actionBar, railSection);
+
+    const markEpisode = (id: number): void => {
+      currentEpisodeId = id;
+      for (const [epId, pill] of pills.entries()) {
+        pill.classList.toggle('is-current', epId === id);
+      }
+    };
+
+    return { body, markEpisode };
+  }
 
   function buildLayer(): { shell: HTMLElement; stage: HTMLElement } {
     const shell = document.createElement('div');
@@ -131,6 +268,24 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
     deps.onPrivacyChange(loaded.item.isPrivate === true || loaded.item.channelId === 'private');
     keyup = (event: KeyboardEvent) => { if (event.key === 'Escape') close(); };
     document.addEventListener('keydown', keyup);
+    unregisterBack = registerBackHandler(() => {
+      close();
+      return true;
+    });
+
+    const detailBody = buildDetailBody(
+      loaded,
+      target.episode.episodeId,
+      (epId) => {
+        void player?.load(epId);
+        detailBody.markEpisode(epId);
+      },
+      () => player?.openDrawer(),
+      deps.onShare === undefined ? undefined : (episode) => void deps.onShare?.(loaded.item, episode)
+    );
+    detailBodyRef = detailBody;
+    shell.append(detailBody.body);
+
     await player.load(target.episode.episodeId, target.seconds > 0 ? target.seconds : undefined);
     return true;
   }
@@ -138,6 +293,11 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
   function close(): void {
     if (keyup !== null) document.removeEventListener('keydown', keyup);
     keyup = null;
+    if (unregisterBack !== null) {
+      unregisterBack();
+      unregisterBack = null;
+    }
+    detailBodyRef = null;
     const instance = player;
     player = null;
     detail = null;
@@ -156,7 +316,10 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
     const ordered = [...detail.episodes].sort((a, b) => a.episodeNumber - b.episodeNumber);
     const at = ordered.findIndex((item) => item.episodeId === player?.state().episodeId);
     const next = ordered[Math.min(ordered.length - 1, Math.max(0, at + offset))];
-    if (next !== undefined) void player.load(next.episodeId);
+    if (next !== undefined) {
+      detailBodyRef?.markEpisode(next.episodeId);
+      void player.load(next.episodeId);
+    }
   }
 
   return {

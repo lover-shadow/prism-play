@@ -117,6 +117,12 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
   const readSurface = (): GestureBounds => { const r = chrome.surface.getBoundingClientRect(); return { width: r.width, height: r.height, top: r.top, left: r.left, topBandPx: 0, bottomBandPx: 0 }; };
 
   root.classList.add('prism-player');
+  const backdrop = document.createElement('div'), speedPill = document.createElement('div');
+  backdrop.className = 'prism-player__backdrop';
+  if (detail?.item.coverUrl) backdrop.innerHTML = `<img class="prism-player__backdrop-img" src="${detail.item.coverUrl}" alt="" /><div class="prism-player__backdrop-glow"></div>`;
+  speedPill.className = 'prism-player__speed-pill';
+  speedPill.innerHTML = '<span>▶▶</span><span>2.0X 极速快进</span>';
+  root.append(backdrop, speedPill);
   const overlay = createStateOverlay(root);
   const hud = createGestureHud(root, clock);
   const chrome = createPlayerChrome(root, (action) => {
@@ -145,9 +151,7 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
       if (enabled) ensureBackgroundAudio(); else void bridge.stopBackgroundAudio();
     }
   });
-  const sleep = createSleepTimer(clock, {
-    getVolume: () => engine?.volume() ?? 1, setVolume: (value) => engine?.setVolume(value), stop: () => releaseHandle('sleep')
-  });
+  const sleep = createSleepTimer(clock, { getVolume: () => engine?.volume() ?? 1, setVolume: (v) => engine?.setVolume(v), stop: () => releaseHandle('sleep') });
   const gesture: GestureController = createGestureController({
     clock, measure: options.measure ?? readSurface, isLocked: () => locked || destroyed,
     currentTime: () => engine?.currentTime() ?? 0, duration: () => engine?.duration() ?? 0,
@@ -203,14 +207,11 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
 
   function handleMediaEvent(event: MediaEvent): void {
     if (destroyed || engine === null) return;
-    if (event === 'play') { interruption.noteUserAction(); void bridge.setKeepScreenOn(true); ensureBackgroundAudio(); }
-    else if (event === 'pause') {
-      if (!interruption.pausingForCall()) interruption.noteUserAction();
-      progress.emit(true);
-    } else if (event === 'timeupdate') { if (progress.due()) progress.emit(); }
-    else if (event === 'error') {
-      phase = 'error'; errorKind = 'retryable'; overlay.show('retryable'); report({ kind: 'media', message: '播放失败' });
-    } else void onEnded();
+    if (event === 'play') { root.classList.add('is-playing'); interruption.noteUserAction(); void bridge.setKeepScreenOn(true); ensureBackgroundAudio(); }
+    else if (event === 'pause') { root.classList.remove('is-playing'); if (!interruption.pausingForCall()) interruption.noteUserAction(); progress.emit(true); }
+    else if (event === 'timeupdate') { if (progress.due()) progress.emit(); }
+    else if (event === 'error') { root.classList.remove('is-playing'); phase = 'error'; errorKind = 'retryable'; overlay.show('retryable'); report({ kind: 'media', message: '播放失败' }); }
+    else void onEnded();
   }
 
   async function ensureEngine(): Promise<PlayerEngine> {
@@ -273,7 +274,6 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
 
   return {
     load,
-    // 锁定只压手势：系统播放控制与解锁按钮在锁定态必须仍然可用。
     play: () => engine?.play(),
     pause: () => { progress.emit(true); engine?.pause(); },
     setLocked, scheduleSleep, closeDrawer: () => drawer.close(),

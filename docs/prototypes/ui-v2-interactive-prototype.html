@@ -1,0 +1,3098 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>《光影Play》全景端到端 UI/UX 高保真交互原型 (v2.0 完整版)</title>
+  <style>
+    /* ==========================================================================
+       1. Design Tokens 完整系统 (严格遵守 P0 零裸 Hex，黑曜石/象牙白双模)
+       ========================================================================== */
+    :root,
+    :root[data-theme="dark"] {
+      --bg: #080A10;
+      --surface: #12151F;
+      --surface-raised: #1A1F2C;
+      --surface-overlay: rgba(8, 10, 16, 0.92);
+      --surface-warm: #181C28;
+      --surface-subtle: #0E1119;
+      --fg: #F4F6FB;
+      --fg-2: #C5CBD8;
+      --muted: #828B9E;
+      --meta: #9AA2B2;
+      --border: #222736;
+      --border-subtle: #181D29;
+      --border-strong: #384157;
+      --accent: #E5A93C;
+      --accent-hover: #F0B854;
+      --accent-active: #C88E26;
+      --accent-on: #080A10;
+      --accent-subtle: rgba(229, 169, 60, 0.15);
+      --success: #22C55E;
+      --warn: #F59E0B;
+      --danger: #EF4444;
+      --danger-subtle: rgba(239, 68, 68, 0.15);
+      --info: #38BDF8;
+
+      --player-bg: #000000;
+      --player-vol-accent: #38BDF8;
+      --player-bri-accent: #E5A93C;
+
+      --elev-card: 0 4px 16px rgba(0, 0, 0, 0.45);
+      --elev-float: 0 12px 32px rgba(0, 0, 0, 0.65);
+      --bench-bg: #0A0D14;
+      --device-border: #262B3A;
+      --chassis-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.08);
+    }
+
+    :root[data-theme="light"] {
+      --bg: #F5F6FA;
+      --surface: #FFFFFF;
+      --surface-raised: #FFFFFF;
+      --surface-overlay: rgba(245, 246, 250, 0.94);
+      --surface-warm: #EBEDF4;
+      --surface-subtle: #E2E5EE;
+      --fg: #131720;
+      --fg-2: #3E4656;
+      --muted: #6C7486;
+      --meta: #626B7B;
+      --border: #DFE2EA;
+      --border-subtle: #EBEEF5;
+      --border-strong: #BAC0CE;
+      --accent: #B87B14;
+      --accent-hover: #9E670E;
+      --accent-active: #7E5107;
+      --accent-on: #FFFFFF;
+      --accent-subtle: rgba(184, 123, 20, 0.12);
+      --success: #15803D;
+      --warn: #B45309;
+      --danger: #B91C1C;
+      --danger-subtle: rgba(185, 28, 28, 0.12);
+      --info: #0284C7;
+
+      --player-bg: #080A10;
+      --player-vol-accent: #0284C7;
+      --player-bri-accent: #B87B14;
+
+      --elev-card: 0 2px 10px rgba(19, 23, 32, 0.08);
+      --elev-float: 0 8px 30px rgba(19, 23, 32, 0.14);
+      --bench-bg: #E6E9F2;
+      --device-border: #CBD2E1;
+      --chassis-shadow: 0 20px 50px -15px rgba(19, 23, 32, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.08);
+    }
+
+    /* hidden 属性必须压过组件自身的 display 声明 */
+    [hidden] { display: none !important; }
+
+    /* 基础重置 */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      background-color: var(--bench-bg);
+      color: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px 16px 64px;
+      overflow-x: hidden;
+      transition: background-color 0.25s ease, color 0.25s ease;
+    }
+
+    /* ==========================================================================
+       2. 顶部主控演示台 (Prototype Control Bar)
+       ========================================================================== */
+    .control-deck {
+      width: 100%;
+      max-width: 980px;
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      border-radius: 16px;
+      padding: 16px 22px;
+      margin-bottom: 24px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      box-shadow: var(--elev-card);
+    }
+
+    .deck-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-tag {
+      background: var(--accent);
+      color: var(--accent-on);
+      padding: 4px 9px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.05em;
+    }
+
+    .deck-title {
+      font-size: 17px;
+      font-weight: 800;
+      color: var(--fg);
+      letter-spacing: -0.01em;
+    }
+
+    .deck-subtitle {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 3px;
+    }
+
+    .deck-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .deck-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 13px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface-warm);
+      color: var(--fg);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .deck-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .deck-btn.active {
+      background: var(--accent);
+      color: var(--accent-on);
+      border-color: var(--accent);
+    }
+
+    /* ==========================================================================
+       3. 手机真机视口模拟器 (Mobile Chassis 393x852 比例)
+       ========================================================================== */
+    .chassis-wrapper {
+      position: relative;
+      width: 393px;
+      height: 852px;
+      background: var(--bg);
+      border: 10px solid var(--device-border);
+      border-radius: 50px;
+      overflow: hidden;
+      box-shadow: var(--chassis-shadow);
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* 顶部状态栏与灵动岛 */
+    .chassis-status-bar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 46px;
+      z-index: 50;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--fg);
+      pointer-events: none;
+    }
+
+    .island-cutout {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 118px;
+      height: 28px;
+      background: #000000;
+      border-radius: 16px;
+      z-index: 51;
+    }
+
+    /* 底部手势指示条 */
+    .chassis-home-bar {
+      position: absolute;
+      bottom: 8px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 136px;
+      height: 5px;
+      background: var(--fg);
+      opacity: 0.35;
+      border-radius: 3px;
+      z-index: 50;
+      pointer-events: none;
+    }
+
+    /* 内部视图宿主 */
+    .app-viewport {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .view-screen {
+      position: absolute;
+      inset: 0;
+      display: none;
+      flex-direction: column;
+      overflow-y: auto;
+      overscroll-behavior-y: contain;
+      scrollbar-width: none;
+      padding-top: 46px; /* 避开状态栏 */
+      padding-bottom: 74px; /* 避开底部 Tab 栏 */
+    }
+
+    .view-screen::-webkit-scrollbar {
+      display: none;
+    }
+
+    .view-screen.is-active {
+      display: flex;
+    }
+
+    /* ==========================================================================
+       4. 全局底栏 TabBar (严格遵守规范 4 大主 Tab: 大视界 / 追剧 / 搜索 / 设置)
+       ========================================================================== */
+    .bottom-tabbar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 64px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
+      padding-bottom: 12px;
+      z-index: 40;
+    }
+
+    .tab-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      background: none;
+      border: 0;
+      transition: color 0.15s ease;
+      padding: 6px 14px;
+    }
+
+    .tab-item.is-active {
+      color: var(--accent);
+    }
+
+    .tab-item svg {
+      width: 22px;
+      height: 22px;
+      stroke-width: 2px;
+    }
+
+    /* ==========================================================================
+       5. 屏幕 1: 【大视界】(首页) 全景架构 (沉浸流媒体聚合中心)
+       ========================================================================== */
+    .home-top-bar {
+      padding: 6px 16px 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .home-brand-logo {
+      font-size: 19px;
+      font-weight: 900;
+      color: var(--accent);
+      letter-spacing: -0.03em;
+      white-space: nowrap;
+    }
+
+    .home-search-pill {
+      flex: 1;
+      height: 36px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      cursor: pointer;
+      box-shadow: var(--elev-card);
+      overflow: hidden;
+    }
+
+    .home-search-pill span {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* 一级主频道栏 (短剧/电影/动漫/纪录片) */
+    .home-channel-bar {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      padding: 0 16px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .channel-tab {
+      padding: 10px 0;
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--muted);
+      cursor: pointer;
+      white-space: nowrap;
+      position: relative;
+      transition: color 0.15s ease;
+    }
+
+    .channel-tab.is-active {
+      color: var(--accent);
+      font-weight: 800;
+    }
+
+    .channel-tab.is-active::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 15%;
+      width: 70%;
+      height: 3px;
+      background: var(--accent);
+      border-radius: 2px;
+    }
+
+    /* 二级分类胶囊轨 */
+    .home-capsule-rail {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 16px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    .capsule-pill {
+      padding: 5px 12px;
+      border-radius: 14px;
+      background: var(--surface-warm);
+      border: 1px solid var(--border);
+      color: var(--fg-2);
+      font-size: 12px;
+      font-weight: 500;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+
+    .capsule-pill.is-active {
+      background: var(--accent-subtle);
+      border-color: var(--accent);
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    /* 续播提醒卡 (Continue Card) */
+    .home-continue-card {
+      margin: 4px 16px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 3.5px solid var(--accent);
+      border-radius: 12px;
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+      box-shadow: var(--elev-card);
+    }
+
+    .continue-thumb {
+      width: 44px;
+      height: 56px;
+      border-radius: 6px;
+      overflow: hidden;
+      flex-shrink: 0;
+      position: relative;
+    }
+
+    .continue-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .continue-info {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      min-width: 0;
+    }
+
+    .continue-badge {
+      font-size: 10px;
+      font-weight: 800;
+      color: var(--accent);
+      letter-spacing: 0.05em;
+    }
+
+    .continue-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--fg);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .continue-meta {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .continue-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 6px 12px;
+      border-radius: 16px;
+      background: var(--accent);
+      color: var(--accent-on);
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    /* 首页内容分区标 */
+    .home-section-head {
+      padding: 4px 16px 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .home-section-title {
+      font-size: 15px;
+      font-weight: 800;
+      color: var(--fg);
+    }
+
+    /* 沉浸式海报双列流 */
+    .home-poster-grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+      padding: 0 16px 16px;
+    }
+
+    .home-poster-card {
+      background: var(--surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      cursor: pointer;
+      box-shadow: var(--elev-card);
+    }
+
+    .home-poster-cover {
+      width: 100%;
+      aspect-ratio: 3 / 4;
+      background: var(--surface-warm);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .home-poster-cover img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: transform 0.25s ease;
+    }
+
+    .home-poster-card:hover .home-poster-cover img {
+      transform: scale(1.04);
+    }
+
+    .home-poster-badge {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      background: rgba(8, 10, 16, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: var(--fg);
+      font-size: 9px;
+      font-weight: 700;
+      padding: 2px 5px;
+      border-radius: 3px;
+    }
+
+    .home-poster-body {
+      padding: 8px 10px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .home-poster-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--fg);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .home-poster-meta {
+      font-size: 11px;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* 热门连载横滑大带 */
+    .home-ranking-rail {
+      display: flex;
+      gap: 10px;
+      padding: 0 16px 16px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    .ranking-card {
+      flex: 0 0 110px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      cursor: pointer;
+    }
+
+    .ranking-cover {
+      width: 100%;
+      aspect-ratio: 3 / 4;
+      border-radius: 8px;
+      overflow: hidden;
+      position: relative;
+      background: var(--surface-warm);
+    }
+
+    .ranking-cover img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .ranking-num-tag {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 24px;
+      height: 24px;
+      background: linear-gradient(135deg, var(--accent) 0%, rgba(229, 169, 60, 0.5) 100%);
+      color: var(--accent-on);
+      font-size: 12px;
+      font-weight: 900;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-bottom-right-radius: 8px;
+    }
+
+    .ranking-name {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--fg);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* ==========================================================================
+       6. 屏幕 2: 【非全屏播放详情页】(Media Stage - 点击任意剧目即滑入)
+       ========================================================================== */
+    #screen-player {
+      padding-top: 0; /* 播放器直接贴顶 */
+      padding-bottom: 24px;
+      background: var(--bg);
+      z-index: 45;
+    }
+
+    /* 播放器视口容器 (自适应与高保真海报环境微光底片) */
+    .player-stage-wrap {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: #000000;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+
+    /* 电影级等待底片：高清海报 + 动态高斯模糊环境光 */
+    .player-backdrop {
+      position: absolute;
+      inset: 0;
+      background-image: url('https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=800&auto=format&fit=crop&q=80');
+      background-size: cover;
+      background-position: center;
+      filter: blur(28px) brightness(0.6);
+      transform: scale(1.18);
+    }
+
+    .player-backdrop-overlay {
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at center, transparent 30%, rgba(0, 0, 0, 0.8) 100%),
+                  linear-gradient(to bottom, rgba(8, 10, 16, 0.75) 0%, transparent 40%, rgba(8, 10, 16, 0.95) 100%);
+    }
+
+    /* 播放起播微光指示标 (呼吸动效) */
+    .player-play-pulse {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 54px;
+      height: 54px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: var(--accent-on);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 25px var(--accent);
+      cursor: pointer;
+      animation: pulseGlow 2.2s infinite ease-in-out;
+      z-index: 5;
+    }
+
+    @keyframes pulseGlow {
+      0%, 100% { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 20px rgba(229, 169, 60, 0.5); }
+      50% { transform: translate(-50%, -50%) scale(1.08); box-shadow: 0 0 35px rgba(229, 169, 60, 0.85); }
+    }
+
+    .stage-top-bar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      z-index: 10;
+      background: linear-gradient(to bottom, rgba(0, 0, 0, 0.7) 0%, transparent 100%);
+    }
+
+    .stage-icon-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: #FFFFFF;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      backdrop-filter: blur(8px);
+    }
+
+    .stage-bottom-bar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 38px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 16px;
+      z-index: 10;
+      background: linear-gradient(to top, rgba(0, 0, 0, 0.8) 0%, transparent 100%);
+    }
+
+    .stage-progress-track {
+      flex: 1;
+      height: 3px;
+      background: rgba(255, 255, 255, 0.25);
+      border-radius: 2px;
+      position: relative;
+      cursor: pointer;
+    }
+
+    .stage-progress-fill {
+      width: 42%;
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+    }
+
+    .stage-time-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.85);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* 播放器下方内容生态流 */
+    .player-detail-content {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .detail-header-card {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .detail-title-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .detail-main-title {
+      font-size: 18px;
+      font-weight: 800;
+      color: var(--fg);
+      line-height: 1.35;
+    }
+
+    .detail-meta-pill-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .meta-pill {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 7px;
+      border-radius: 4px;
+      background: var(--surface-warm);
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+
+    .meta-pill.accent {
+      background: var(--accent-subtle);
+      color: var(--accent);
+      border-color: transparent;
+    }
+
+    /* 折叠简介 */
+    .detail-synopsis-box {
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--fg-2);
+      position: relative;
+      cursor: pointer;
+    }
+
+    .detail-synopsis-text {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      transition: all 0.2s ease;
+    }
+
+    .detail-synopsis-box.is-expanded .detail-synopsis-text {
+      -webkit-line-clamp: unset;
+      line-clamp: unset;
+    }
+
+    .synopsis-toggle-hint {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--accent);
+      margin-top: 4px;
+    }
+
+    /* 核心操作工具岛 (Action Bar) */
+    .detail-action-island {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 8px;
+      box-shadow: var(--elev-card);
+    }
+
+    .action-island-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      background: none;
+      border: 0;
+      color: var(--fg-2);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .action-island-item.active {
+      color: var(--accent);
+    }
+
+    .action-island-item svg {
+      width: 20px;
+      height: 20px;
+    }
+
+    /* 常驻选集区 */
+    .episodes-section {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .section-title-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .section-h3 {
+      font-size: 15px;
+      font-weight: 800;
+      color: var(--fg);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .section-sub-info {
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 400;
+    }
+
+    .view-all-link {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      cursor: pointer;
+    }
+
+    /* 常驻横滑轨 */
+    .episodes-rail {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      padding-bottom: 2px;
+    }
+
+    .ep-rail-btn {
+      flex: 0 0 52px;
+      height: 48px;
+      border-radius: 8px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--fg);
+      font-size: 14px;
+      font-weight: 700;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .ep-rail-btn.active {
+      background: var(--accent);
+      color: var(--accent-on);
+      border-color: var(--accent);
+      box-shadow: 0 4px 12px rgba(229, 169, 60, 0.35);
+    }
+
+    .ep-rail-btn .ep-wave {
+      width: 14px;
+      height: 4px;
+      background: var(--accent-on);
+      border-radius: 2px;
+      margin-top: 2px;
+    }
+
+    /* 类似剧集流转区 (Related Flow) */
+    .related-section {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .related-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+
+    .related-card {
+      background: var(--surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      overflow: hidden;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .related-cover {
+      width: 100%;
+      aspect-ratio: 3 / 4;
+      background: var(--surface-warm);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .related-cover img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .related-tag {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      background: rgba(0, 0, 0, 0.7);
+      color: #fff;
+      font-size: 9px;
+      padding: 1px 4px;
+      border-radius: 2px;
+    }
+
+    .related-body {
+      padding: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .related-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--fg);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .related-desc {
+      font-size: 10px;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* ==========================================================================
+       7. 屏幕 3: 【追剧与历史】(History View)
+       ========================================================================== */
+    .history-tab-header {
+      display: flex;
+      gap: 14px;
+      padding: 6px 16px 12px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .history-tab-btn {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--muted);
+      cursor: pointer;
+      padding-bottom: 4px;
+    }
+
+    .history-tab-btn.active {
+      color: var(--accent);
+      font-weight: 800;
+      border-bottom: 2px solid var(--accent);
+    }
+
+    .history-card {
+      display: flex;
+      gap: 14px;
+      padding: 13px 15px;
+      border-bottom: 1px solid var(--border-subtle);
+      align-items: center;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+
+    .history-card:hover {
+      background: var(--surface-subtle);
+    }
+
+    .history-card:last-child {
+      border-bottom: 0;
+    }
+
+    .history-thumb {
+      width: 62px;
+      height: 82px;
+      border-radius: 8px;
+      overflow: hidden;
+      flex-shrink: 0;
+      position: relative;
+      background: var(--surface-subtle);
+    }
+
+    .history-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .history-info {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .history-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--fg);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .history-meta {
+      font-size: 11.5px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .history-progress-bar {
+      width: 100%;
+      height: 3px;
+      background: var(--surface-subtle);
+      border-radius: 999px;
+      overflow: hidden;
+      margin-top: 3px;
+    }
+
+    .history-progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), #F0C874);
+      border-radius: 999px;
+    }
+
+    .history-resume-cta {
+      flex: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: var(--accent-subtle);
+      color: var(--accent);
+      font-size: 11.5px;
+      font-weight: 700;
+      border: 1px solid rgba(229, 169, 60, 0.25);
+      transition: all 0.15s ease;
+    }
+
+    .history-card:hover .history-resume-cta {
+      background: var(--accent);
+      color: var(--accent-on);
+    }
+
+    /* 追剧高密度分段与标签 */
+    .history-filter-rail {
+      display: flex;
+      gap: 7px;
+      padding: 2px 16px 14px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      flex-shrink: 0;
+      min-height: 44px;
+      align-items: center;
+    }
+    .history-filter-pill {
+      flex: none;
+      height: 28px;
+      padding: 0 12px;
+      border-radius: 999px;
+      background: var(--surface);
+      border: 1px solid var(--border-subtle);
+      font-size: 11.5px;
+      font-weight: 500;
+      color: var(--fg-2);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .history-filter-pill.active {
+      background: var(--accent-subtle);
+      border-color: rgba(229, 169, 60, 0.35);
+      color: var(--accent);
+      font-weight: 700;
+    }
+    .history-card-badges {
+      display: flex; align-items: center; gap: 6px; margin-top: 1px;
+    }
+    .history-tag {
+      font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px;
+      background: var(--surface-subtle); color: var(--muted);
+    }
+    .history-tag.highlight {
+      background: var(--accent-subtle); color: var(--accent);
+    }
+
+    /* ==========================================================================
+       8. 屏幕 4: 【搜索与探索】(Search View)
+       ========================================================================== */
+    .search-input-pill {
+      margin: 4px 14px 12px;
+      height: 42px;
+      background: var(--surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 13px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+      transition: border-color 0.15s ease;
+    }
+
+    .search-input-pill:focus-within {
+      border-color: var(--accent);
+    }
+
+    .search-input-field {
+      background: none;
+      border: 0;
+      color: var(--fg);
+      outline: none;
+      font-size: 13px;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .search-chip-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      padding: 8px 14px;
+    }
+
+    .search-chip {
+      padding: 5px 11px;
+      border-radius: 999px;
+      background: var(--surface);
+      border: 1px solid var(--border-subtle);
+      color: var(--fg-2);
+      font-size: 11.5px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .search-chip:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .search-chip.hot {
+      color: var(--accent);
+      border-color: rgba(229, 169, 60, 0.35);
+      background: var(--accent-subtle);
+      font-weight: 600;
+    }
+
+    .search-result-card {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border-subtle);
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+
+    .search-result-card:last-child {
+      border-bottom: none;
+    }
+
+    .search-result-card:hover {
+      background: var(--surface-subtle);
+    }
+
+    .search-result-thumb {
+      width: 44px;
+      height: 58px;
+      border-radius: 6px;
+      overflow: hidden;
+      flex: none;
+      background: var(--surface-subtle);
+    }
+
+    .search-result-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .search-result-info {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .search-result-title {
+      font-size: 13.5px;
+      font-weight: 700;
+      color: var(--fg);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .search-result-meta {
+      font-size: 11px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* 搜索高密度热搜榜单与分类矩阵 */
+    .search-ranking-grid {
+      display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px;
+      background: var(--border-subtle); border-radius: 12px; overflow: hidden;
+      margin: 4px 0 2px;
+    }
+    .search-rank-item {
+      display: flex; align-items: center; gap: 8px; padding: 9px 12px;
+      background: var(--surface); cursor: pointer; transition: background 0.15s ease;
+    }
+    .search-rank-item:hover {
+      background: var(--surface-subtle);
+    }
+    .search-rank-num {
+      width: 17px; height: 17px; border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10.5px; font-weight: 800; color: var(--muted); background: var(--surface-subtle);
+      flex: none;
+    }
+    .search-rank-num.top1 { background: #E5A93C; color: #080A10; }
+    .search-rank-num.top2 { background: rgba(229, 169, 60, 0.45); color: #FFF; }
+    .search-rank-num.top3 { background: rgba(229, 169, 60, 0.25); color: var(--accent); }
+    .search-rank-name {
+      font-size: 12px; font-weight: 600; color: var(--fg);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
+    }
+    .search-rank-heat {
+      font-size: 9.5px; color: var(--accent); font-weight: 700; flex: none;
+    }
+
+    .search-topic-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 8px 12px;
+    }
+    .search-topic-btn {
+      height: 32px; border-radius: 8px; border: 1px solid var(--border-subtle);
+      background: var(--surface-subtle); color: var(--fg); font-size: 11.5px; font-weight: 600;
+      display: flex; align-items: center; justify-content: center; gap: 4px;
+      cursor: pointer; transition: all 0.15s ease;
+    }
+    .search-topic-btn:hover {
+      border-color: var(--accent); color: var(--accent);
+    }
+
+    /* ==========================================================================
+       9. 屏幕 5: 【设置与系统偏好】(Settings View)
+       ========================================================================== */
+    .page-header {
+      padding: 14px 16px 10px;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+
+    .page-title {
+      font-size: 20px;
+      font-weight: 800;
+      color: var(--fg);
+      letter-spacing: -0.01em;
+      line-height: 1.2;
+    }
+
+    .page-subtitle {
+      font-size: 11.5px;
+      color: var(--muted);
+      margin-top: 3px;
+    }
+
+    .grouped-card-list {
+      padding: 2px 14px 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      flex-shrink: 0;
+    }
+
+    /* Inset Grouped 卡片容器 */
+    .inset-group {
+      background: var(--surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+    }
+
+    .group-header {
+      padding: 10px 16px 6px;
+      font-size: 11.5px;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .group-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 13px 16px;
+      min-height: 48px;
+      border-bottom: 1px solid var(--border-subtle);
+      transition: background 0.15s ease;
+    }
+
+    .group-row:last-child {
+      border-bottom: 0;
+    }
+
+    .row-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .row-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      background: var(--surface-warm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+    }
+
+    .row-texts {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .row-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--fg);
+    }
+
+    .row-subtitle {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    /* 温润滑动的开关 (Switch) */
+    .ios-switch {
+      position: relative;
+      width: 46px;
+      height: 26px;
+      background: var(--border-strong);
+      border-radius: 13px;
+      cursor: pointer;
+      transition: background 0.25s ease;
+    }
+
+    .ios-switch.active {
+      background: var(--accent);
+    }
+
+    .switch-thumb {
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 20px;
+      height: 20px;
+      background: #FFFFFF;
+      border-radius: 50%;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.25);
+      transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .ios-switch.active .switch-thumb {
+      transform: translateX(20px);
+    }
+
+    /* ==========================================================================
+       10. 底部半屏选集抽屉 (Bottom Sheet) & 全屏影院态 (Cinema Mode)
+       ========================================================================== */
+    .bottom-sheet-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.65);
+      z-index: 55;
+      display: none;
+      backdrop-filter: blur(4px);
+    }
+
+    .bottom-sheet-backdrop.is-open {
+      display: block;
+    }
+
+    .bottom-sheet-panel {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      max-height: 72%;
+      background: var(--surface);
+      border-top-left-radius: 22px;
+      border-top-right-radius: 22px;
+      border-top: 1px solid var(--border-strong);
+      box-shadow: var(--elev-float);
+      display: flex;
+      flex-direction: column;
+      z-index: 56;
+      transform: translateY(100%);
+      transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .bottom-sheet-backdrop.is-open .bottom-sheet-panel {
+      transform: translateY(0);
+    }
+
+    .sheet-handle-bar {
+      width: 40px;
+      height: 4px;
+      background: var(--border-strong);
+      border-radius: 2px;
+      margin: 10px auto 4px;
+    }
+
+    .sheet-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 18px 12px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .sheet-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 10px;
+      padding: 16px 18px 24px;
+      overflow-y: auto;
+      max-height: 380px;
+    }
+
+    .sheet-ep-btn {
+      height: 48px;
+      background: var(--surface-warm);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--fg);
+      font-size: 14px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+
+    .sheet-ep-btn.active {
+      background: var(--accent);
+      color: var(--accent-on);
+      border-color: var(--accent);
+    }
+
+    /* 全屏沉浸影院模式 */
+    .cinema-fullscreen-layer {
+      position: absolute;
+      inset: 0;
+      background: #000000;
+      z-index: 60;
+      display: none;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .cinema-fullscreen-layer.is-open {
+      display: flex;
+    }
+
+    .cinema-video-mock {
+      position: absolute;
+      inset: 0;
+      background-image: url('https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=1000&auto=format&fit=crop&q=80');
+      background-size: cover;
+      background-position: center;
+    }
+
+    .cinema-scrim-top {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 100px;
+      background: linear-gradient(to bottom, rgba(0, 0, 0, 0.85) 0%, transparent 100%);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 40px 20px 0;
+      z-index: 2;
+    }
+
+    .cinema-title-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .cinema-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #FFFFFF;
+    }
+
+    .cinema-ep-label {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.7);
+    }
+
+    .cinema-scrim-bottom {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 120px;
+      background: linear-gradient(to top, rgba(0, 0, 0, 0.9) 0%, transparent 100%);
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      padding: 0 20px 24px;
+      gap: 12px;
+      z-index: 2;
+    }
+
+    .cinema-bottom-controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .cinema-speed-pill {
+      background: rgba(255, 255, 255, 0.15);
+      color: #FFFFFF;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 14px;
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .longpress-hud {
+      position: absolute;
+      top: 64px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.75);
+      border: 1px solid var(--accent);
+      border-radius: 20px;
+      padding: 6px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.05em;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+      z-index: 10;
+      animation: floatBreath 1.5s infinite ease-in-out;
+    }
+
+    @keyframes floatBreath {
+      0%, 100% { transform: translateX(-50%) translateY(0); }
+      50% { transform: translateX(-50%) translateY(-3px); }
+    }
+
+    /* ===================== 首页现代流媒体排版系统 (去拥挤 · 大气呼吸 · 层次分明) ===================== */
+    /* 1. 顶栏：开阔大气质感，留白充裕，无任何紧凑挤压 */
+    .pf-topbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px 6px; background: var(--bg); }
+    .pf-brand-name { font-size: 18px; font-weight: 800; letter-spacing: 0.03em; color: var(--fg); }
+    .pf-brand-badge { font-size: 10px; font-weight: 700; color: var(--accent); padding: 2px 7px; border-radius: 999px; background: var(--accent-subtle); border: 1px solid rgba(229, 169, 60, 0.25); letter-spacing: 0.05em; }
+
+    /* 2. 吸顶导航区：纯字优雅频道栏 (无厚重方框边框) + 轻盈次级题材流 */
+    .pf-sticky { position: sticky; top: 0; z-index: 20; background: var(--bg); padding-bottom: 4px; }
+    .pf-channel-bar { display: flex; gap: 18px; overflow-x: auto; padding: 4px 16px 8px; scrollbar-width: none; }
+    .pf-channel-bar::-webkit-scrollbar { display: none; }
+    .pf-channel { flex: none; position: relative; padding: 4px 0 8px; border: 0; background: transparent; color: var(--muted); font-size: 14.5px; font-weight: 500; cursor: pointer; transition: all .18s ease; }
+    .pf-channel:hover { color: var(--fg); }
+    .pf-channel.is-active { color: var(--fg); font-weight: 700; font-size: 15px; }
+    .pf-channel.is-active::after { content: ''; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); width: 16px; height: 3px; border-radius: 2px; background: var(--accent); }
+
+    /* 二级分类：柔和极简细胶囊 */
+    .pf-capsule-rail { display: flex; gap: 6px; overflow-x: auto; padding: 2px 16px 6px; scrollbar-width: none; }
+    .pf-capsule-rail::-webkit-scrollbar { display: none; }
+    .pf-capsule { flex: none; height: 26px; padding: 0 11px; border-radius: 999px; border: 1px solid transparent; background: var(--surface); color: var(--fg-2); font-size: 11.5px; font-weight: 500; cursor: pointer; transition: all .15s ease; }
+    .pf-capsule:hover { color: var(--fg); }
+    .pf-capsule.is-active { background: var(--accent-subtle); border-color: rgba(229, 169, 60, 0.35); color: var(--accent); font-weight: 650; }
+
+    /* 3. 核心搜索入口 (原续播位置)：全宽舒适加大、高度提升至 48px，文字精简克制、呼吸感充盈 */
+    .pf-home-search-bar {
+      margin: 6px 12px 12px; height: 48px; border-radius: 14px;
+      background: var(--surface); border: 1px solid var(--border-subtle);
+      display: flex; align-items: center; padding: 0 16px;
+      cursor: pointer; transition: all .18s ease; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+    }
+    .pf-home-search-bar:hover { border-color: var(--accent); transform: translateY(-1px); }
+    .pf-search-lead { display: flex; align-items: center; gap: 11px; color: var(--muted); font-size: 13.5px; width: 100%; font-weight: 500; }
+    .pf-search-lead svg { color: var(--accent); flex: none; width: 18px; height: 18px; }
+
+    /* 4. 内容分区标头 + 四模排版切换：语义绑定在海报网格顶端，各得其所 */
+    .pf-grid-header { display: flex; align-items: center; justify-content: space-between; padding: 4px 16px 8px; }
+    .pf-grid-title-group { display: flex; align-items: baseline; gap: 8px; }
+    .pf-grid-title { font-size: 14px; font-weight: 700; color: var(--fg); }
+    .pf-grid-count { font-size: 11px; color: var(--muted); }
+
+    .pf-mode-segmented { display: inline-flex; align-items: center; background: var(--surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 2px; gap: 2px; }
+    .pf-mode-icon-btn { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border: 0; background: transparent; border-radius: 6px; color: var(--muted); cursor: pointer; transition: all .15s ease; }
+    .pf-mode-icon-btn:hover { color: var(--fg); }
+    .pf-mode-icon-btn.is-active { background: var(--accent); color: var(--accent-on); }
+
+    .pf-grid { display: grid; gap: 10px; padding: 0 16px; }
+    .pf-grid[data-mode="compact-3"] { grid-template-columns: repeat(3, 1fr); }
+    .pf-grid[data-mode="bookshelf-4"] { grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    .pf-grid[data-mode="comfort-2"] { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .pf-grid[data-mode="list-1"] { grid-template-columns: 1fr; gap: 10px; }
+
+    .pf-card { position: relative; background: var(--surface); border: 1px solid var(--border-subtle); border-radius: 12px; overflow: hidden; }
+    .pf-card-open { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+    .pf-card-media { position: relative; display: block; width: 100%; aspect-ratio: 3 / 4; background: var(--surface-subtle); overflow: hidden; }
+    .pf-card-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .pf-card-media.is-fallback { display: flex; align-items: center; justify-content: center; color: var(--muted); }
+    .pf-ep-badge { position: absolute; right: 6px; bottom: 6px; padding: 2px 6px; border-radius: 6px; background: rgba(0, 0, 0, .62); color: #fff; font-size: 10px; font-weight: 700; backdrop-filter: blur(4px); }
+    .pf-card-body { display: flex; flex-direction: column; gap: 3px; padding: 7px 8px 9px; }
+    .pf-card-title { font-size: 12.5px; font-weight: 650; color: var(--fg); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .pf-card-tag { font-size: 10px; color: var(--muted); }
+    .pf-card-synopsis { display: none; font-size: 11px; color: var(--muted); line-height: 1.55; display: none; -webkit-line-clamp: 2; }
+    .pf-grid[data-mode="comfort-2"] .pf-card-synopsis,
+    .pf-grid[data-mode="list-1"] .pf-card-synopsis { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
+    .pf-grid[data-mode="list-1"] .pf-card-open { display: flex; gap: 10px; align-items: flex-start; }
+    .pf-grid[data-mode="list-1"] .pf-card-media { width: 92px; flex: none; }
+    .pf-grid[data-mode="list-1"] .pf-card-body { padding: 8px 10px 8px 0; }
+    .pf-card-share { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; border: 0; border-radius: 8px; background: rgba(0, 0, 0, .55); color: #fff; cursor: pointer; backdrop-filter: blur(4px); }
+    .pf-card-share:hover { background: var(--accent); color: var(--accent-on); }
+
+    .pf-more-host { display: flex; justify-content: center; padding: 12px 14px 18px; }
+    .pf-more-btn { width: 100%; height: 40px; border-radius: 12px; border: 1px dashed var(--border-strong); background: var(--surface); color: var(--fg-2); font-size: 12px; font-weight: 600; cursor: pointer; }
+    .pf-more-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    .pf-skeleton-card { border-radius: 12px; overflow: hidden; background: var(--surface); border: 1px solid var(--border-subtle); }
+    .pf-skeleton-media { display: block; width: 100%; aspect-ratio: 3 / 4; }
+    .pf-skeleton-line { display: block; height: 9px; margin: 8px 8px; border-radius: 5px; }
+    .pf-skeleton-line--short { width: 55%; margin-top: 0; }
+    .pf-skeleton-media, .pf-skeleton-line { background: linear-gradient(90deg, var(--surface-subtle) 25%, var(--border-subtle) 37%, var(--surface-subtle) 63%); background-size: 400% 100%; animation: pfShimmer 1.4s ease infinite; }
+    @keyframes pfShimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+
+    .pf-state { margin: 6px 14px 14px; padding: 30px 18px; border-radius: 14px; background: var(--surface); border: 1px solid var(--border-subtle); display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+    .pf-state-icon { width: 46px; height: 46px; border-radius: 14px; display: flex; align-items: center; justify-content: center; background: var(--surface-subtle); color: var(--muted); }
+    .pf-state-title { font-size: 13px; font-weight: 700; color: var(--fg); }
+    .pf-state-detail { font-size: 11.5px; line-height: 1.6; color: var(--muted); max-width: 240px; }
+    .pf-state-action { margin-top: 2px; height: 34px; padding: 0 16px; border: 0; border-radius: 10px; background: var(--accent); color: var(--accent-on); font-size: 12px; font-weight: 700; cursor: pointer; }
+    .pf-grid .pf-state { grid-column: 1 / -1; margin: 6px 0 10px; }
+
+    .pf-toast {
+      position: absolute; left: 50%; bottom: 78px; transform: translateX(-50%) translateY(8px);
+      max-width: 78%; padding: 9px 14px; border-radius: 12px;
+      background: var(--surface-overlay); border: 1px solid var(--border-subtle);
+      color: var(--fg); font-size: 11.5px; font-weight: 600; line-height: 1.5;
+      box-shadow: var(--elev-float); opacity: 0; pointer-events: none;
+      transition: opacity .2s ease, transform .2s ease; z-index: 60; text-align: center;
+    }
+    .pf-toast.is-on { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* 二级页面功能回填通用件 */
+    .pf-mini-btn { flex: none; height: 30px; padding: 0 11px; border-radius: 9px; border: 1px solid var(--border-subtle); background: var(--surface-subtle); color: var(--fg-2); font-size: 11px; font-weight: 600; cursor: pointer; }
+    .pf-mini-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .pf-mini-btn.primary { border-color: transparent; background: var(--accent); color: var(--accent-on); }
+    .pf-mini-btn.primary:hover { background: var(--accent-hover); color: var(--accent-on); }
+    .pf-row-actions { display: flex; gap: 6px; flex: none; }
+    .pf-related-rail { display: flex; gap: 10px; overflow-x: auto; padding: 10px 12px; scrollbar-width: none; }
+    .pf-related-rail::-webkit-scrollbar { display: none; }
+    .pf-mini-poster { flex: none; width: 92px; cursor: pointer; }
+    .pf-mini-poster img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 10px; display: block; background: var(--surface-subtle); }
+    .pf-mini-title { display: block; margin-top: 5px; font-size: 11.5px; font-weight: 650; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pf-mini-meta { display: block; font-size: 10px; color: var(--muted); }
+    .pf-code-input { flex: 1; min-width: 0; height: 34px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--border-subtle); background: var(--surface-subtle); color: var(--fg); font-size: 12px; }
+    .pf-code-input:focus { outline: none; border-color: var(--accent); }
+
+    .pf-dialog-mask { position: absolute; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(0, 0, 0, .55); backdrop-filter: blur(3px); }
+    .pf-dialog { width: 100%; max-width: 300px; padding: 18px 16px 14px; border-radius: 16px; background: var(--surface); border: 1px solid var(--border-subtle); box-shadow: var(--elev-float); display: flex; flex-direction: column; gap: 10px; }
+    .pf-dialog-title { font-size: 15px; font-weight: 700; color: var(--fg); }
+    .pf-dialog-text { font-size: 11.5px; line-height: 1.65; color: var(--muted); }
+    .pf-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+  </style>
+</head>
+<body>
+
+  <!-- ==================== 顶部交互操控面板 ==================== -->
+  <header class="control-deck">
+    <div class="deck-left">
+      <span class="brand-tag">PRISM PLAY</span>
+      <div>
+        <h1 class="deck-title">《光影Play》全景端到端 UI/UX 高保真交互原型 (v2.0)</h1>
+        <p class="deck-subtitle">真正自持的高端视频聚合软件 · 功能保真返工版 (v2.1) · 首页 1:1 还原源码能力 + 三页功能回填 + 统一 Inset Grouped 视觉语言</p>
+      </div>
+    </div>
+    <div class="deck-actions">
+      <button class="deck-btn" onclick="toggleTheme()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+        <span>深浅色切换</span>
+      </button>
+      <button class="deck-btn active" onclick="switchNav('home')">
+        <span>大视界 (首页)</span>
+      </button>
+      <button class="deck-btn" onclick="openPlayerDetail('真假千金的错位人生', 45, 80)">
+        <span>非全屏播放台</span>
+      </button>
+      <button class="deck-btn" onclick="launchCinemaMode()">
+        <span>全屏影院态</span>
+      </button>
+      <button class="deck-btn" onclick="switchNav('history')">
+        <span>追剧</span>
+      </button>
+      <button class="deck-btn" onclick="switchNav('search')">
+        <span>搜索</span>
+      </button>
+      <button class="deck-btn" onclick="switchNav('settings')">
+        <span>设置</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ==================== 手机真机模拟机身 (iPhone 15 Pro 比例) ==================== -->
+  <div class="chassis-wrapper">
+    <!-- 顶部状态栏与灵动岛 -->
+    <div class="chassis-status-bar">
+      <span>09:41</span>
+      <div class="island-cutout"></div>
+      <div style="display:flex; gap:4px; align-items:center;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/></svg>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="11" x="2" y="6" rx="2"/><path d="M22 11v2"/></svg>
+      </div>
+    </div>
+
+    <!-- 内部视图视口 -->
+    <div class="app-viewport">
+
+      <!-- ==================== 屏幕 1: 【大视界】(首页) ==================== -->
+      <div class="view-screen is-active" id="screen-home">
+        <!-- 顶栏：开阔大气质感，留白充裕，无任何紧凑挤压 -->
+        <div class="pf-topbar">
+          <div style="display:flex; align-items:baseline; gap:8px;">
+            <span class="pf-brand-name">光影Play</span>
+            <span class="pf-brand-tab" id="pfBrandTab" style="font-size:12px; color:var(--muted);">大视界</span>
+          </div>
+          <span class="pf-brand-badge">视频聚合</span>
+        </div>
+
+        <!-- sticky 吸顶区：纯文字优雅频道栏 (零边框、零灰底) + 轻盈次级题材流 -->
+        <div class="pf-sticky">
+          <div class="pf-channel-bar" role="tablist" aria-label="大视界频道">
+            <button class="pf-channel is-active" data-channel="drama" onclick="pfChannel(this)">短剧精选</button>
+            <button class="pf-channel" data-channel="movie" onclick="pfChannel(this)">院线电影</button>
+            <button class="pf-channel" data-channel="anime" onclick="pfChannel(this)">热血动漫</button>
+            <button class="pf-channel" data-channel="doc" onclick="pfChannel(this)">人文纪录</button>
+          </div>
+          <div class="pf-capsule-rail" role="group" aria-label="二级分类">
+            <button class="pf-capsule is-active" onclick="pfCapsule(this)">全部</button>
+            <button class="pf-capsule" onclick="pfCapsule(this)">逆袭翻盘</button>
+            <button class="pf-capsule" onclick="pfCapsule(this)">豪门世家</button>
+            <button class="pf-capsule" onclick="pfCapsule(this)">都市神医</button>
+            <button class="pf-capsule" onclick="pfCapsule(this)">重生复仇</button>
+            <button class="pf-capsule" onclick="pfCapsule(this)">悬疑脑洞</button>
+          </div>
+        </div>
+
+        <!-- 核心搜索功能 (原续播位置)：全宽加大、文字精简克制 -->
+        <div class="pf-home-search-bar" onclick="switchNav('search')" role="button" aria-label="搜索全网剧目">
+          <div class="pf-search-lead">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            <span>搜索剧名 / 题材</span>
+          </div>
+        </div>
+
+        <!-- 内容分区段头 + 四模排版切换：语义直接绑定海报网格，各得其所 -->
+        <div class="pf-grid-header">
+          <div class="pf-grid-title-group">
+            <span class="pf-grid-title" id="pfChannelTitle">短剧精选</span>
+            <span class="pf-grid-count">共 137 部</span>
+          </div>
+          <div class="pf-mode-segmented" role="group" aria-label="海报排版模式">
+            <button class="pf-mode-icon-btn is-active" data-mode="compact-3" title="三列紧凑" aria-label="三列紧凑" aria-pressed="true" onclick="pfModeIcon(this)">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
+            </button>
+            <button class="pf-mode-icon-btn" data-mode="comfort-2" title="两列大图" aria-label="两列大图" aria-pressed="false" onclick="pfModeIcon(this)">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+            </button>
+            <button class="pf-mode-icon-btn" data-mode="bookshelf-4" title="四列书架" aria-label="四列书架" aria-pressed="false" onclick="pfModeIcon(this)">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="10" y="3" rx="1"/><rect width="5" height="5" x="17" y="3" rx="1"/><rect width="5" height="5" x="3" y="10" rx="1"/><rect width="5" height="5" x="10" y="10" rx="1"/><rect width="5" height="5" x="17" y="10" rx="1"/><rect width="5" height="5" x="3" y="17" rx="1"/><rect width="5" height="5" x="10" y="17" rx="1"/><rect width="5" height="5" x="17" y="17" rx="1"/></svg>
+            </button>
+            <button class="pf-mode-icon-btn" data-mode="list-1" title="单列图文" aria-label="单列图文" aria-pressed="false" onclick="pfModeIcon(this)">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- 海报网格：列数与间距 100% 由 data-mode 驱动（源码不写死列数，交给 design-tokens.css） -->
+        <div class="pf-grid" id="pfGrid" data-mode="compact-3">
+          <article class="pf-card" data-content-id="drama-001">
+            <button class="pf-card-open" onclick="openPlayerDetail('真假千金的错位人生', 45, 80)">
+              <span class="pf-card-media">
+                <img src="https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=400&auto=format&fit=crop&q=80" alt="">
+                <span class="pf-ep-badge">共 80 集</span>
+              </span>
+              <span class="pf-card-body">
+                <span class="pf-card-title">真假千金的错位人生</span>
+                <span class="pf-card-tag">豪门世家</span>
+                <span class="pf-card-synopsis">一场错位人生，真假千金各归其位后的绝地反击。</span>
+              </span>
+            </button>
+            <button class="pf-card-share" aria-label="分享《真假千金的错位人生》" onclick="pfShare(event, '真假千金的错位人生')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+            </button>
+          </article>
+
+          <article class="pf-card" data-content-id="drama-002">
+            <button class="pf-card-open" onclick="openPlayerDetail('无双战神归来', 60, 60)">
+              <span class="pf-card-media">
+                <img src="https://images.unsplash.com/photo-1578328819058-b69f3a3b0f6b?w=400&auto=format&fit=crop&q=80" alt="">
+                <span class="pf-ep-badge">共 60 集</span>
+              </span>
+              <span class="pf-card-body">
+                <span class="pf-card-title">无双战神归来</span>
+                <span class="pf-card-tag">逆袭翻盘</span>
+                <span class="pf-card-synopsis">十年征战归故里，一剑平尽天下不平事。</span>
+              </span>
+            </button>
+            <button class="pf-card-share" aria-label="分享《无双战神归来》" onclick="pfShare(event, '无双战神归来')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+            </button>
+          </article>
+
+          <article class="pf-card" data-content-id="drama-003">
+            <button class="pf-card-open" onclick="openPlayerDetail('绝品神医龙婿', 78, 80)">
+              <span class="pf-card-media">
+                <img src="https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=400&auto=format&fit=crop&q=80" alt="">
+                <span class="pf-ep-badge">共 80 集</span>
+              </span>
+              <span class="pf-card-body">
+                <span class="pf-card-title">绝品神医龙婿</span>
+                <span class="pf-card-tag">都市神医</span>
+                <span class="pf-card-synopsis">妙手回春，却甘当豪门赘婿；银针一出，众生俯首。</span>
+              </span>
+            </button>
+            <button class="pf-card-share" aria-label="分享《绝品神医龙婿》" onclick="pfShare(event, '绝品神医龙婿')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+            </button>
+          </article>
+
+          <article class="pf-card" data-content-id="drama-004">
+            <button class="pf-card-open" onclick="openPlayerDetail('嫡女归来步步惊心', 30, 60)">
+              <span class="pf-card-media">
+                <img src="https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=400&auto=format&fit=crop&q=80" alt="">
+                <span class="pf-ep-badge">共 60 集</span>
+              </span>
+              <span class="pf-card-body">
+                <span class="pf-card-title">嫡女归来步步惊心</span>
+                <span class="pf-card-tag">重生复仇</span>
+                <span class="pf-card-synopsis">前世含恨而终，重生归来步步为营，权谋尽在掌中。</span>
+              </span>
+            </button>
+            <button class="pf-card-share" aria-label="分享《嫡女归来步步惊心》" onclick="pfShare(event, '嫡女归来步步惊心')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+            </button>
+          </article>
+
+          <article class="pf-card" data-content-id="drama-005">
+            <button class="pf-card-open" onclick="openPlayerDetail('隐形巨富娇妻', 42, 42)">
+              <span class="pf-card-media">
+                <img src="https://images.unsplash.com/photo-1534447677768-be436bb09401?w=400&auto=format&fit=crop&q=80" alt="">
+                <span class="pf-ep-badge">共 42 集</span>
+              </span>
+              <span class="pf-card-body">
+                <span class="pf-card-title">隐形巨富娇妻</span>
+                <span class="pf-card-tag">豪门世家</span>
+                <span class="pf-card-synopsis">她以为嫁了个穷司机，直到那天车库门全部打开。</span>
+              </span>
+            </button>
+            <button class="pf-card-share" aria-label="分享《隐形巨富娇妻》" onclick="pfShare(event, '隐形巨富娇妻')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+            </button>
+          </article>
+
+          <article class="pf-card" data-content-id="drama-006">
+            <button class="pf-card-open" onclick="openPlayerDetail('雾都疑影', 12, 12)">
+              <span class="pf-card-media">
+                <img src="https://images.unsplash.com/photo-1505686994434-e3cc5abf1330?w=400&auto=format&fit=crop&q=80" alt="">
+                <span class="pf-ep-badge">共 12 集</span>
+              </span>
+              <span class="pf-card-body">
+                <span class="pf-card-title">雾都疑影</span>
+                <span class="pf-card-tag">悬疑脑洞</span>
+                <span class="pf-card-synopsis">雨夜码头的一具无名尸，牵出十年前的旧案。</span>
+              </span>
+            </button>
+            <button class="pf-card-share" aria-label="分享《雾都疑影》" onclick="pfShare(event, '雾都疑影')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+            </button>
+          </article>
+
+          <!-- 封面缺失降级（源码 poster-fallback）：无 coverUrl 时显示占位图标而非空白 -->
+          <article class="pf-card" data-content-id="drama-007">
+            <button class="pf-card-open" onclick="openPlayerDetail('山城旧事', 20, 20)">
+              <span class="pf-card-media is-fallback">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+                <span class="pf-ep-badge">共 20 集</span>
+              </span>
+              <span class="pf-card-body">
+                <span class="pf-card-title">山城旧事</span>
+                <span class="pf-card-tag">人文纪录</span>
+                <span class="pf-card-synopsis">封面缺失时的降级占位，不出现空白方块。</span>
+              </span>
+            </button>
+            <button class="pf-card-share" aria-label="分享《山城旧事》" onclick="pfShare(event, '山城旧事')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+            </button>
+          </article>
+
+          <!-- 不可分享剧目（源码 isShareable）：分享按钮「缺席」而非置灰禁用 -->
+          <article class="pf-card" data-content-id="drama-008">
+            <button class="pf-card-open" onclick="openPlayerDetail('独家长夜', 18, 18)">
+              <span class="pf-card-media">
+                <img src="https://images.unsplash.com/photo-1478720568477-152d9b164e26?w=400&auto=format&fit=crop&q=80" alt="">
+                <span class="pf-ep-badge">共 18 集</span>
+              </span>
+              <span class="pf-card-body">
+                <span class="pf-card-title">独家长夜</span>
+                <span class="pf-card-tag">悬疑脑洞</span>
+                <span class="pf-card-synopsis">未标记 shareable，分享按钮物理缺席（非置灰）。</span>
+              </span>
+            </button>
+          </article>
+        </div>
+
+        <!-- 分页加载（源码 home-more-btn）：已载 / 总数 + revision 游标 -->
+        <div class="pf-more-host" id="pfMoreHost">
+          <button class="pf-more-btn" onclick="pfLoadMore(this)">加载更多（已载 8 / 137）</button>
+        </div>
+      </div>
+
+      <!-- ==================== 屏幕 2: 【非全屏播放详情页】(点击海报自然升起) ==================== -->
+      <div class="view-screen" id="screen-player">
+        <!-- 视频播放窗口 (高质感海报微光底片) -->
+        <div class="player-stage-wrap">
+          <!-- 高质感背景光与海报 -->
+          <div class="player-backdrop"></div>
+          <div class="player-backdrop-overlay"></div>
+
+          <!-- 播放起播微光指示标 -->
+          <div class="player-play-pulse" onclick="launchCinemaMode()">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+          </div>
+
+          <!-- 顶部操控条 (带退出返回上一页) -->
+          <div class="stage-top-bar">
+            <button class="stage-icon-btn" onclick="closePlayerDetail()">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m15 18-6-6 6-6"/></svg>
+            </button>
+            <div style="display:flex; gap:8px;">
+              <button class="stage-icon-btn" onclick="alert('已连接客厅电视 (DLNA)')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"/><path d="M2 12a9 9 0 0 1 8 8"/><path d="M2 16a5 5 0 0 1 4 4"/><line x1="2" x2="2.01" y1="20" y2="20"/></svg>
+              </button>
+              <button class="stage-icon-btn" onclick="launchCinemaMode()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- 底部微控制带 -->
+          <div class="stage-bottom-bar">
+            <span class="stage-time-label">01:24</span>
+            <div class="stage-progress-track">
+              <div class="stage-progress-fill"></div>
+            </div>
+            <span class="stage-time-label">03:15</span>
+          </div>
+        </div>
+
+        <!-- 播放器下方内容生态流 -->
+        <div class="player-detail-content">
+          <!-- 剧目名片区 -->
+          <div class="detail-header-card">
+            <div class="detail-title-row">
+              <h2 class="detail-main-title">真假千金的错位人生</h2>
+              <span class="meta-pill accent">第 3 集</span>
+            </div>
+            <div class="detail-meta-pill-row">
+              <span class="meta-pill">更新至 45 集</span>
+              <span class="meta-pill">全 80 集</span>
+              <span class="meta-pill">都市逆袭</span>
+              <span class="meta-pill">女性爽剧</span>
+            </div>
+          </div>
+
+          <!-- 折叠简介 -->
+          <div class="detail-synopsis-box" onclick="toggleSynopsis(this)">
+            <p class="detail-synopsis-text">
+              二十年前一场阴差阳错，江南首富温家千金与渔家女互换命运。二十年后，真千金温幼仪凭借一手调香绝技重回顶级豪门，面对养女步步紧逼与豪门冷眼，她步步为营，撕开伪善面具，夺回属于自己的荣耀与家族血脉真相。
+            </p>
+            <div class="synopsis-toggle-hint">
+              <span>展开完整简介</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
+            </div>
+          </div>
+
+          <!-- 核心操作工具岛 (Action Bar) -->
+          <div class="detail-action-island">
+            <button class="action-island-item active" onclick="toggleFavorite(this)">
+              <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></svg>
+              <span>已追剧</span>
+            </button>
+            <button class="action-island-item" onclick="openDownloadModal()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+              <span>缓存本集</span>
+            </button>
+            <button class="action-island-item" onclick="alert('已复制专属观影链接')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></svg>
+              <span>分享</span>
+            </button>
+            <button class="action-island-item" onclick="launchCinemaMode()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+              <span>沉浸全屏</span>
+            </button>
+          </div>
+
+          <!-- 常驻选集区 (横滑选集轨 + 呼吸高亮) -->
+          <div class="episodes-section">
+            <div class="section-title-bar">
+              <div class="section-h3">
+                <span>选集播放</span>
+                <span class="section-sub-info">(1-45集)</span>
+              </div>
+              <div class="view-all-link" onclick="openBottomSheet()">
+                <span>全部 45 集</span>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m9 18 6-6-6-6"/></svg>
+              </div>
+            </div>
+
+            <!-- 常驻横滑轨 -->
+            <div class="episodes-rail">
+              <button class="ep-rail-btn" onclick="selectEpisode(1, this)">01</button>
+              <button class="ep-rail-btn" onclick="selectEpisode(2, this)">02</button>
+              <button class="ep-rail-btn active" onclick="selectEpisode(3, this)">
+                <span>03</span>
+                <div class="ep-wave"></div>
+              </button>
+              <button class="ep-rail-btn" onclick="selectEpisode(4, this)">04</button>
+              <button class="ep-rail-btn" onclick="selectEpisode(5, this)">05</button>
+              <button class="ep-rail-btn" onclick="selectEpisode(6, this)">06</button>
+              <button class="ep-rail-btn" onclick="selectEpisode(7, this)">07</button>
+            </div>
+          </div>
+
+          <!-- 类似剧集流转区 (Related Flow) -->
+          <div class="related-section">
+            <div class="section-h3">同类好剧推荐</div>
+            <div class="related-grid">
+              <div class="related-card" onclick="openPlayerDetail('嫡女归来步步惊心', 30, 60)">
+                <div class="related-cover">
+                  <img src="https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=400&auto=format&fit=crop&q=80" alt="封面">
+                  <span class="related-tag">全60集</span>
+                </div>
+                <div class="related-body">
+                  <span class="related-title">嫡女归来步步惊心</span>
+                  <span class="related-desc">重生复仇 · 虐渣逆袭</span>
+                </div>
+              </div>
+
+              <div class="related-card" onclick="openPlayerDetail('隐形巨富娇妻', 42, 42)">
+                <div class="related-cover">
+                  <img src="https://images.unsplash.com/photo-1534447677768-be436bb09401?w=400&auto=format&fit=crop&q=80" alt="封面">
+                  <span class="related-tag">完结</span>
+                </div>
+                <div class="related-body">
+                  <span class="related-title">隐形巨富娇妻</span>
+                  <span class="related-desc">扮猪吃虎 · 打脸反转</span>
+                </div>
+              </div>
+
+              <div class="related-card" onclick="openPlayerDetail('绝品神医龙婿', 78, 80)">
+                <div class="related-cover">
+                  <img src="https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=400&auto=format&fit=crop&q=80" alt="封面">
+                  <span class="related-tag">热播中</span>
+                </div>
+                <div class="related-body">
+                  <span class="related-title">绝品神医龙婿</span>
+                  <span class="related-desc">妙手仁心 · 登临绝顶</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== 屏幕 3: 【追剧与历史】(History View) ==================== -->
+      <div class="view-screen" id="screen-history">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title">追剧</h2>
+            <p class="page-subtitle">自动记录秒级断点与收藏剧集</p>
+          </div>
+          <button class="pf-mini-btn" style="border-radius:999px;" onclick="pfToast('观看历史已清空')">清空记录</button>
+        </div>
+
+        <!-- 追剧高密度分段快捷筛选 -->
+        <div class="history-filter-rail">
+          <button class="history-filter-pill active" onclick="pfFilterHistory(this, 'all')">全部记录 (7)</button>
+          <button class="history-filter-pill" onclick="pfFilterHistory(this, 'watching')">正在追 (3)</button>
+          <button class="history-filter-pill" onclick="pfFilterHistory(this, 'fav')">想看收藏 (2)</button>
+          <button class="history-filter-pill" onclick="pfFilterHistory(this, 'finished')">已完播 (2)</button>
+        </div>
+
+        <div class="grouped-card-list">
+          <!-- 正在观看高密度大卡 -->
+          <div class="group-header">正在观看 · 自动记录断点</div>
+          <div class="inset-group">
+            <div class="history-card" onclick="openPlayerDetail('真假千金的错位人生', 45, 80)">
+              <div class="history-thumb">
+                <img src="https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=300&auto=format&fit=crop&q=80" alt="剧照">
+              </div>
+              <div class="history-info">
+                <div class="history-title">真假千金的错位人生</div>
+                <div class="history-card-badges">
+                  <span class="history-tag highlight">今日更新第80集</span>
+                  <span class="history-tag">豪门爽剧</span>
+                </div>
+                <div class="history-meta">看到第 45 集 (01:24 / 03:15) · 剩 1:51</div>
+                <div class="history-progress-bar">
+                  <div class="history-progress-fill" style="width: 48%;"></div>
+                </div>
+              </div>
+              <div class="history-resume-cta">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+                <span>续播</span>
+              </div>
+            </div>
+
+            <div class="history-card" onclick="openPlayerDetail('无双战神归来', 60, 60)">
+              <div class="history-thumb">
+                <img src="https://images.unsplash.com/photo-1578328819058-b69f3a3b0f6b?w=300&auto=format&fit=crop&q=80" alt="剧照">
+              </div>
+              <div class="history-info">
+                <div class="history-title">无双战神归来</div>
+                <div class="history-card-badges">
+                  <span class="history-tag highlight">全60集完结</span>
+                  <span class="history-tag">逆袭天下</span>
+                </div>
+                <div class="history-meta">看到第 12 集 (02:40 / 03:00) · 剩 0:20</div>
+                <div class="history-progress-bar">
+                  <div class="history-progress-fill" style="width: 88%;"></div>
+                </div>
+              </div>
+              <div class="history-resume-cta">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+                <span>续播</span>
+              </div>
+            </div>
+
+            <div class="history-card" onclick="openPlayerDetail('绝品神医龙婿', 78, 80)">
+              <div class="history-thumb">
+                <img src="https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=300&auto=format&fit=crop&q=80" alt="剧照">
+              </div>
+              <div class="history-info">
+                <div class="history-title">绝品神医龙婿</div>
+                <div class="history-card-badges">
+                  <span class="history-tag highlight">更新至78集</span>
+                  <span class="history-tag">都市医圣</span>
+                </div>
+                <div class="history-meta">看到第 3 集 (00:45 / 03:10) · 剩 2:25</div>
+                <div class="history-progress-bar">
+                  <div class="history-progress-fill" style="width: 24%;"></div>
+                </div>
+              </div>
+              <div class="history-resume-cta">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+                <span>续播</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 想看与追剧收藏 -->
+          <div class="group-header">我的追剧收藏 (2)</div>
+          <div class="inset-group">
+            <div class="group-row" onclick="openPlayerDetail('隐形巨富娇妻', 42, 42)" style="cursor:pointer;">
+              <div class="row-left">
+                <div class="row-icon">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></svg>
+                </div>
+                <div class="row-texts">
+                  <span class="row-title">隐形巨富娇妻</span>
+                  <span class="row-subtitle">全 42 集完结 · 豪门逆袭 · 暂未开播</span>
+                </div>
+              </div>
+              <button class="pf-mini-btn primary" style="border-radius:999px;">开始看</button>
+            </div>
+            <div class="group-row" onclick="openPlayerDetail('山城旧事', 20, 20)" style="cursor:pointer;">
+              <div class="row-left">
+                <div class="row-icon">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></svg>
+                </div>
+                <div class="row-texts">
+                  <span class="row-title">山城旧事</span>
+                  <span class="row-subtitle">共 20 集 · 人文纪录 · 昨日加入收藏</span>
+                </div>
+              </div>
+              <button class="pf-mini-btn primary" style="border-radius:999px;">开始看</button>
+            </div>
+          </div>
+
+          <!-- 往期完播高密度呈现 -->
+          <div class="group-header">往期完播记录</div>
+          <div class="inset-group">
+            <div class="group-row">
+              <div class="row-left">
+                <div class="row-texts">
+                  <span class="row-title">嫡女归来步步惊心</span>
+                  <span class="row-subtitle">全 60 集已看完全集 · 观看耗时 2.8 小时 · 3天前完播</span>
+                </div>
+              </div>
+              <div class="pf-row-actions">
+                <button class="pf-mini-btn" onclick="pfToast('已从第 1 集重新播放')">重温</button>
+                <button class="pf-mini-btn" onclick="openPlayerDetail('嫡女归来步步惊心', 30, 60)">详情</button>
+              </div>
+            </div>
+            <div class="group-row">
+              <div class="row-left">
+                <div class="row-texts">
+                  <span class="row-title">雾都疑影</span>
+                  <span class="row-subtitle">全 12 集已看完全集 · 悬疑脑洞 · 上周完播</span>
+                </div>
+              </div>
+              <div class="pf-row-actions">
+                <button class="pf-mini-btn" onclick="pfToast('已从第 1 集重新播放')">重温</button>
+                <button class="pf-mini-btn" onclick="openPlayerDetail('雾都疑影', 12, 12)">详情</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 同类好剧高密度横滑 -->
+          <div class="group-header">依你的偏好推荐</div>
+          <div class="inset-group">
+            <div class="pf-related-rail">
+              <div class="pf-mini-poster" onclick="openPlayerDetail('绝品神医龙婿', 78, 80)">
+                <img src="https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=300&auto=format&fit=crop&q=80" alt="">
+                <span class="pf-mini-title">绝品神医龙婿</span>
+                <span class="pf-mini-meta">共 80 集 · 9.8分</span>
+              </div>
+              <div class="pf-mini-poster" onclick="openPlayerDetail('嫡女归来步步惊心', 30, 60)">
+                <img src="https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=300&auto=format&fit=crop&q=80" alt="">
+                <span class="pf-mini-title">嫡女归来步步惊心</span>
+                <span class="pf-mini-meta">共 60 集 · 热榜TOP1</span>
+              </div>
+              <div class="pf-mini-poster" onclick="openPlayerDetail('雾都疑影', 12, 12)">
+                <img src="https://images.unsplash.com/photo-1505686994434-e3cc5abf1330?w=300&auto=format&fit=crop&q=80" alt="">
+                <span class="pf-mini-title">雾都疑影</span>
+                <span class="pf-mini-meta">共 12 集 · 悬疑神作</span>
+              </div>
+              <div class="pf-mini-poster" onclick="openPlayerDetail('独家长夜', 18, 18)">
+                <img src="https://images.unsplash.com/photo-1478720568477-152d9b164e26?w=300&auto=format&fit=crop&q=80" alt="">
+                <span class="pf-mini-title">独家长夜</span>
+                <span class="pf-mini-meta">全 18 集 · 爆款精选</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 本地公开缓存 -->
+          <div class="group-header">存储管理</div>
+          <div class="inset-group">
+            <div class="group-row">
+              <div class="row-left">
+                <div class="row-icon">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                </div>
+                <div class="row-texts">
+                  <span class="row-title">公开目录与海报缓存</span>
+                  <span class="row-subtitle">已占用 12.4 MB · 上限 256 MB (加速离线秒开)</span>
+                </div>
+              </div>
+              <button class="pf-mini-btn primary" onclick="pfToast('缓存已安全清理')">清理缓存</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== 屏幕 4: 【搜索与探索】(Search View) ==================== -->
+      <div class="view-screen" id="screen-search">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title">全域搜索</h2>
+            <p class="page-subtitle">毫秒级检索全网剧名、演员与热门题材</p>
+          </div>
+          <button class="pf-mini-btn" style="border-radius:999px;" onclick="switchNav('home')">返回大视界</button>
+        </div>
+
+        <!-- 搜索输入条 -->
+        <div class="search-input-pill">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input type="text" class="search-input-field" id="pfSearchInput" placeholder="输入剧名 / 题材关键词" value="战神">
+          <button class="search-submit-btn" onclick="pfToast('已按「' + document.getElementById('pfSearchInput').value + '」检索')">搜索</button>
+        </div>
+
+        <div class="grouped-card-list" style="padding-top:0;">
+          <!-- 最近搜索历史 (可单点直达) -->
+          <div style="display:flex; align-items:center; justify-content:space-between; padding:4px 6px 2px;">
+            <span class="group-header" style="padding:0;">最近搜索</span>
+            <span style="font-size:11px; color:var(--muted); cursor:pointer;" onclick="pfToast('搜索历史已清空')">清空</span>
+          </div>
+          <div class="inset-group">
+            <div class="search-chip-group">
+              <span class="search-chip hot" onclick="document.getElementById('pfSearchInput').value='战神归来'">战神归来</span>
+              <span class="search-chip hot" onclick="document.getElementById('pfSearchInput').value='真假千金'">真假千金</span>
+              <span class="search-chip" onclick="document.getElementById('pfSearchInput').value='都市神医'">都市神医</span>
+              <span class="search-chip" onclick="document.getElementById('pfSearchInput').value='重生嫡女'">重生嫡女</span>
+              <span class="search-chip" onclick="document.getElementById('pfSearchInput').value='隐形巨富'">隐形巨富</span>
+            </div>
+          </div>
+
+          <!-- 全网热搜风云榜 (高密度双列 TOP 6) -->
+          <div class="group-header">热搜风云榜 · 实时上升</div>
+          <div class="search-ranking-grid">
+            <div class="search-rank-item" onclick="document.getElementById('pfSearchInput').value='无双战神归来'; pfToast('已载入榜单剧目')">
+              <span class="search-rank-num top1">1</span>
+              <span class="search-rank-name">无双战神归来</span>
+              <span class="search-rank-heat">185万</span>
+            </div>
+            <div class="search-rank-item" onclick="document.getElementById('pfSearchInput').value='真假千金错位'; pfToast('已载入榜单剧目')">
+              <span class="search-rank-num top2">2</span>
+              <span class="search-rank-name">真假千金错位</span>
+              <span class="search-rank-heat">142万</span>
+            </div>
+            <div class="search-rank-item" onclick="document.getElementById('pfSearchInput').value='绝品神医龙婿'; pfToast('已载入榜单剧目')">
+              <span class="search-rank-num top3">3</span>
+              <span class="search-rank-name">绝品神医龙婿</span>
+              <span class="search-rank-heat">118万</span>
+            </div>
+            <div class="search-rank-item" onclick="document.getElementById('pfSearchInput').value='嫡女归来步步惊心'; pfToast('已载入榜单剧目')">
+              <span class="search-rank-num">4</span>
+              <span class="search-rank-name">嫡女归来步步惊心</span>
+              <span class="search-rank-heat">96万</span>
+            </div>
+            <div class="search-rank-item" onclick="document.getElementById('pfSearchInput').value='隐形巨富娇妻'; pfToast('已载入榜单剧目')">
+              <span class="search-rank-num">5</span>
+              <span class="search-rank-name">隐形巨富娇妻</span>
+              <span class="search-rank-heat">84万</span>
+            </div>
+            <div class="search-rank-item" onclick="document.getElementById('pfSearchInput').value='雾都疑影'; pfToast('已载入榜单剧目')">
+              <span class="search-rank-num">6</span>
+              <span class="search-rank-name">雾都疑影</span>
+              <span class="search-rank-heat">71万</span>
+            </div>
+          </div>
+
+          <!-- 热门题材分类矩阵 -->
+          <div class="group-header">题材快速探索</div>
+          <div class="inset-group">
+            <div class="search-topic-grid">
+              <button class="search-topic-btn" onclick="document.getElementById('pfSearchInput').value='逆袭翻盘'">逆袭翻盘</button>
+              <button class="search-topic-btn" onclick="document.getElementById('pfSearchInput').value='豪门世家'">豪门世家</button>
+              <button class="search-topic-btn" onclick="document.getElementById('pfSearchInput').value='都市神医'">都市神医</button>
+              <button class="search-topic-btn" onclick="document.getElementById('pfSearchInput').value='重生复仇'">重生复仇</button>
+              <button class="search-topic-btn" onclick="document.getElementById('pfSearchInput').value='悬疑脑洞'">悬疑脑洞</button>
+              <button class="search-topic-btn" onclick="document.getElementById('pfSearchInput').value='人文纪录'">人文纪录</button>
+            </div>
+          </div>
+
+          <!-- 匹配结果 (4 部高密度卡片) -->
+          <div style="display:flex; align-items:center; justify-content:space-between; padding:4px 6px 2px;">
+            <span class="group-header" style="padding:0;">匹配片单 (4)</span>
+            <span style="font-size:11px; color:var(--accent); font-weight:600;">按热度排序 ▾</span>
+          </div>
+          <div class="inset-group">
+            <div class="search-result-card" onclick="openPlayerDetail('无双战神归来', 60, 60)">
+              <div class="search-result-thumb">
+                <img src="https://images.unsplash.com/photo-1578328819058-b69f3a3b0f6b?w=300&auto=format&fit=crop&q=80" alt="">
+              </div>
+              <div class="search-result-info">
+                <span class="search-result-title">无双战神归来</span>
+                <span class="search-result-meta">全 60 集 · 逆袭翻盘 · 剧名精确命中 · 9.9分</span>
+              </div>
+              <button class="pf-mini-btn primary" style="border-radius:999px; height:26px; padding:0 10px;">播放</button>
+            </div>
+
+            <div class="search-result-card" onclick="openPlayerDetail('战神殿狂飙战王', 32, 80)">
+              <div class="search-result-thumb">
+                <img src="https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=300&auto=format&fit=crop&q=80" alt="">
+              </div>
+              <div class="search-result-info">
+                <span class="search-result-title">战神殿狂飙战王</span>
+                <span class="search-result-meta">更新至 32 集 / 共 80 集 · 别名命中 · 9.6分</span>
+              </div>
+              <button class="pf-mini-btn primary" style="border-radius:999px; height:26px; padding:0 10px;">播放</button>
+            </div>
+
+            <div class="search-result-card" onclick="openPlayerDetail('战神归来之绝顶锋芒', 45, 45)">
+              <div class="search-result-thumb">
+                <img src="https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=300&auto=format&fit=crop&q=80" alt="">
+              </div>
+              <div class="search-result-info">
+                <span class="search-result-title">战神归来之绝顶锋芒</span>
+                <span class="search-result-meta">全 45 集完结 · 豪门战神 · 简介命中</span>
+              </div>
+              <button class="pf-mini-btn primary" style="border-radius:999px; height:26px; padding:0 10px;">播放</button>
+            </div>
+
+            <div class="search-result-card" onclick="openPlayerDetail('龙王战神之狂飙都市', 50, 50)">
+              <div class="search-result-thumb">
+                <img src="https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=300&auto=format&fit=crop&q=80" alt="">
+              </div>
+              <div class="search-result-info">
+                <span class="search-result-title">龙王战神之狂飙都市</span>
+                <span class="search-result-meta">全 50 集完结 · 都市神医 · 关联剧目</span>
+              </div>
+              <button class="pf-mini-btn primary" style="border-radius:999px; height:26px; padding:0 10px;">播放</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== 屏幕 5: 【设置与系统偏好】(Settings View) ==================== -->
+      <div class="view-screen" id="screen-settings">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title">设置</h2>
+            <p class="page-subtitle">播放偏好与系统配置</p>
+          </div>
+        </div>
+
+        <div class="grouped-card-list">
+          <div class="group-header">外观</div>
+          <div class="inset-group">
+            <div class="group-row">
+              <div class="row-left">
+                <div class="row-icon">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+                </div>
+                <div class="row-texts">
+                  <span class="row-title">日夜双模主题</span>
+                  <span class="row-subtitle">黑曜石深色 / 象牙浅白即时切换</span>
+                </div>
+              </div>
+              <div class="ios-switch active" onclick="toggleTheme(); this.classList.toggle('active')">
+                <div class="switch-thumb"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="group-header">视听体验</div>
+          <div class="inset-group">
+            <div class="group-row">
+              <div class="row-left">
+                <div class="row-icon">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                </div>
+                <div class="row-texts">
+                  <span class="row-title">后台 / 息屏播放</span>
+                  <span class="row-subtitle">锁屏或切回桌面时持续音频流</span>
+                </div>
+              </div>
+              <div class="ios-switch active" onclick="this.classList.toggle('active')">
+                <div class="switch-thumb"></div>
+              </div>
+            </div>
+
+            <div class="group-row">
+              <div class="row-left">
+                <div class="row-icon">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                </div>
+                <div class="row-texts">
+                  <span class="row-title">来电自动暂停</span>
+                  <span class="row-subtitle">通话呼入时暂停并记录断点</span>
+                </div>
+              </div>
+              <div class="ios-switch active" onclick="this.classList.toggle('active')">
+                <div class="switch-thumb"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="group-header">卡密与会员</div>
+          <div class="inset-group">
+            <div class="group-row">
+              <div class="row-left">
+                <div class="row-icon" style="background:var(--accent-subtle); color:var(--accent);">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/></svg>
+                </div>
+                <div class="row-texts">
+                  <span class="row-title">当前版本身份</span>
+                  <span class="row-subtitle">季度畅享卡 · 剩余 84 天</span>
+                </div>
+              </div>
+              <span class="meta-pill accent">有效</span>
+            </div>
+            <div class="group-row">
+              <input class="pf-code-input" id="pfRedeemInput" type="text" placeholder="输入卡密（如 GY-XXXXXXXX）" value="">
+              <button class="pf-mini-btn primary" onclick="pfToast('卡密核销成功，已写入凭证')">核销</button>
+            </div>
+          </div>
+
+          <div class="group-header">版本与更新</div>
+          <div class="inset-group">
+            <div class="group-row">
+              <div class="row-left">
+                <div class="row-icon">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                </div>
+                <div class="row-texts">
+                  <span class="row-title">当前版本</span>
+                  <span class="row-subtitle">dev_v2.1.1.1</span>
+                </div>
+              </div>
+              <button class="pf-mini-btn" onclick="pfToast('已检测：当前为最新版本 dev_v2.1.1.1')">检查更新</button>
+            </div>
+            <div class="group-row">
+              <div class="row-left">
+                <div class="row-icon">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                </div>
+                <div class="row-texts">
+                  <span class="row-title">Android 最新版本</span>
+                  <span class="row-subtitle">v2.1.0 · 推荐升级</span>
+                </div>
+              </div>
+              <button class="pf-mini-btn primary" onclick="pfToast('开始下载 Android 安装包')">下载安装包</button>
+            </div>
+          </div>
+
+          <div class="group-header">隐私与安全</div>
+          <div class="inset-group">
+            <div class="group-row">
+              <div class="row-left">
+                <div class="row-icon">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                </div>
+                <div class="row-texts">
+                  <span class="row-title">个人探索（隐私模式）</span>
+                  <span class="row-subtitle">当次会话有效 · 冷启动默认关闭</span>
+                </div>
+              </div>
+              <div class="ios-switch" id="pfPrivateSwitch" onclick="pfPrivateToggle(this)">
+                <div class="switch-thumb"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="group-header">系统诊断</div>
+          <div class="inset-group">
+            <div class="group-row">
+              <div class="row-left">
+                <div class="row-icon">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/></svg>
+                </div>
+                <div class="row-texts">
+                  <span class="row-title">接口与网络</span>
+                  <span class="row-subtitle">play.prismos.org · 网络已连接</span>
+                </div>
+              </div>
+              <div class="pf-row-actions">
+                <button class="pf-mini-btn" onclick="pfToast('诊断信息已刷新')">刷新</button>
+                <button class="pf-mini-btn primary" onclick="pfToast('日志已复制到剪贴板')">复制日志</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 个人探索免责声明（源码：开启前强制二次确认，拒绝则开关保持关闭） -->
+      <div class="pf-dialog-mask" id="pfPrivateDialog" hidden onclick="pfPrivateDecline()">
+        <div class="pf-dialog" onclick="event.stopPropagation()">
+          <span class="pf-dialog-title">开启前确认</span>
+          <p class="pf-dialog-text">个人探索为当次会话手动开启：开启态只存内存，冷启动默认关闭，不写观看历史、不参与离线缓存与分享。请确认你已年满 18 岁，并知悉服务端只能记录本次显式开启请求。</p>
+          <div class="pf-dialog-actions">
+            <button class="pf-mini-btn" onclick="pfPrivateDecline()">拒绝并放弃</button>
+            <button class="pf-mini-btn primary" onclick="pfPrivateAccept()">我已满 18 岁，确认开启</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ==================== 底部主导航 TabBar (4 大规范 Tab) ==================== -->
+    <nav class="bottom-tabbar">
+      <button class="tab-item is-active" id="tab-home" onclick="switchNav('home')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
+        <span>大视界</span>
+      </button>
+      <button class="tab-item" id="tab-history" onclick="switchNav('history')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        <span>追剧</span>
+      </button>
+      <button class="tab-item" id="tab-search" onclick="switchNav('search')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <span>搜索</span>
+      </button>
+      <button class="tab-item" id="tab-settings" onclick="switchNav('settings')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span>设置</span>
+      </button>
+    </nav>
+
+    <!-- 底部半屏数字选集抽屉 (Bottom Sheet) -->
+    <div class="bottom-sheet-backdrop" id="bottom-sheet" onclick="closeBottomSheet(event)">
+      <div class="bottom-sheet-panel" onclick="event.stopPropagation()">
+        <div class="sheet-handle-bar"></div>
+        <div class="sheet-header">
+          <span style="font-size:15px; font-weight:800; color:var(--fg);">选集 (全 45 集)</span>
+          <button style="background:none; border:0; color:var(--muted); font-size:13px; font-weight:600; cursor:pointer;" onclick="closeBottomSheet(null)">关闭</button>
+        </div>
+        <div class="sheet-grid">
+          <button class="sheet-ep-btn" onclick="selectEpisode(1)">01</button>
+          <button class="sheet-ep-btn" onclick="selectEpisode(2)">02</button>
+          <button class="sheet-ep-btn active" onclick="selectEpisode(3)">03</button>
+          <button class="sheet-ep-btn" onclick="selectEpisode(4)">04</button>
+          <button class="sheet-ep-btn" onclick="selectEpisode(5)">05</button>
+          <button class="sheet-ep-btn" onclick="selectEpisode(6)">06</button>
+          <button class="sheet-ep-btn" onclick="selectEpisode(7)">07</button>
+          <button class="sheet-ep-btn" onclick="selectEpisode(8)">08</button>
+          <button class="sheet-ep-btn" onclick="selectEpisode(9)">09</button>
+          <button class="sheet-ep-btn" onclick="selectEpisode(10)">10</button>
+          <button class="sheet-ep-btn" onclick="selectEpisode(11)">11</button>
+          <button class="sheet-ep-btn" onclick="selectEpisode(12)">12</button>
+          <button class="sheet-ep-btn" onclick="selectEpisode(13)">13</button>
+          <button class="sheet-ep-btn" onclick="selectEpisode(14)">14</button>
+          <button class="sheet-ep-btn" onclick="selectEpisode(15)">15</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 全屏沉浸影院模式遮罩 (Cinema Fullscreen) -->
+    <div class="cinema-fullscreen-layer" id="cinema-fullscreen">
+      <div class="cinema-video-mock"></div>
+
+      <!-- 长按 2.0x 随动快进指示标 (演示微动效) -->
+      <div class="longpress-hud">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="13 19 22 12 13 5 13 19"/><polygon points="2 19 11 12 2 5 2 19"/></svg>
+        <span>长按 2.0X 极速快进中</span>
+      </div>
+
+      <!-- 顶部沉浸 Scrim 渐变栏 -->
+      <div class="cinema-scrim-top">
+        <button class="stage-icon-btn" onclick="exitCinemaMode()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m15 18-6-6 6-6"/></svg>
+        </button>
+        <div class="cinema-title-wrap">
+          <span class="cinema-title">真假千金的错位人生</span>
+          <span class="cinema-ep-label">第 3 集 · 1080P 高清</span>
+        </div>
+        <button class="stage-icon-btn" onclick="alert('全屏手势锁已启用')">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        </button>
+      </div>
+
+      <!-- 底部沉浸 Scrim 渐变控制带 -->
+      <div class="cinema-scrim-bottom">
+        <div class="stage-progress-track">
+          <div class="stage-progress-fill" style="width: 58%;"></div>
+        </div>
+        <div class="cinema-bottom-controls">
+          <span class="stage-time-label">01:54 / 03:15</span>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <button class="cinema-speed-pill" onclick="alert('切换倍速: 1.0x / 1.25x / 1.5x / 2.0x')">倍速 1.0x</button>
+            <button class="cinema-speed-pill" onclick="openBottomSheet()">选集 (45)</button>
+            <button class="stage-icon-btn" style="width:30px; height:30px;" onclick="exitCinemaMode()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 底部物理 Home 指示条 -->
+    <div class="chassis-home-bar"></div>
+  </div>
+
+  <!-- ==================== 原型交互驱动脚本 ==================== -->
+  <script>
+    let previousNavTab = 'home';
+
+    // 1. 主导航 Tab 切换
+    /* ===================== 首页功能保真层交互 (1:1 对齐 src/views/home-view.ts) ===================== */
+    let PF_GRID_SNAPSHOT = null;
+
+    function pfSnapshotGrid() {
+      const grid = document.getElementById('pfGrid');
+      if (grid !== null && PF_GRID_SNAPSHOT === null) PF_GRID_SNAPSHOT = grid.innerHTML;
+    }
+
+    function pfToast(text) {
+      const host = document.querySelector('.app-viewport');
+      if (host === null) return;
+      let node = host.querySelector('.pf-toast');
+      if (node === null) {
+        node = document.createElement('div');
+        node.className = 'pf-toast';
+        host.appendChild(node);
+      }
+      node.textContent = text;
+      node.classList.add('is-on');
+      window.clearTimeout(node.dataset.timer ? Number(node.dataset.timer) : 0);
+      const timer = window.setTimeout(() => node.classList.remove('is-on'), 1800);
+      node.dataset.timer = String(timer);
+    }
+
+    function pfIcon(name) {
+      const paths = {
+        inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+        offline: '<path d="m2 2 20 20"/><path d="M8.5 16.5a5 5 0 0 1 7 0"/><path d="M5 12.55a11 11 0 0 1 5.17-2.39"/><path d="M19 12.55a11 11 0 0 0-6.4-3.1"/><path d="M12 20h.01"/>',
+        error: '<path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>',
+        disabled: '<rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>'
+      };
+      return '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + (paths[name] || paths.inbox) + '</svg>';
+    }
+
+    function pfActiveMode() {
+      const active = document.querySelector('.pf-mode-icon-btn.is-active');
+      return active === null ? 'compact-3' : active.dataset.mode;
+    }
+
+    const PF_CHANNEL_TITLES = { drama: '短剧精选', movie: '院线电影', anime: '热血动漫', doc: '人文纪录' };
+
+    function pfChannel(btn) {
+      for (const el of document.querySelectorAll('.pf-channel')) {
+        const on = el === btn;
+        el.classList.toggle('is-active', on);
+        if (on) el.setAttribute('aria-current', 'true');
+        else el.removeAttribute('aria-current');
+      }
+      const title = document.getElementById('pfChannelTitle');
+      if (title !== null) title.textContent = PF_CHANNEL_TITLES[btn.dataset.channel] || '大视界';
+      // 源码语义：换频道 → 分类重置为「全部」、清空分页游标并重拉目录
+      for (const pill of Array.from(document.querySelectorAll('.pf-capsule'))) {
+        pill.classList.toggle('is-active', pill.textContent.trim() === '全部');
+      }
+      pfState('loading');
+      window.setTimeout(() => pfState('ready'), 850);
+    }
+
+    function pfCapsule(btn) {
+      for (const el of document.querySelectorAll('.pf-capsule')) {
+        const on = el === btn;
+        el.classList.toggle('is-active', on);
+        if (on) el.setAttribute('aria-current', 'true');
+        else el.removeAttribute('aria-current');
+      }
+      pfState('loading');
+      window.setTimeout(() => pfState('ready'), 700);
+    }
+
+    function pfModeIcon(btn) {
+      for (const el of document.querySelectorAll('.pf-mode-icon-btn')) {
+        const on = el === btn;
+        el.classList.toggle('is-active', on);
+        el.setAttribute('aria-pressed', String(on));
+      }
+      const grid = document.getElementById('pfGrid');
+      if (grid !== null) grid.dataset.mode = btn.dataset.mode;
+    }
+
+    let pfLoaded = 8;
+    function pfLoadMore(btn) {
+      btn.disabled = true;
+      btn.textContent = '加载中…';
+      window.setTimeout(() => {
+        pfLoaded = Math.min(137, pfLoaded + 8);
+        btn.disabled = false;
+        btn.textContent = '加载更多（已载 ' + pfLoaded + ' / 137）';
+        // 源码口径：items.length >= total 时不再渲染该按钮
+        if (pfLoaded >= 137) btn.parentElement.hidden = true;
+      }, 800);
+    }
+
+    function pfShare(event, title) {
+      event.stopPropagation();
+      pfToast('已复制《' + title + '》分享链接 /s/:id（源码：仅 shareable 且非私密）');
+    }
+
+    function pfFilterHistory(btn, filter) {
+      for (const el of document.querySelectorAll('.history-filter-pill')) {
+        el.classList.toggle('active', el === btn);
+      }
+      pfToast('已筛选：' + btn.textContent.trim());
+    }
+
+    /* 个人探索：源码语义 —— 冷启动默认关闭；开启前强制免责二次确认，拒绝则保持关闭 */
+    function pfPrivateToggle(node) {
+      const dialog = document.getElementById('pfPrivateDialog');
+      if (node.classList.contains('active')) {
+        node.classList.remove('active');
+        pfToast('已关闭个人探索（开启态仅存内存，冷启动默认关闭）');
+        return;
+      }
+      if (dialog !== null) dialog.hidden = false;
+    }
+
+    function pfPrivateAccept() {
+      const dialog = document.getElementById('pfPrivateDialog');
+      if (dialog !== null) dialog.hidden = true;
+      const sw = document.getElementById('pfPrivateSwitch');
+      if (sw !== null) sw.classList.add('active');
+      pfToast('已开启本次会话的个人探索（不写历史、不可分享）');
+    }
+
+    function pfPrivateDecline() {
+      const dialog = document.getElementById('pfPrivateDialog');
+      if (dialog !== null) dialog.hidden = true;
+      const sw = document.getElementById('pfPrivateSwitch');
+      if (sw !== null) sw.classList.remove('active');
+      pfToast('未开启个人探索：拒绝免责声明后开关保持关闭');
+    }
+
+    function pfState(kind) {
+      const grid = document.getElementById('pfGrid');
+      const more = document.getElementById('pfMoreHost');
+      if (grid === null) return;
+
+      if (kind === 'loading') {
+        pfSnapshotGrid();
+        let html = '';
+        for (let i = 0; i < 12; i += 1) {
+          html += '<div class="pf-skeleton-card"><span class="pf-skeleton-media"></span><span class="pf-skeleton-line"></span><span class="pf-skeleton-line pf-skeleton-line--short"></span></div>';
+        }
+        grid.dataset.mode = pfActiveMode();
+        grid.innerHTML = html;
+        if (more !== null) more.hidden = true;
+        return;
+      }
+
+      if (kind === 'ready') {
+        if (PF_GRID_SNAPSHOT !== null) grid.innerHTML = PF_GRID_SNAPSHOT;
+        grid.dataset.mode = pfActiveMode();
+        if (more !== null) more.hidden = false;
+        return;
+      }
+
+      const states = {
+        empty: { icon: 'inbox', title: '该视界暂无可播放剧目', detail: '该视界尚未上架内容，换个频道或稍后再来。', action: '返回短剧精选' },
+        offline: { icon: 'offline', title: '网络未连接', detail: '目录需联网获取；本机缓存只加速公开目录与海报浏览，不替代联网取流。', action: '重新加载' },
+        error: { icon: 'error', title: '目录加载失败', detail: '边缘服务暂时不可用，已回退到本地快照（revision 不一致）。', action: '重试' },
+        disabled: { icon: 'disabled', title: '没有可展示的视界频道', detail: '云端未下发任何频道节点，请稍后重新加载拓扑。', action: '重新加载' }
+      };
+      const state = states[kind];
+      if (state === undefined) return;
+      grid.innerHTML =
+        '<div class="pf-state">' +
+        '<span class="pf-state-icon">' + pfIcon(state.icon) + '</span>' +
+        '<span class="pf-state-title">' + state.title + '</span>' +
+        '<span class="pf-state-detail">' + state.detail + '</span>' +
+        '<button class="pf-state-action" onclick="pfState(\'ready\')">' + state.action + '</button>' +
+        '</div>';
+      if (more !== null) more.hidden = true;
+    }
+
+    function switchNav(tabId) {
+      document.querySelectorAll('.view-screen').forEach(el => el.classList.remove('is-active'));
+      document.querySelectorAll('.tab-item').forEach(el => el.classList.remove('is-active'));
+
+      const targetScreen = document.getElementById('screen-' + tabId);
+      const targetTab = document.getElementById('tab-' + tabId);
+
+      if (targetScreen) targetScreen.classList.add('is-active');
+      if (targetTab) targetTab.classList.add('is-active');
+
+      if (tabId !== 'player') {
+        previousNavTab = tabId;
+      }
+    }
+
+    // 2. 打开指定剧目详情 (从任何海报自然滑入播放详情页)
+    function openPlayerDetail(title, epCurrent, epTotal) {
+      document.querySelectorAll('.view-screen').forEach(el => el.classList.remove('is-active'));
+      const playerScreen = document.getElementById('screen-player');
+      if (playerScreen) playerScreen.classList.add('is-active');
+
+      // 更新剧名
+      const titleEl = document.querySelector('.detail-main-title');
+      if (titleEl) titleEl.textContent = title;
+    }
+
+    // 3. 退出播放详情页回到上一页
+    function closePlayerDetail() {
+      switchNav(previousNavTab || 'home');
+    }
+
+    // 4. 主题切换 (黑曜石深色 / 象牙浅白)
+    function toggleTheme() {
+      const html = document.documentElement;
+      const current = html.getAttribute('data-theme') || 'dark';
+      const next = current === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-theme', next);
+    }
+
+    // 5. 频道与胶囊筛选高亮微交互
+    function filterChannel(el) {
+      document.querySelectorAll('.channel-tab').forEach(t => t.classList.remove('is-active'));
+      el.classList.add('is-active');
+    }
+
+    function filterCapsule(el) {
+      document.querySelectorAll('.capsule-pill').forEach(t => t.classList.remove('is-active'));
+      el.classList.add('is-active');
+    }
+
+    // 6. 简介折叠/展开交互
+    function toggleSynopsis(box) {
+      box.classList.toggle('is-expanded');
+      const hint = box.querySelector('.synopsis-toggle-hint span');
+      if (hint) {
+        hint.textContent = box.classList.contains('is-expanded') ? '收起简介' : '展开完整简介';
+      }
+    }
+
+    // 7. 追剧状态切换
+    function toggleFavorite(btn) {
+      btn.classList.toggle('active');
+      const span = btn.querySelector('span');
+      if (span) {
+        span.textContent = btn.classList.contains('active') ? '已追剧' : '追剧';
+      }
+    }
+
+    // 8. 选集切换
+    function selectEpisode(epNum, btnEl) {
+      document.querySelectorAll('.ep-rail-btn, .sheet-ep-btn').forEach(btn => {
+        btn.classList.remove('active');
+        const wave = btn.querySelector('.ep-wave');
+        if (wave) wave.remove();
+      });
+
+      if (btnEl) {
+        btnEl.classList.add('active');
+        const wave = document.createElement('div');
+        wave.className = 'ep-wave';
+        btnEl.appendChild(wave);
+      }
+
+      const pill = document.querySelector('.meta-pill.accent');
+      if (pill) pill.textContent = `第 ${epNum} 集`;
+
+      closeBottomSheet(null);
+    }
+
+    // 9. 底部半屏数字选集面板开关
+    function openBottomSheet() {
+      document.getElementById('bottom-sheet').classList.add('is-open');
+    }
+
+    function closeBottomSheet(e) {
+      if (!e || e.target.id === 'bottom-sheet') {
+        document.getElementById('bottom-sheet').classList.remove('is-open');
+      }
+    }
+
+    // 10. 全屏沉浸影院模式
+    function launchCinemaMode() {
+      document.getElementById('cinema-fullscreen').classList.add('is-open');
+    }
+
+    function exitCinemaMode() {
+      document.getElementById('cinema-fullscreen').classList.remove('is-open');
+    }
+
+    // 11. 本地缓存弹窗模拟
+    function openDownloadModal() {
+      alert('已将当前第 3 集添加至本地离线下载队列（离线零流量可播）');
+    }
+  </script>
+</body>
+</html>

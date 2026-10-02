@@ -206,24 +206,31 @@ select {
   line-height: var(--leading-snug);
 }
 
-/* ---- 播放浮层：全屏黑底宿主，退出条压在安全区之上 ---- */
+/* ---- 播放浮层：全屏宿主，支持非全屏详情生态台与全屏切换 ---- */
 .prism-player-host {
   position: fixed;
   inset: 0;
   z-index: 200;
-  display: grid;
-  grid-template-rows: auto 1fr;
-  background: var(--player-bg);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--bg);
+  -webkit-overflow-scrolling: touch;
 }
 
 .prism-player-host__bar {
+  flex: none;
   display: flex;
   align-items: center;
   gap: var(--space-3);
   min-height: var(--header-height);
   padding: calc(env(safe-area-inset-top, 0px) + var(--space-1)) var(--space-4) var(--space-1);
-  background: var(--player-hud-bg);
-  border-bottom: 1px solid var(--player-hud-border);
+  background: var(--surface-overlay);
+  border-bottom: 1px solid var(--border-subtle);
+  position: sticky;
+  top: 0;
+  z-index: 30;
 }
 
 .prism-player-host__exit {
@@ -233,19 +240,202 @@ select {
   border: 0;
   color: var(--fg);
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
 }
 
 .prism-player-host__title {
   font-size: var(--text-sm);
-  color: var(--fg-2);
+  font-weight: 600;
+  color: var(--fg);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .prism-player-host__stage {
-  min-height: 0;
+  flex: none;
   width: 100%;
+  background: #000;
+}
+
+/* 非全屏剧集详情生态台 (Portrait Media Stage) */
+.prism-player-host__body {
+  flex: 1 1 auto;
+  padding: 14px 16px calc(24px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--bg);
+}
+
+.prism-player-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.prism-player-info__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.prism-player-info__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--fg);
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prism-player-info__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.prism-player-info__tag {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  background: var(--surface);
+  color: var(--muted);
+  border: 1px solid var(--border-subtle);
+}
+.prism-player-info__tag.is-accent {
+  background: var(--accent-subtle);
+  color: var(--accent);
+  border-color: rgba(229, 169, 60, 0.3);
+}
+
+.prism-player-info__synopsis-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.prism-player-info__synopsis {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.prism-player-info__synopsis.is-collapsed {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.prism-player-info__expand-btn {
+  align-self: flex-start;
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+/* 操作工具岛 */
+.prism-player-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.prism-player-action-btn {
+  flex: 1;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  color: var(--fg-2);
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.prism-player-action-btn:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+.prism-player-action-btn.is-active {
+  background: var(--accent-subtle);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 常驻选集横滑轨 */
+.prism-player-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.prism-player-rail__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.prism-player-rail__title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--fg);
+}
+.prism-player-rail__all-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+}
+.prism-player-rail__list {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: none;
+}
+.prism-player-rail__list::-webkit-scrollbar {
+  display: none;
+}
+.prism-player-rail__pill {
+  flex: none;
+  width: 52px;
+  height: 44px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  color: var(--fg-2);
+  font-size: 14px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.prism-player-rail__pill:hover {
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+.prism-player-rail__pill.is-current {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-on);
+  box-shadow: 0 0 10px rgba(229, 169, 60, 0.4);
 }
 
 @media (min-width: 768px) {

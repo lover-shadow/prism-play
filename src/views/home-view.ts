@@ -15,6 +15,7 @@ import { POSTER_MODE_LABEL, isPosterMode, type PosterMode } from '../core/state/
 import { ALL_CATEGORIES_LABEL, createCapsuleRail } from '../components/capsule-rail';
 import { createChannelBar, DEFAULT_CHANNEL_ID, pickDefaultChannel } from '../components/channel-bar';
 import { createContinueCard } from '../components/continue-card';
+import { icon } from '../components/icons';
 import { createModeSwitch, createPosterGrid } from '../components/poster-grid';
 import {
   clearChildren,
@@ -49,6 +50,7 @@ export interface HomeViewDeps {
    */
   onChannelChange?: (channel: ChannelItem | null) => void;
   pageSize?: number;
+  onSearch?: () => void;
 }
 
 export interface HomeView {
@@ -69,10 +71,33 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
     const sticky = element('div', 'home-sticky');
     const channelHost = element('div', 'home-channel-host');
     const railHost = element('div', 'home-capsule-host');
+    const searchBar = element('div', 'home-search-bar');
+    searchBar.setAttribute('role', 'button');
+    searchBar.setAttribute('tabindex', '0');
+    searchBar.setAttribute('aria-label', '搜索全网剧目');
+    searchBar.innerHTML = `<span class="home-search-lead">${icon('search', { size: 16 })}<span>搜索剧名 / 题材</span></span>`;
+    searchBar.addEventListener('click', () => {
+      if (deps.onSearch) deps.onSearch();
+      else {
+        const btn = document.querySelector<HTMLButtonElement>('.app-tab[data-tab="search"]');
+        btn?.click();
+      }
+    });
+    searchBar.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        searchBar.click();
+      }
+    });
+
     const continueHost = element('div', 'home-continue-host');
     const heading = element('h2', 'home-section-header');
+    const titleGroup = element('div', 'home-section-lead');
     const channelName = element('span', 'home-section-title');
     const modeTag = element('span', 'home-mode-tag');
+    titleGroup.appendChild(channelName);
+    titleGroup.appendChild(modeTag);
+
     const switchHost = element('div', 'home-mode-switch');
     const gridHost = element('div', 'home-grid-host');
     const moreHost = element('div', 'home-more-host');
@@ -80,12 +105,15 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
 
     sticky.appendChild(channelHost);
     sticky.appendChild(railHost);
-    heading.appendChild(channelName);
-    heading.appendChild(modeTag);
+    heading.appendChild(titleGroup);
+    heading.appendChild(switchHost);
+
     view.appendChild(sticky);
+    view.appendChild(searchBar);
     view.appendChild(continueHost);
     view.appendChild(heading);
-    view.appendChild(switchHost);
+    view.appendChild(gridHost);
+    view.appendChild(moreHost);
     view.appendChild(gridHost);
     view.appendChild(moreHost);
     deps.root.appendChild(view);

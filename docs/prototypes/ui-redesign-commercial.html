@@ -1,0 +1,1723 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>《光影Play》商业级播放器 UI 重构对比与交互原型</title>
+  <style>
+    /* ==========================================================================
+       1. Design Tokens 完整内联层 (自包含，零外部 CSS 依赖，彻底杜绝 404)
+       ========================================================================== */
+    :root,
+    :root[data-theme="dark"] {
+      --bg: #080A10;
+      --surface: #12151F;
+      --surface-raised: #1A1F2C;
+      --surface-overlay: rgba(8, 10, 16, 0.88);
+      --surface-warm: #181C28;
+      --surface-subtle: #0E1119;
+      --fg: #F4F6FB;
+      --fg-2: #C5CBD8;
+      --muted: #828B9E;
+      --meta: #9AA2B2;
+      --border: #222736;
+      --border-subtle: #181D29;
+      --border-strong: #384157;
+      --accent: #E5A93C;
+      --accent-hover: #F0B854;
+      --accent-active: #C88E26;
+      --accent-on: #080A10;
+      --accent-subtle: rgba(229, 169, 60, 0.15);
+      --success: #22C55E;
+      --success-subtle: rgba(34, 197, 94, 0.15);
+      --warn: #F59E0B;
+      --warn-subtle: rgba(245, 158, 11, 0.15);
+      --danger: #EF4444;
+      --danger-subtle: rgba(239, 68, 68, 0.15);
+      --info: #38BDF8;
+
+      --elev-card: 0 4px 16px rgba(0, 0, 0, 0.45);
+      --elev-float: 0 12px 32px rgba(0, 0, 0, 0.65);
+
+      --bench-bg: #0B0E17;
+      --chassis-border: #2D3446;
+      --chassis-bg: #161A26;
+    }
+
+    :root[data-theme="light"] {
+      --bg: #F5F6FA;
+      --surface: #FFFFFF;
+      --surface-raised: #FFFFFF;
+      --surface-overlay: rgba(245, 246, 250, 0.92);
+      --surface-warm: #EBEDF4;
+      --surface-subtle: #E2E5EE;
+      --fg: #131720;
+      --fg-2: #3E4656;
+      --muted: #6C7486;
+      --meta: #626B7B;
+      --border: #DFE2EA;
+      --border-subtle: #EBEEF5;
+      --border-strong: #BAC0CE;
+      --accent: #B87B14;
+      --accent-hover: #9E670E;
+      --accent-active: #7E5107;
+      --accent-on: #131720;
+      --accent-subtle: rgba(184, 123, 20, 0.12);
+      --success: #15803D;
+      --warn: #B45309;
+      --danger: #B91C1C;
+      --info: #0284C7;
+
+      --elev-card: 0 2px 10px rgba(19, 23, 32, 0.08);
+      --elev-float: 0 8px 30px rgba(19, 23, 32, 0.14);
+
+      --bench-bg: #EAEDF5;
+      --chassis-border: #CBD2E1;
+      --chassis-bg: #DCE2F0;
+    }
+
+    /* 字体与基础重置 */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      background-color: var(--bench-bg);
+      color: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px 64px;
+      overflow-x: hidden;
+      transition: background-color 0.25s ease, color 0.25s ease;
+    }
+
+    /* ==========================================================================
+       顶部主控台控制面板 (Control Bar)
+       ========================================================================== */
+    .control-deck {
+      width: 100%;
+      max-width: 960px;
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      border-radius: 14px;
+      padding: 16px 20px;
+      margin-bottom: 24px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      box-shadow: var(--elev-card);
+    }
+
+    .deck-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-badge {
+      background: var(--accent);
+      color: var(--accent-on);
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.05em;
+    }
+
+    .deck-title {
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--fg);
+      letter-spacing: -0.01em;
+    }
+
+    .deck-subtitle {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .deck-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .deck-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 14px;
+      border-radius: 6px;
+      border: 1px solid var(--border-strong);
+      background: var(--surface-raised);
+      color: var(--fg);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .deck-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .deck-btn.active {
+      background: var(--accent);
+      color: var(--accent-on);
+      border-color: var(--accent);
+    }
+
+    /* ==========================================================================
+       双机真机视口对比台 (Compare Stage)
+       ========================================================================== */
+    .compare-stage {
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      gap: 36px;
+      width: 100%;
+      max-width: 960px;
+      flex-wrap: wrap;
+    }
+
+    .device-column {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      width: 390px;
+    }
+
+    .device-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      padding: 0 4px;
+    }
+
+    .device-tag {
+      font-size: 14px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .device-tag.current { color: var(--danger); }
+    .device-tag.redesign { color: var(--success); }
+
+    .device-metrics {
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* 手机外壳 (iPhone 15 Pro 比例：390 × 844 px) */
+    .phone-mockup {
+      width: 390px;
+      height: 844px;
+      background: var(--bg);
+      border: 12px solid var(--chassis-border);
+      outline: 2px solid var(--border);
+      border-radius: 50px;
+      box-shadow: 0 28px 80px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.08);
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+      transition: background-color 0.25s ease;
+    }
+
+    /* 顶部灵动岛 */
+    .phone-island {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 108px;
+      height: 28px;
+      background: #000000;
+      border-radius: 20px;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      padding-right: 10px;
+    }
+
+    .island-lens {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #0d1326;
+      border: 1.5px solid rgba(255, 255, 255, 0.2);
+    }
+
+    /* 手机屏幕视口 */
+    .phone-screen {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding-top: 42px; /* 状态栏避让 */
+      overflow-y: auto;
+      overflow-x: hidden;
+      position: relative;
+      scrollbar-width: none;
+    }
+
+    .phone-screen::-webkit-scrollbar { display: none; }
+
+    /* 底部导航栏 */
+    .phone-tabbar {
+      height: 56px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
+      padding-bottom: 6px;
+      z-index: 50;
+      flex-shrink: 0;
+    }
+
+    .tabbar-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      color: var(--muted);
+      font-size: 10px;
+      cursor: pointer;
+    }
+
+    .tabbar-item.active {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    /* 标尺遮罩图层 (Ruler) */
+    .ruler-overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 90;
+      display: none;
+    }
+
+    .ruler-overlay.visible { display: block; }
+
+    .ruler-zone {
+      position: absolute;
+      left: 0;
+      right: 0;
+      background: rgba(239, 68, 68, 0.18);
+      border-bottom: 1.5px dashed rgba(239, 68, 68, 0.85);
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      padding-right: 12px;
+      font-size: 11px;
+      color: #EF4444;
+      font-weight: 800;
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+    }
+
+    .ruler-fold-line {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 520px;
+      height: 2px;
+      background: #F59E0B;
+      z-index: 95;
+      display: none;
+      box-shadow: 0 0 8px rgba(245, 158, 11, 0.8);
+    }
+
+    .ruler-fold-line.visible { display: block; }
+
+    .ruler-fold-label {
+      position: absolute;
+      right: 10px;
+      top: -22px;
+      background: #F59E0B;
+      color: #080A10;
+      font-size: 10px;
+      font-weight: 800;
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+
+    /* ==========================================================================
+       【方案 A 现有实现】：真实还原各层堆叠与死区
+       ========================================================================== */
+    .curr-header {
+      height: 52px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    .curr-brand {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--accent);
+    }
+
+    .curr-subbrand {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .curr-channels {
+      height: 50px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 14px;
+      overflow-x: auto;
+      flex-shrink: 0;
+    }
+
+    .curr-chan-tab {
+      padding: 6px 10px;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--fg-2);
+      white-space: nowrap;
+      position: relative;
+    }
+
+    .curr-chan-tab.active {
+      color: var(--accent);
+    }
+
+    .curr-chan-tab.active::after {
+      content: '';
+      position: absolute;
+      bottom: 2px;
+      left: 15%;
+      width: 70%;
+      height: 3px;
+      background: var(--accent);
+      border-radius: 2px;
+    }
+
+    .curr-capsules {
+      height: 44px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 12px;
+      overflow-x: auto;
+      flex-shrink: 0;
+    }
+
+    .curr-cap {
+      padding: 4px 12px;
+      font-size: 12px;
+      border: 1px solid var(--border);
+      border-radius: 9999px;
+      background: var(--surface-warm);
+      color: var(--fg-2);
+      white-space: nowrap;
+    }
+
+    .curr-cap.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: var(--accent-subtle);
+      font-weight: 700;
+    }
+
+    .curr-continue {
+      margin: 8px 12px;
+      padding: 10px 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: var(--elev-card);
+    }
+
+    .curr-cont-thumb {
+      width: 52px;
+      height: 52px;
+      border-radius: 6px;
+      background: #1e2538;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+      flex-shrink: 0;
+      border: 1px solid var(--border);
+    }
+
+    .curr-cont-meta {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .curr-cont-tag {
+      font-size: 10px;
+      color: var(--accent);
+      font-weight: 800;
+    }
+
+    .curr-cont-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--fg);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .curr-cont-sub {
+      font-size: 11px;
+      color: var(--fg-2);
+    }
+
+    .curr-cont-bar {
+      height: 4px;
+      background: var(--surface-subtle);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 3px;
+    }
+
+    .curr-cont-fill {
+      width: 65%;
+      height: 100%;
+      background: var(--accent);
+    }
+
+    .curr-section-head {
+      padding: 8px 12px 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .curr-sec-title {
+      font-size: 15px;
+      font-weight: 800;
+      color: var(--fg);
+    }
+
+    .curr-sec-tag {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .curr-mode-switch {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 6px;
+      padding: 4px 12px 10px;
+    }
+
+    .curr-mode-btn {
+      height: 34px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--fg-2);
+      font-size: 11px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      font-weight: 600;
+    }
+
+    .curr-mode-btn.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: var(--surface-warm);
+    }
+
+    .curr-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      padding: 0 12px 20px;
+    }
+
+    .curr-poster-card {
+      background: var(--surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .curr-poster-img {
+      width: 100%;
+      aspect-ratio: 3 / 4;
+      background: linear-gradient(135deg, #1b2132 0%, #101524 100%);
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .curr-poster-ep {
+      position: absolute;
+      right: 4px;
+      bottom: 4px;
+      background: rgba(8, 10, 16, 0.85);
+      color: var(--fg);
+      font-size: 9px;
+      padding: 1px 5px;
+      border-radius: 2px;
+      font-weight: 600;
+    }
+
+    .curr-poster-body {
+      padding: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .curr-poster-name {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--fg);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .curr-poster-tag {
+      font-size: 10px;
+      color: var(--meta);
+    }
+
+    /* ==========================================================================
+       【方案 B 商业级重构设计】：高质感流媒体架构
+       ========================================================================== */
+    .redesign-topbar {
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 14px;
+      background: var(--surface-overlay);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .topbar-logo {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 16px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: var(--accent);
+    }
+
+    .topbar-channels {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-left: 6px;
+    }
+
+    .topbar-chan-item {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--muted);
+      cursor: pointer;
+      position: relative;
+      transition: color 0.15s ease;
+    }
+
+    .topbar-chan-item.active {
+      color: var(--fg);
+      font-weight: 800;
+      font-size: 15px;
+    }
+
+    .topbar-chan-item.active::after {
+      content: '';
+      position: absolute;
+      bottom: -6px;
+      left: 15%;
+      width: 70%;
+      height: 2.5px;
+      background: var(--accent);
+      border-radius: 2px;
+    }
+
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .topbar-icon-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--fg-2);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .topbar-icon-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .redesign-search-box {
+      margin: 8px 12px 0;
+      height: 36px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 9999px;
+      display: flex;
+      align-items: center;
+      padding: 0 14px;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    .search-hot-tag {
+      margin-left: auto;
+      background: var(--accent-subtle);
+      color: var(--accent);
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 700;
+    }
+
+    .redesign-subbar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 12px;
+      overflow-x: auto;
+    }
+
+    .redesign-pill {
+      height: 26px;
+      padding: 0 12px;
+      font-size: 11px;
+      font-weight: 600;
+      border-radius: 13px;
+      background: transparent;
+      color: var(--fg-2);
+      display: flex;
+      align-items: center;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+
+    .redesign-pill.active {
+      background: var(--accent);
+      color: var(--accent-on);
+      font-weight: 800;
+    }
+
+    /* 商业级 Hero 焦点画卷大卡 */
+    .hero-stage {
+      position: relative;
+      margin: 4px 12px 12px;
+      border-radius: 14px;
+      overflow: hidden;
+      aspect-ratio: 16 / 9;
+      background: linear-gradient(135deg, #1f2738 0%, #0d111a 100%);
+      border: 1px solid rgba(229, 169, 60, 0.3);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      padding: 14px;
+    }
+
+    .hero-art-bg {
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at 70% 30%, #3a4a6e 0%, #151b29 70%, #080a10 100%);
+      opacity: 0.9;
+    }
+
+    .hero-art-glow {
+      position: absolute;
+      top: -20%;
+      right: -10%;
+      width: 180px;
+      height: 180px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(229, 169, 60, 0.35) 0%, transparent 70%);
+      filter: blur(20px);
+    }
+
+    .hero-gradient {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(to top, rgba(8, 10, 16, 0.98) 0%, rgba(8, 10, 16, 0.5) 50%, transparent 100%);
+    }
+
+    .hero-content {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .hero-badge-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .hero-badge-top {
+      background: linear-gradient(90deg, #E5A93C 0%, #F59E0B 100%);
+      color: #080A10;
+      font-size: 10px;
+      font-weight: 800;
+      padding: 2px 6px;
+      border-radius: 3px;
+    }
+
+    .hero-badge-tag {
+      background: rgba(255, 255, 255, 0.18);
+      color: var(--fg);
+      font-size: 10px;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 3px;
+    }
+
+    .hero-title {
+      font-size: 17px;
+      font-weight: 900;
+      color: #FFFFFF;
+      letter-spacing: -0.01em;
+      line-height: 1.25;
+      margin-top: 2px;
+      text-shadow: 0 2px 6px rgba(0, 0, 0, 0.8);
+    }
+
+    .hero-hook {
+      font-size: 11px;
+      color: var(--fg-2);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+    }
+
+    .hero-action-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 6px;
+    }
+
+    .hero-play-btn {
+      height: 32px;
+      padding: 0 14px;
+      background: var(--accent);
+      color: var(--accent-on);
+      font-size: 12px;
+      font-weight: 800;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      border: 0;
+      cursor: pointer;
+      box-shadow: 0 2px 10px rgba(229, 169, 60, 0.4);
+    }
+
+    .hero-sub-btn {
+      height: 32px;
+      padding: 0 10px;
+      background: rgba(255, 255, 255, 0.15);
+      color: #FFFFFF;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+    }
+
+    /* 悬浮微型断点续播卡 */
+    .redesign-continue-pill {
+      margin: 0 12px 12px;
+      padding: 8px 12px;
+      background: var(--surface-raised);
+      border: 1px solid var(--border-strong);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      cursor: pointer;
+      box-shadow: var(--elev-card);
+    }
+
+    .rc-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .rc-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: var(--accent-on);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .rc-text {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    .rc-title-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .rc-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--fg);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .rc-ep {
+      font-size: 10px;
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .rc-progress-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 10px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .rc-bar {
+      width: 70px;
+      height: 3px;
+      background: var(--surface-subtle);
+      border-radius: 1.5px;
+      overflow: hidden;
+    }
+
+    .rc-bar-fill {
+      width: 65%;
+      height: 100%;
+      background: var(--accent);
+    }
+
+    .rc-btn {
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      flex-shrink: 0;
+    }
+
+    .redesign-section-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 12px 8px;
+    }
+
+    .sec-heading {
+      font-size: 14px;
+      font-weight: 800;
+      color: var(--fg);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .sec-accent-bar {
+      width: 3px;
+      height: 14px;
+      background: var(--accent);
+      border-radius: 2px;
+    }
+
+    .density-switcher {
+      display: flex;
+      align-items: center;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 2px;
+      gap: 2px;
+    }
+
+    .density-btn {
+      width: 24px;
+      height: 22px;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .density-btn.active {
+      background: var(--surface-warm);
+      color: var(--accent);
+    }
+
+    /* 横滑榜单轨道 */
+    .hot-rail {
+      display: flex;
+      gap: 10px;
+      padding: 0 12px 14px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    .hot-card {
+      width: 105px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      cursor: pointer;
+    }
+
+    .hot-card-img {
+      width: 100%;
+      aspect-ratio: 3 / 4;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #242c40 0%, #151b28 100%);
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--border-strong);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .hot-rank-num {
+      position: absolute;
+      top: 4px;
+      left: 6px;
+      font-size: 20px;
+      font-weight: 900;
+      font-style: italic;
+      line-height: 1;
+      text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9);
+    }
+
+    .rank-1 { color: #E5A93C; }
+    .rank-2 { color: #CBD5E1; }
+    .rank-3 { color: #CD7F32; }
+
+    .hot-card-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--fg);
+      margin-top: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* 瀑布流网格 */
+    .redesign-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      padding: 0 12px 24px;
+    }
+
+    .rg-card {
+      display: flex;
+      flex-direction: column;
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--surface);
+      border: 1px solid var(--border-subtle);
+      transition: transform 0.15s ease;
+    }
+
+    .rg-card:hover {
+      transform: translateY(-2px);
+      border-color: var(--border-strong);
+    }
+
+    .rg-media {
+      width: 100%;
+      aspect-ratio: 3 / 4;
+      background: linear-gradient(135deg, #1e2638 0%, #111624 100%);
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .rg-badge {
+      position: absolute;
+      right: 4px;
+      bottom: 4px;
+      background: rgba(8, 10, 16, 0.88);
+      color: var(--fg);
+      font-size: 9px;
+      padding: 1px 5px;
+      border-radius: 2px;
+      font-weight: 600;
+    }
+
+    .rg-tag-top {
+      position: absolute;
+      top: 4px;
+      left: 4px;
+      background: var(--accent);
+      color: #080A10;
+      font-size: 8px;
+      font-weight: 900;
+      padding: 1px 5px;
+      border-radius: 2px;
+    }
+
+    .rg-body {
+      padding: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .rg-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--fg);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .rg-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 10px;
+      color: var(--meta);
+    }
+
+    /* ==========================================================================
+       底部决策与诊断分析总结
+       ========================================================================== */
+    .analysis-summary {
+      width: 100%;
+      max-width: 960px;
+      margin-top: 32px;
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      border-radius: 14px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      box-shadow: var(--elev-card);
+    }
+
+    .summary-title {
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
+    }
+
+    .sum-card {
+      background: var(--surface-raised);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .sum-head {
+      font-size: 13px;
+      font-weight: 800;
+      color: var(--fg);
+    }
+
+    .sum-desc {
+      font-size: 12px;
+      color: var(--fg-2);
+      line-height: 1.55;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 控制与对比调节中枢 -->
+  <header class="control-deck">
+    <div class="deck-left">
+      <span class="brand-badge">UI/UX AUDIT</span>
+      <div>
+        <h1 class="deck-title">《光影Play》商业级播放器 UI 空间重构全景对比</h1>
+        <p class="deck-subtitle">实测标准：390 × 844 px (iPhone 15 Pro / Android 旗舰) 视口</p>
+      </div>
+    </div>
+    <div class="deck-actions">
+      <button class="deck-btn" id="btn-toggle-ruler" onclick="toggleRulers()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.3 15.3l-9-9c-.4-.4-1-.4-1.4 0l-5.6 5.6c-.4.4-.4 1 0 1.4l9 9c.4.4 1 .4 1.4 0l5.6-5.6c.4-.4.4-1 0-1.4z"/><path d="M7.7 13.3L13 8"/><path d="M10.7 16.3L16 11"/></svg>
+        <span>开启空间透视标尺 (Ruler)</span>
+      </button>
+      <button class="deck-btn" id="btn-theme" onclick="toggleTheme()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        <span>切换象牙浅白模式</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- 双机并列对比主视口 -->
+  <main class="compare-stage">
+
+    <!-- 左侧：现有实现（Current Implementation） -->
+    <section class="device-column">
+      <div class="device-header">
+        <span class="device-tag current">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+          现有代码实现 (Current)
+        </span>
+        <span class="device-metrics">首屏死区: 329px (48%)</span>
+      </div>
+
+      <div class="phone-mockup">
+        <div class="phone-island"><span class="island-lens"></span></div>
+
+        <!-- 空间透视尺（标注病灶高度） -->
+        <div class="ruler-overlay" id="ruler-left">
+          <div class="ruler-zone" style="top: 42px; height: 52px;">Header: 52px (无实质功能)</div>
+          <div class="ruler-zone" style="top: 94px; height: 50px;">频道栏: 50px (独立占一行)</div>
+          <div class="ruler-zone" style="top: 144px; height: 44px;">二级胶囊: 44px (再占一行)</div>
+          <div class="ruler-zone" style="top: 196px; height: 88px;">续播灰卡: 88px (死板大框)</div>
+          <div class="ruler-zone" style="top: 284px; height: 78px;">模式按键平铺: 78px (喧宾夺主)</div>
+        </div>
+        <div class="ruler-fold-line" id="fold-left">
+          <span class="ruler-fold-label">首屏折叠线 (The Fold Line 520px) - 下方内容首屏不可见</span>
+        </div>
+
+        <!-- 屏幕内部内容 -->
+        <div class="phone-screen">
+          <!-- 1. 外壳 Header -->
+          <div class="curr-header">
+            <span class="curr-brand">光影Play</span>
+            <span class="curr-subbrand">大视界</span>
+          </div>
+
+          <!-- 2. 吸顶频道栏 -->
+          <div class="curr-channels">
+            <span class="curr-chan-tab active">短剧精选</span>
+            <span class="curr-chan-tab">院线电影</span>
+            <span class="curr-chan-tab">热血动漫</span>
+            <span class="curr-chan-tab">人文纪录</span>
+          </div>
+
+          <!-- 3. 二级横滑胶囊 -->
+          <div class="curr-capsules">
+            <span class="curr-cap active">全部</span>
+            <span class="curr-cap">都市逆袭</span>
+            <span class="curr-cap">神豪赘婿</span>
+            <span class="curr-cap">战神归来</span>
+            <span class="curr-cap">古装权谋</span>
+          </div>
+
+          <!-- 4. 黄金断点续播卡 -->
+          <div class="curr-continue">
+            <div class="curr-cont-thumb">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            </div>
+            <div class="curr-cont-meta">
+              <span class="curr-cont-tag">继续观看黄金断点</span>
+              <span class="curr-cont-title">狂龙出狱 · 医武双绝</span>
+              <span class="curr-cont-sub">第 18 集 · 已播 1:42 · 剩 0:38</span>
+              <div class="curr-cont-bar"><div class="curr-cont-fill"></div></div>
+            </div>
+          </div>
+
+          <!-- 5. 频道标题与四模切换器平铺 -->
+          <div class="curr-section-head">
+            <span class="curr-sec-title">短剧精选</span>
+            <span class="curr-sec-tag">【中图紧凑】</span>
+          </div>
+          <div class="curr-mode-switch">
+            <button class="curr-mode-btn active">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+              中图紧凑
+            </button>
+            <button class="curr-mode-btn">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+              大图舒适
+            </button>
+            <button class="curr-mode-btn">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+              书架模式
+            </button>
+            <button class="curr-mode-btn">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+              图文列表
+            </button>
+          </div>
+
+          <!-- 6. 海报网格（被挤到底部，首屏严重折叠） -->
+          <div class="curr-grid">
+            <div class="curr-poster-card">
+              <div class="curr-poster-img">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                <span class="curr-poster-ep">共 92 集</span>
+              </div>
+              <div class="curr-poster-body">
+                <span class="curr-poster-name">千亿豪婿归来</span>
+                <span class="curr-poster-tag">都市逆袭</span>
+              </div>
+            </div>
+            <div class="curr-poster-card">
+              <div class="curr-poster-img">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                <span class="curr-poster-ep">共 80 集</span>
+              </div>
+              <div class="curr-poster-body">
+                <span class="curr-poster-name">长生三千年</span>
+                <span class="curr-poster-tag">玄幻修仙</span>
+              </div>
+            </div>
+            <div class="curr-poster-card">
+              <div class="curr-poster-img">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                <span class="curr-poster-ep">共 105 集</span>
+              </div>
+              <div class="curr-poster-body">
+                <span class="curr-poster-name">凤霸天下</span>
+                <span class="curr-poster-tag">古装言情</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 底部主 Tab 栏 -->
+        <div class="phone-tabbar">
+          <div class="tabbar-item active">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            <span>大视界</span>
+          </div>
+          <div class="tabbar-item">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <span>追剧</span>
+          </div>
+          <div class="tabbar-item">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span>搜索</span>
+          </div>
+          <div class="tabbar-item">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            <span>设置</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 右侧：商业级重构设计（Commercial Redesign） -->
+    <section class="device-column">
+      <div class="device-header">
+        <span class="device-tag redesign">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          商业级重构方案 (Commercial Elegance)
+        </span>
+        <span class="device-metrics">首屏有效消费提升: +180%</span>
+      </div>
+
+      <div class="phone-mockup">
+        <div class="phone-island"><span class="island-lens"></span></div>
+
+        <!-- 空间透视尺（标注重构后精炼高度） -->
+        <div class="ruler-overlay" id="ruler-right">
+          <div class="ruler-zone" style="top: 42px; height: 48px; background: rgba(34, 197, 94, 0.18); border-color: rgba(34, 197, 94, 0.85); color: #22C55E;">多合一精炼顶栏: 48px</div>
+          <div class="ruler-zone" style="top: 90px; height: 36px; background: rgba(34, 197, 94, 0.18); border-color: rgba(34, 197, 94, 0.85); color: #22C55E;">搜索胶囊: 36px</div>
+          <div class="ruler-zone" style="top: 126px; height: 32px; background: rgba(34, 197, 94, 0.18); border-color: rgba(34, 197, 94, 0.85); color: #22C55E;">微型分类条: 32px</div>
+        </div>
+        <div class="ruler-fold-line" id="fold-right">
+          <span class="ruler-fold-label" style="background: #22C55E;">首屏折叠线 (The Fold Line 520px) - 已呈现 Hero 大卡、续播卡与热榜</span>
+        </div>
+
+        <!-- 屏幕内部内容 -->
+        <div class="phone-screen">
+          <!-- 1. 多合一灵动超薄顶栏 (48px) -->
+          <div class="redesign-topbar">
+            <div class="topbar-left">
+              <span class="topbar-logo">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                光影Play
+              </span>
+              <nav class="topbar-channels">
+                <span class="topbar-chan-item active">精选</span>
+                <span class="topbar-chan-item">电影</span>
+                <span class="topbar-chan-item">动漫</span>
+                <span class="topbar-chan-item">纪录片</span>
+              </nav>
+            </div>
+            <div class="topbar-right">
+              <button class="topbar-icon-btn" title="最近播放历史">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- 2. 全局快捷搜索胶囊 (36px) -->
+          <div class="redesign-search-box">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span>搜索剧名、主角、爆款短剧...</span>
+            <span class="search-hot-tag">🔥 狂龙出狱</span>
+          </div>
+
+          <!-- 3. 微型二级分类滑动条 (32px) -->
+          <div class="redesign-subbar">
+            <span class="redesign-pill active">全部</span>
+            <span class="redesign-pill">都市热血</span>
+            <span class="redesign-pill">神豪逆袭</span>
+            <span class="redesign-pill">古装权谋</span>
+            <span class="redesign-pill">现言甜宠</span>
+            <span class="redesign-pill">悬疑脑洞</span>
+          </div>
+
+          <!-- 4. 商业级 Hero 焦点画卷置顶大卡 (190px) -->
+          <div class="hero-stage">
+            <div class="hero-art-bg"></div>
+            <div class="hero-art-glow"></div>
+            <div class="hero-gradient"></div>
+            <div class="hero-content">
+              <div class="hero-badge-row">
+                <span class="hero-badge-top">TOP 1 爆款</span>
+                <span class="hero-badge-tag">全网破8000万</span>
+                <span class="hero-badge-tag">4K超清</span>
+              </div>
+              <h2 class="hero-title">龙王殿：赘婿逆天神豪</h2>
+              <p class="hero-hook">隐忍三年受尽欺凌，一朝解除封印，万千豪门跪迎龙王！</p>
+              <div class="hero-action-bar">
+                <button class="hero-play-btn">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                  立即起播第1集
+                </button>
+                <button class="hero-sub-btn">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+                  追剧
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 5. 悬浮精巧黄金断点续播卡 (46px) -->
+          <div class="redesign-continue-pill">
+            <div class="rc-left">
+              <div class="rc-icon">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              </div>
+              <div class="rc-text">
+                <div class="rc-title-row">
+                  <span class="rc-title">狂龙出狱 · 医武双绝</span>
+                  <span class="rc-ep">第 18 集</span>
+                </div>
+                <div class="rc-progress-row">
+                  <div class="rc-bar"><div class="rc-bar-fill"></div></div>
+                  <span>剩 0:38</span>
+                </div>
+              </div>
+            </div>
+            <div class="rc-btn">
+              <span>继续看</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </div>
+          </div>
+
+          <!-- 6. 模块标题与排版微型切换器 -->
+          <div class="redesign-section-row">
+            <div class="sec-heading">
+              <span class="sec-accent-bar"></span>
+              <span>🔥 今日爆火热搜榜</span>
+            </div>
+            <div class="density-switcher" title="排版密度切换">
+              <button class="density-btn active" title="3列紧凑">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+              </button>
+              <button class="density-btn" title="2列舒适">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+              </button>
+              <button class="density-btn" title="图文列表">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- 7. 横滑榜单轨道 (TOP 10 艺术字标) -->
+          <div class="hot-rail">
+            <div class="hot-card">
+              <div class="hot-card-img">
+                <span class="hot-rank-num rank-1">1</span>
+                <span style="font-size:11px;font-weight:700;color:var(--accent);margin-top:28px">热播榜首</span>
+              </div>
+              <span class="hot-card-title">千亿总裁双胞胎</span>
+            </div>
+            <div class="hot-card">
+              <div class="hot-card-img">
+                <span class="hot-rank-num rank-2">2</span>
+                <span style="font-size:11px;font-weight:700;color:#CBD5E1;margin-top:28px">人气飙升</span>
+              </div>
+              <span class="hot-card-title">绝品战皇殿</span>
+            </div>
+            <div class="hot-card">
+              <div class="hot-card-img">
+                <span class="hot-rank-num rank-3">3</span>
+                <span style="font-size:11px;font-weight:700;color:#CD7F32;margin-top:28px">全网热搜</span>
+              </div>
+              <span class="hot-card-title">重生之商海巨擘</span>
+            </div>
+            <div class="hot-card">
+              <div class="hot-card-img">
+                <span class="hot-rank-num" style="color:var(--muted)">4</span>
+                <span style="font-size:11px;font-weight:700;color:var(--muted);margin-top:28px">必看佳作</span>
+              </div>
+              <span class="hot-card-title">天降萌宝九个爹</span>
+            </div>
+          </div>
+
+          <!-- 8. 精选瀑布流海报网格 -->
+          <div class="redesign-section-row" style="padding-top: 6px;">
+            <div class="sec-heading">
+              <span class="sec-accent-bar"></span>
+              <span>精选短剧库</span>
+            </div>
+          </div>
+
+          <div class="redesign-grid">
+            <div class="rg-card">
+              <div class="rg-media">
+                <span class="rg-tag-top">爆款</span>
+                <span style="font-size:12px;font-weight:800;color:var(--fg);text-shadow:0 1px 3px rgba(0,0,0,0.8)">豪婿归来</span>
+                <span class="rg-badge">92 集全</span>
+              </div>
+              <div class="rg-body">
+                <span class="rg-title">千亿豪婿归来</span>
+                <div class="rg-meta">
+                  <span>都市逆袭</span>
+                  <span style="color:var(--accent);font-weight:700">9.6分</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="rg-card">
+              <div class="rg-media">
+                <span style="font-size:12px;font-weight:800;color:var(--fg);text-shadow:0 1px 3px rgba(0,0,0,0.8)">长生千年</span>
+                <span class="rg-badge">80 集全</span>
+              </div>
+              <div class="rg-body">
+                <span class="rg-title">长生三千年</span>
+                <div class="rg-meta">
+                  <span>玄幻修仙</span>
+                  <span style="color:var(--accent);font-weight:700">9.4分</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="rg-card">
+              <div class="rg-media">
+                <span style="font-size:12px;font-weight:800;color:var(--fg);text-shadow:0 1px 3px rgba(0,0,0,0.8)">凤霸天下</span>
+                <span class="rg-badge">105 集全</span>
+              </div>
+              <div class="rg-body">
+                <span class="rg-title">凤霸天下</span>
+                <div class="rg-meta">
+                  <span>古装权谋</span>
+                  <span style="color:var(--accent);font-weight:700">9.8分</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 底部主 Tab 栏 -->
+        <div class="phone-tabbar">
+          <div class="tabbar-item active">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            <span>大视界</span>
+          </div>
+          <div class="tabbar-item">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <span>追剧</span>
+          </div>
+          <div class="tabbar-item">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span>搜索</span>
+          </div>
+          <div class="tabbar-item">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            <span>设置</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- 架构级改进诊断卡片 -->
+  <section class="analysis-summary">
+    <div class="summary-title">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+      《光影Play》首页 UI 架构重构核心决策看板
+    </div>
+
+    <div class="summary-grid">
+      <div class="sum-card">
+        <div class="sum-head" style="color:var(--danger)">1. 根治“三层死板吸顶”</div>
+        <p class="sum-desc">
+          <strong>问题：</strong>Header (52px) + 频道栏 (50px) + 二级胶囊 (44px) 纵向堆叠，死区达 146px。<br>
+          <strong>商业解法：</strong>Logo 与一级频道同列并轨（48px），二级胶囊微型化 (32px)，直接释放 66px 黄金高度。
+        </p>
+      </div>
+
+      <div class="sum-card">
+        <div class="sum-head" style="color:var(--warn)">2. 剔除“调试器”排版大按钮</div>
+        <p class="sum-desc">
+          <strong>问题：</strong>把 4 个排版切换按钮平铺在标题下方（占 78px），属于明显的调试面板思维。<br>
+          <strong>商业解法：</strong>收敛为内容区右侧的精致三态微型分段图标 (22px)，将低频配置退居幕后。
+        </p>
+      </div>
+
+      <div class="sum-card">
+        <div class="sum-head" style="color:var(--success)">3. 引入商业级 Hero 焦点画卷</div>
+        <p class="sum-desc">
+          <strong>问题：</strong>开屏即机械网格，无视觉焦点，像 CMS 资源后台。<br>
+          <strong>商业解法：</strong>引入 16:9 渐变沉浸大卡（TOP 1 爆款置顶），配置“立即起播第1集”主按钮，极大提升点击转化率。
+        </p>
+      </div>
+
+      <div class="sum-card">
+        <div class="sum-head" style="color:var(--info)">4. 黄金断点续播卡“悬浮轻量化”</div>
+        <p class="sum-desc">
+          <strong>问题：</strong>88px 笨重大灰框横插在中间，生硬截断视线。<br>
+          <strong>商业解法：</strong>重构为 46px 极简悬浮微卡，琥珀金细线进度条 + 一触秒续，保留核心能力同时无感融入。
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    let rulerVisible = false;
+
+    function toggleRulers() {
+      rulerVisible = !rulerVisible;
+      const left = document.getElementById('ruler-left');
+      const right = document.getElementById('ruler-right');
+      const foldL = document.getElementById('fold-left');
+      const foldR = document.getElementById('fold-right');
+      const btn = document.getElementById('btn-toggle-ruler');
+
+      left.classList.toggle('visible', rulerVisible);
+      right.classList.toggle('visible', rulerVisible);
+      foldL.classList.toggle('visible', rulerVisible);
+      foldR.classList.toggle('visible', rulerVisible);
+      btn.classList.toggle('active', rulerVisible);
+    }
+
+    function toggleTheme() {
+      const root = document.documentElement;
+      const current = root.getAttribute('data-theme');
+      const next = current === 'light' ? 'dark' : 'light';
+      root.setAttribute('data-theme', next);
+      const btn = document.getElementById('btn-theme');
+      btn.classList.toggle('active', next === 'light');
+      btn.querySelector('span').textContent = next === 'light' ? '切换黑曜石深色模式' : '切换象牙浅白模式';
+    }
+  </script>
+</body>
+</html>
