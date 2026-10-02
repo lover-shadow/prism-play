@@ -66,6 +66,15 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
   let keyup: ((event: KeyboardEvent) => void) | null = null;
   let unregisterBack: (() => void) | null = null;
   let detailBodyRef: PlayerDetailStage | null = null;
+  let isFullscreen = false;
+  let resizeHandler: (() => void) | null = null;
+
+  function toggleFullscreen(on?: boolean): void {
+    if (layer === null) return;
+    isFullscreen = on !== undefined ? on : !isFullscreen;
+    layer.classList.toggle('prism-player-host--fullscreen', isFullscreen);
+    player?.setFullscreen?.(isFullscreen);
+  }
 
   /** 播放器是异步构造的（ArtPlayer/hls.js 动态导入），动作必须始终打在"当前那一个"实例上。 */
   const act = (action: (current: PrismPlayer) => void): void => { if (player !== null) action(player); };
@@ -137,12 +146,26 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
       allowBackgroundAudio: deps.allowBackgroundAudio()
     });
     deps.onPrivacyChange(loaded.item.isPrivate === true || loaded.item.channelId === 'private');
-    keyup = (event: KeyboardEvent) => { if (event.key === 'Escape') close(); };
+    keyup = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        if (isFullscreen) toggleFullscreen(false); else close();
+      }
+    };
     document.addEventListener('keydown', keyup);
     unregisterBack = registerBackHandler(() => {
+      if (isFullscreen) {
+        toggleFullscreen(false);
+        return true;
+      }
       close();
       return true;
     });
+
+    resizeHandler = () => {
+      const isLandscape = window.innerWidth > window.innerHeight;
+      if (isLandscape && !isFullscreen) toggleFullscreen(true);
+    };
+    window.addEventListener('resize', resizeHandler);
 
     const detailBody = buildDetailBody(
       loaded,
@@ -153,10 +176,7 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
       },
       () => player?.openDrawer(),
       deps.onShare === undefined ? undefined : (episode) => void deps.onShare?.(loaded.item, episode),
-      () => {
-        const stageEl = stage.querySelector<HTMLElement>('.prism-player') ?? stage;
-        stageEl.classList.toggle('prism-player--fullscreen');
-      },
+      () => toggleFullscreen(),
       async () => {
         if (loaded.item.isPrivate || loaded.item.channelId === 'private' || !deps.api.related) return [];
         try {
@@ -182,6 +202,11 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
       unregisterBack();
       unregisterBack = null;
     }
+    if (resizeHandler !== null) {
+      window.removeEventListener('resize', resizeHandler);
+      resizeHandler = null;
+    }
+    isFullscreen = false;
     detailBodyRef = null;
     const instance = player;
     player = null;

@@ -142,10 +142,20 @@
 .prism-drawer__switch { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 38px; font-size: var(--text-xs); color: var(--fg-2); }
 .prism-drawer__checkbox { width: 18px; height: 18px; accent-color: var(--accent); }
 
+/* 彻底清除 WebKit / Android WebView 默认的视频大播放键与占位符 */
+video::-webkit-media-controls-start-playback-button,
+video::-webkit-media-controls-overlay-play-button {
+  display: none !important; -webkit-appearance: none; opacity: 0 !important; pointer-events: none !important;
+}
+
 /* Artplayer 容器样式覆盖：消除粗糙黑白椭圆图标与黑屏背景 */
 .art-video-player { background-color: transparent !important; }
-.art-video-player .art-state, .art-video-player .art-icon-state, .art-state, .art-icon-state { display: none !important; }
-.art-video-player video { background-color: transparent !important; }
+.art-video-player .art-mask, .art-video-player .art-state, .art-video-player .art-icon-state, .art-state, .art-icon-state { display: none !important; opacity: 0 !important; pointer-events: none !important; }
+.art-video-player video { background-color: transparent !important; object-fit: contain !important; }
+
+/* 优雅美化 ArtPlayer 缓冲加载状态：居中琥珀金极简微光，告别突兀 */
+.art-video-player .art-loading { z-index: 40 !important; background: transparent !important; }
+.art-video-player .art-loading svg { width: 40px !important; height: 40px !important; color: var(--accent) !important; filter: drop-shadow(0 0 10px rgba(229, 169, 60, 0.6)); }
 
 /* 等待底片与高斯模糊环境光 (电影级拉幕感) */
 .prism-player__backdrop { position: absolute; inset: 0; z-index: 1; overflow: hidden; pointer-events: none; background: var(--player-bg); opacity: 1; transition: opacity 0.4s ease; }

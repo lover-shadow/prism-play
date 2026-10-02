@@ -32,8 +32,9 @@ export interface PlayerEngine {
   currentTime(): number; setCurrentTime(seconds: number): void; duration(): number;
   volume(): number; setVolume(value: number): void; setSource(url: string, mimeType?: string): void;
   toggleControls(): void; on(event: MediaEvent, handler: () => void): () => void;
+  setFullscreen?(fullscreen: boolean): void; resize?(): void;
 }
-export interface EngineContext { container: HTMLDivElement; theme: string; onError(message: string): void }
+export interface EngineContext { container: HTMLDivElement; theme: string; poster?: string; onError(message: string): void }
 export type EngineFactory = (context: EngineContext) => PlayerEngine | Promise<PlayerEngine>;
 export interface PlayerApi { playback(episodeId: number): Promise<PlaybackInfo>; title(titleId: string): Promise<TitleDetail> }
 export interface PlayerFailure { kind: PlayerErrorKind | 'media' | 'progress-blocked'; message: string }
@@ -61,39 +62,43 @@ export interface PrismPlayer {
   setLocked(locked: boolean): void; scheduleSleep(mode: SleepMode): void; openDrawer(): void; closeDrawer(): void;
   /** AC-11: audio focus is the host's fact, not the page's, so the caller reports it. */
   notifyAudioFocus(focus: 'restored' | 'lost'): void; notifyLeave(): void;
+  setFullscreen?(fullscreen: boolean): void;
 }
 
 const errorKindOf = (error: unknown): PlayerErrorKind =>
   error instanceof ApiError ? (error.treatedAsMissing ? 'missing' : error.code === 'NETWORK_ERROR' ? 'offline' : 'retryable') : 'retryable';
 
 /** Production engine: ArtPlayer for chrome and events, hls.js for the controlled proxy manifest. */
-export const createArtEngine: EngineFactory = async ({ container, theme, onError }) => {
+export const createArtEngine: EngineFactory = async ({ container, theme, poster, onError }) => {
   const [{ default: Artplayer }, { default: Hls }] = await Promise.all([import('artplayer'), import('hls.js')]);
   let hls: InstanceType<typeof Hls> | null = null;
+  const blank = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+  const initialPoster = poster || blank;
   const art = new Artplayer({
-    container, url: '', theme, volume: 1, autoplay: true, autoSize: true, isLive: false, lang: 'zh-cn', playsInline: true,
+    container, url: '', poster: initialPoster, theme, volume: 1, autoplay: true, autoSize: false, isLive: false, lang: 'zh-cn', playsInline: true,
     customType: {
       m3u8: (video: HTMLVideoElement, url: string) => {
         hls?.destroy();
+        video.poster = initialPoster; video.playsInline = true;
+        video.setAttribute('playsinline', 'true'); video.setAttribute('webkit-playsinline', 'true');
         if (Hls.isSupported()) {
-          hls = new Hls({ lowLatencyMode: false });
-          hls.loadSource(url);
-          hls.attachMedia(video);
-          hls.on(Hls.Events.ERROR, (_event, data) => { if (data.fatal) onError('播放中断，正在尝试重新解析'); });
-        } else if (video.canPlayType('application/vnd.apple.mpegurl')) video.src = url;
+          hls = new Hls({ lowLatencyMode: false }); hls.loadSource(url); hls.attachMedia(video);
+          hls.on(Hls.Events.MANIFEST_PARSED, () => { void video.play().catch(() => { video.muted = true; void video.play().catch(() => {}); }); });
+          hls.on(Hls.Events.ERROR, (_e, data) => { if (data.fatal) onError('播放中断，正在尝试重新解析'); });
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) { video.src = url; void video.play().catch(() => {}); }
         else onError('当前设备不支持 HLS 播放，需在 Android 端验证');
       }
     }
   });
   return {
     play: () => void art.play(), pause: () => art.pause(), playing: () => art.playing,
-    currentTime: () => art.currentTime, setCurrentTime: (seconds) => void (art.currentTime = seconds),
-    duration: () => art.duration, volume: () => art.video.volume,
-    setVolume: (value) => void (art.video.volume = clamp(value, 0, 1)),
+    currentTime: () => art.currentTime, setCurrentTime: (s) => void (art.currentTime = s),
+    duration: () => art.duration, volume: () => art.video.volume, setVolume: (v) => void (art.video.volume = clamp(v, 0, 1)),
     toggleControls: () => art.controls.toggle(),
-    setSource: (url, mimeType) => { art.type = mimeType === 'video/mp4' ? 'mp4' : 'm3u8'; art.url = url; void art.play().catch(() => {}); },
+    setSource: (u, m) => { art.type = m === 'video/mp4' ? 'mp4' : 'm3u8'; art.url = u; void art.play().catch(() => {}); },
     on: (event, handler) => { const name = `video:${event}`; art.on(name, handler); return () => art.off(name, handler); },
-    destroy: () => { hls?.destroy(); art.destroy(); }
+    setFullscreen: (f: boolean) => { art.fullscreenWeb = f; art.autoSize(); },
+    resize: () => art.autoSize(), destroy: () => { hls?.destroy(); art.destroy(); }
   };
 };
 
@@ -216,7 +221,7 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
     if (engine !== null) return engine;
     const theme = getComputedStyle(document.documentElement).getPropertyValue('--player-accent').trim();
     engine = await (options.engine ?? createArtEngine)({
-      container: chrome.stage, theme, onError: (message) => report({ kind: 'media', message })
+      container: chrome.stage, theme, poster: detail?.item.coverUrl, onError: (message) => report({ kind: 'media', message })
     });
     const live = engine;
     mediaOff = (['ended', 'timeupdate', 'play', 'pause', 'error'] as const).map((event) => live.on(event, () => handleMediaEvent(event)));
@@ -270,13 +275,11 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
   const setLocked = (v: boolean): void => { locked = v; render(); }; const scheduleSleep = (m: SleepMode): void => { sleep.schedule(m); render(); };
 
   return {
-    load,
-    play: () => engine?.play(),
-    pause: () => { progress.emit(true); engine?.pause(); },
+    load, play: () => engine?.play(), pause: () => { progress.emit(true); engine?.pause(); },
     setLocked, scheduleSleep, closeDrawer: () => drawer.close(),
     openDrawer: () => { if (detail !== null && episodeId !== null) drawer.open(detail, episodeId); },
-    notifyAudioFocus: (value) => interruption.audioFocus(value),
-    notifyLeave: () => { interruption.noteUserAction(); progress.emit(true); },
+    notifyAudioFocus: (value) => interruption.audioFocus(value), notifyLeave: () => { interruption.noteUserAction(); progress.emit(true); },
+    setFullscreen: (on: boolean) => { root.classList.toggle('prism-player--fullscreen', on); engine?.setFullscreen?.(on); },
     state: (): PlayerState => ({
       phase, errorKind, episodeId, contentId: detail?.item.id ?? null, playing: engine?.playing() ?? false,
       locked, sleepMode: sleep.mode(), isPrivate: isPrivateSubject(detail?.item ?? {}),
@@ -285,8 +288,7 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
     }),
     destroy: () => {
       if (destroyed) return;
-      destroyed = true; phase = 'destroyed'; token += 1;
-      progress.emit(true);
+      destroyed = true; phase = 'destroyed'; token += 1; progress.emit(true);
       sleep.destroy(); gesture.destroy(); hud.destroy(); drawer.destroy(); overlay.destroy(); chrome.destroy();
       for (const [target, type, handler] of bound) target.removeEventListener(type, handler);
       bound.length = 0;

@@ -214,6 +214,15 @@ select {
 .prism-player-host__title { font-size: var(--text-sm); font-weight: 600; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .prism-player-host__stage { flex: none; width: 100%; background: var(--player-bg); }
 
+/* ---- 沉浸全屏模式 (横屏/竖屏 100% 铺满视口，彻底消除任何屏幕居中缩放与黑边残留) ---- */
+.prism-player-host.prism-player-host--fullscreen { overflow: hidden !important; background: var(--player-bg) !important; }
+.prism-player-host.prism-player-host--fullscreen .prism-player-host__bar,
+.prism-player-host.prism-player-host--fullscreen .prism-player-host__body { display: none !important; }
+.prism-player-host.prism-player-host--fullscreen .prism-player-host__stage { position: fixed !important; inset: 0 !important; width: 100vw !important; height: 100vh !important; z-index: 1000 !important; background: var(--player-bg) !important; margin: 0 !important; }
+.prism-player-host.prism-player-host--fullscreen .prism-player { position: absolute !important; inset: 0 !important; width: 100% !important; height: 100% !important; aspect-ratio: auto !important; border-radius: 0 !important; background: var(--player-bg) !important; }
+.prism-player-host.prism-player-host--fullscreen .art-video-player { width: 100% !important; height: 100% !important; background: var(--player-bg) !important; }
+.prism-player-host.prism-player-host--fullscreen video { width: 100% !important; height: 100% !important; object-fit: contain !important; }
+
 /* 非全屏剧集详情生态台 (Portrait Media Stage) */
 .prism-player-host__body { flex: 1 1 auto; padding: 14px 16px calc(24px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 16px; background: var(--bg); }
 .prism-player-info { display: flex; flex-direction: column; gap: 8px; }

@@ -157,6 +157,30 @@ describe('player-host 装配', () => {
     expect(h.player.isOpen()).toBe(false);
   });
 
+  it('全屏模式切换与返回拦截：全屏下返回优先退出全屏，非全屏返回才关闭播放器', async () => {
+    const h = host();
+    await h.player.open('c1'); await settle();
+    const hostEl = h.mount.querySelector('.prism-player-host') as HTMLElement;
+    expect(hostEl.classList.contains('prism-player-host--fullscreen')).toBe(false);
+
+    const cinemaBtn = Array.from(h.mount.querySelectorAll<HTMLButtonElement>('.action-island-item')).find(
+      (b) => b.textContent?.includes('沉浸全屏')
+    );
+    cinemaBtn?.click();
+    expect(hostEl.classList.contains('prism-player-host--fullscreen')).toBe(true);
+
+    // 全屏态下触发系统 Back 键：优先退出全屏，播放器保持打开
+    const back1 = await dispatchBackButtonForTest();
+    expect(back1).toBe(true);
+    expect(hostEl.classList.contains('prism-player-host--fullscreen')).toBe(false);
+    expect(h.player.isOpen()).toBe(true);
+
+    // 非全屏态下触发系统 Back 键：关闭播放器
+    const back2 = await dispatchBackButtonForTest();
+    expect(back2).toBe(true);
+    expect(h.player.isOpen()).toBe(false);
+  });
+
   it('通知栏动作映射到当前实例：切换播放、上下集、焦点回程', async () => {
     const h = host();
     await h.player.open('c1'); await settle();
