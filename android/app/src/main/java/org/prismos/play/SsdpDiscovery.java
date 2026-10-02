@@ -188,7 +188,7 @@ final class SsdpDiscovery {
             return false;
         }
         try {
-            if (!nic.isUp() || nic.isLoopback() || nic.isPointToPoint() || nic.getVirtual()) {
+            if (!nic.isUp() || nic.isLoopback() || nic.isPointToPoint() || nic.isVirtual()) {
                 return false;
             }
             Enumeration<InetAddress> addresses = nic.getInetAddresses();
