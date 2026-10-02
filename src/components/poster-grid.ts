@@ -95,6 +95,7 @@ export function createModeSwitch(deps: ModeSwitchDeps): ModeSwitch {
     button.type = 'button';
     button.dataset.mode = mode;
     button.title = POSTER_MODE_LABEL[mode];
+    button.setAttribute('aria-label', POSTER_MODE_LABEL[mode]);
     button.appendChild(iconNode(MODE_GLYPHS[mode], { size: 16, className: 'mode-glyph' }));
     button.appendChild(element('span', 'mode-btn-label', POSTER_MODE_LABEL[mode]));
     button.addEventListener('click', () => {

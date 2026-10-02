@@ -104,19 +104,17 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
   const callPauseSwitch = switchControl('call-auto-pause', '来电自动暂停', (next) => void toggleCallPause(next));
   const privateSwitch = switchControl('private-switch', '个人探索', (next) => flipPrivateSession(next));
   const codeInput = make('input', 'pv-input');
-  codeInput.type = 'text'; codeInput.dataset.el = 'redeem-code'; codeInput.placeholder = '输入卡密'; codeInput.setAttribute('aria-label', '卡密');
+  codeInput.type = 'text'; codeInput.dataset.el = 'redeem-code'; codeInput.placeholder = '输入卡密（如 GY-XXXXXXXX）'; codeInput.setAttribute('aria-label', '卡密');
   const hostHonesty = (): string => (nativeOnly() === 'web-fallback' ? '当前为 Web 宿主，此项须 Android 真机才会真实生效。' : '已交由 Android 原生能力处理，效果仍需真机复核。');
   const themeRow = rowLine('row-theme', '日夜双模主题', '黑曜石夜空 / 象牙纯白即时切换，偏好只写入可备份的偏好域。', [themeSwitch]);
   const keepRow = rowLine('row-keep-screen', '后台 / 息屏播放', `锁屏或切回桌面时是否保持音频，${hostHonesty()}`, [keepScreenSwitch]);
   const pauseRow = rowLine('row-call-pause', '来电自动暂停', '响铃即暂停并记录断点；恢复播放须满足前置条件，否则保持暂停。', [callPauseSwitch]);
-  const redeemRow = rowLine('row-redeem', '卡密核销', '核销成功后由宿主写入安全凭证域，本视图不留 JWT 副本。', [codeInput, button('核销', () => void submitRedeem(), { icon: 'check', cls: 'pv-btn-primary', el: 'redeem-submit' })]);
+  const redeemRow = make('div', 'pv-redeem-row');
+  redeemRow.dataset.el = 'row-redeem';
+  redeemRow.append(codeInput, button('核销', () => void submitRedeem(), { icon: 'check', cls: 'pv-btn-primary', el: 'redeem-submit' }));
   const privateRow = rowLine('row-private', '个人探索（当次手动开启）', '冷启动默认关闭；开启态只存内存，不写历史、不可分享。', [privateSwitch]);
   ota.head.append(button('检查更新', () => void checkVersion(), { icon: 'refresh', cls: 'pv-btn-ghost', el: 'ota-check' }));
-  const diagController = createDiagnosticsBand({
-    apiBaseUrl: deps.apiBaseUrl ?? '',
-    nativeSource: nativeOnly,
-    paintRows
-  });
+  const diagController = createDiagnosticsBand({ apiBaseUrl: deps.apiBaseUrl ?? '', nativeSource: nativeOnly, paintRows });
   deps.root.classList.add('pv-view', 'set-view');
   deps.root.append(make('h2', 'pv-head-title', '系统设置中枢'), appearance.wrap, playback.wrap, redeem.wrap, ota.wrap, diagController.wrap);
   // AC-02-2：构造即「关」，并丢弃任何遗留的当次凭据，绝不允许「界面已关但凭据仍在飞」。

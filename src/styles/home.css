@@ -39,14 +39,15 @@
 .home-search-lead { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: var(--text-sm); width: 100%; }
 .home-search-lead svg { color: var(--accent); flex: none; }
 
-/* —— 区块头：频道名 + 当前排版标签 + 四模切换器同行并轨 —— */
+/* —— 区块头：纯净频道名 + 纯图标四模切换器同行并轨（零文字干扰） —— */
 .home-section-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin: 0; padding: var(--space-2) 14px 0; }
-.home-section-lead { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
-.home-section-title { font-size: 14px; font-weight: 700; color: var(--fg); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.home-mode-tag { font-size: var(--text-xs); font-weight: 500; color: var(--muted); }
-.home-mode-switch { display: inline-flex; align-items: center; background: var(--surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 2px; gap: 2px; }
-.mode-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 26px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; transition: all 0.15s ease; }
-.mode-btn[aria-pressed='true'] { color: var(--accent-on); background: var(--accent); font-weight: 600; }
+.home-section-lead { display: flex; align-items: center; min-width: 0; flex: 1 1 auto; }
+.home-section-title { font-size: 15px; font-weight: 700; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.home-mode-tag { display: none !important; }
+.home-mode-switch { display: inline-flex; align-items: center; background: var(--surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 2px; gap: 2px; flex: 0 0 auto; }
+.mode-btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; transition: all 0.15s ease; }
+.mode-btn[aria-pressed='true'] { color: var(--accent-on); background: var(--accent); }
+.mode-btn-label { display: none !important; }
 
 /* —— 首屏续播卡在首页彻底隐藏（权责完整归拢至追剧页） —— */
 .home-continue-host { display: none !important; }
