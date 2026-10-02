@@ -31,6 +31,7 @@
 │    • Database UUID：e54f7f0b-1be7-4d40-89bd-b91c8faf576b                         │
 │    • 存储格式：SQLite 分布式复制实例（亚太 APAC 主节点）                          │
 │    • 表结构规模：20 张真实业务表 + 5 张 FTS5 全文索引影子表                      │
+│    • 当前数据规模：154 部作品（短剧 66/电影 34/动漫 30/纪录 24）、FTS5 154 条、rev: 136│
 ├──────────────────────────────────────────────────────────────────────────────────┤
 │ 4. 键值极速缓存 (KV)                                                             │
 │    • 空间名称：prism-play-kv                                                     │
@@ -186,6 +187,20 @@ VALUES (101, 'drama_new_001', 1, '第1集：潜龙出渊', 120, strftime('%s','n
 INSERT OR REPLACE INTO episode_sources (episode_id, provider_id, upstream_media_url, enabled, created_at, updated_at)
 VALUES (101, 'provider_hls', 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8', 1, strftime('%s','now'), strftime('%s','now'));
 ```
+
+### 4. 批量内容清洗导入与全网刷新工序 (流水线自动化)
+针对大批量片单扩充与多频道更新，工程提供全自动清洗与导入工具：
+```bash
+# 进入云端目录
+cd D:\DEV\prism-play\edge
+
+# 运行采集清洗与 SQL 生成器 (自动从成熟验证源拉取 1080P HLS 与海报并做 CJK 分词)
+"C:/Users/Master/.workbuddy/binaries/node/versions/22.22.2-3/node.exe" scripts/seed-runner.mjs
+
+# 一键灌装进线上远程 D1 数据库 (自动更新 items, episodes, sources, FTS5 与 catalog_changes)
+npx wrangler d1 execute prism-play-db --remote --file=scripts/seed-data.sql
+```
+*详见专门事实正本：《大视界内容拓扑、分类规范与数据运维事实正本》(`docs/02-architecture/CONTENT-CATALOG-FACTS.md`)。*
 
 ---
 
