@@ -1,0 +1,26 @@
+{
+  "activeTiers": [
+    {
+      "tier": "Q",
+      "name": "季度畅享卡",
+      "durationDays": 90,
+      "priceYuan": 9.9,
+      "desc": "90 天免打扰纯净畅看"
+    }
+  ],
+  "nudgePolicy": {
+    "freeTrialSeconds": 54000,
+    "stage1UntilSeconds": 108000,
+    "stage2UntilSeconds": 180000,
+    "stage1IntervalSeconds": 3600,
+    "stage2IntervalSeconds": 2700,
+    "stage3IntervalSeconds": 1800,
+    "dialogTitle": "支持光影Play",
+    "dialogBody": "独立自建多源聚合与边缘调度，不接广告不偷扣费。开通季卡享受更稳定流畅的观影体验。"
+  },
+  "privateAccessTiers": [
+    "B",
+    "Y",
+    "S"
+  ]
+}

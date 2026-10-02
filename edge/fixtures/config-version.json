@@ -1,0 +1,10 @@
+{
+  "android": {
+    "versionCode": 21110,
+    "versionName": "dev_v2.1.1.1",
+    "changelog": "1. 首页自适应推荐混排\n2. 播放器全屏适配优化\n3. 多端历史与偏好同步",
+    "downloadUrl": "https://play.prismos.org/dl/latest/android",
+    "minVersionCode": 21110,
+    "force": false
+  }
+}

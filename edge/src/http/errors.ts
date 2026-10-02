@@ -33,7 +33,7 @@ export const DEFAULT_ERROR_MESSAGE: Readonly<Record<ErrorCode, string>> = {
   PRIVATE_SESSION_REQUIRED: '请先阅读并接受免责声明后再开启个人探索',
   TIER_INSUFFICIENT: '当前授权档位不足以开启个人探索',
   NOT_FOUND: '内容不存在或已下架',
-  SERVICE_UNAVAILABLE: '该分集暂无可用播放源，请稍后重试',
+  SERVICE_UNAVAILABLE: '服务暂不可用，请稍后重试',
   PLATFORM_UNSUPPORTED: '本期仅支持 Android 客户端，platform 必须为 android',
   CREDENTIAL_EXPIRED: '授权凭证已过期或无效，请重新核销卡密',
   VALIDATION_ERROR: '请求参数不合法，请修正后重试',

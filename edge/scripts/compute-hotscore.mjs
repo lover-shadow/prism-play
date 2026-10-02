@@ -95,12 +95,24 @@ async function main() {
   }
 
   const statements = [];
-  for (const row of scored) {
+  const BATCH_SIZE = 200;
+  let batchCount = 0;
+
+  for (let i = 0; i < scored.length; i++) {
+    const row = scored[i];
+    if (i % BATCH_SIZE === 0) {
+      if (i > 0) statements.push('COMMIT;');
+      statements.push('BEGIN TRANSACTION;');
+      batchCount++;
+    }
     statements.push(
       `UPDATE content_items SET hits_week = ${row.hitsWeek}, hits_total = ${row.hitsTotal}, ` +
         `hot_score = ${row.score}, is_ai = ${row.isAi}, is_hot = ${hotIds.has(row.id) ? 1 : 0}, ` +
         `updated_at = ${nowSeconds} WHERE id = ${escapeSql(row.id)};`
     );
+  }
+  if (scored.length > 0) {
+    statements.push('COMMIT;');
   }
 
   fs.writeFileSync(SQL_OUTPUT, statements.join('\n'), 'utf8');

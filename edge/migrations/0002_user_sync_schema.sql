@@ -54,3 +54,4 @@ ALTER TABLE content_items ADD COLUMN is_hot INTEGER NOT NULL DEFAULT 0 CHECK(is_
 
 CREATE INDEX IF NOT EXISTS idx_content_hot ON content_items(channel_id, is_hot, hot_score DESC);
 CREATE INDEX IF NOT EXISTS idx_content_ai ON content_items(channel_id, is_ai, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_content_catalog_filter ON content_items(channel_id, enabled, is_private, category, updated_at DESC);
