@@ -13,6 +13,8 @@ android/build/
 __pycache__/
 *.pyc
 outputs/
+edge/cache/
+*.sql
 
 
 
