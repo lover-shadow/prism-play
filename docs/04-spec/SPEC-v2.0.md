@@ -150,7 +150,7 @@ CREATE INDEX IF NOT EXISTS idx_watch_history_time ON local_watch_history(updated
 | **独立设置中心** | `src/views/settings-view.ts` | 日夜双模切换、后台/息屏播放开关、来电自动暂停、卡密兑换、OTA 检测、个人探索开关（条件显现）、本地缓存清理附属功能 | `POST /api/redeem`, `GET /api/version` |
 | **分享点开即播页** | `edge/src/routes/share.ts` | 边缘直出极简 H5，载入当前单集；自动播放被拒时提供手动播放兜底；`ended` 弹出下载截流卡 | `GET /s/:drama_id` |
 | **搜索与结果视图** | `src/views/search-view.ts`（规划路径） | 本地公开热词快显、输入法组合、补全/关键词/语义/同类、筛选/纠错、降级提示与零结果 | `/api/search/suggestions`, `/api/search`, `/api/titles/{titleId}/related` |
-| **追剧与历史视图** | `src/views/history-view.ts`（规划路径） | 正在追剧集（秒级进度条与一键起播）、观看历史清单、基于已看剧目的同类推荐流（缓存不独立设页，下沉设置项） | 本地历史库 + `GET /api/titles/{titleId}/related` |
+| **追剧与历史视图** | `src/views/history-view.ts`（规划路径） | 正在追剧集（秒级进度条与一键起播）、观看历史清单、基于已看剧目的同类推荐流、多端接力同步 | 本地历史库 + `GET /api/titles/{titleId}/related`, `GET|POST /api/user/sync` |
 | **公开目录缓存服务** | `src/core/catalog-cache.ts`（规划路径） | 快照版本增量同步、缩略海报缓存及 LRU（作为端侧基础服务运行，不设独立主界面）；私密请求零落盘 | `/api/catalog`, `/api/catalog/changes` |
 
 > 上述七个视图/组件均须实现对应生命周期与异常状态（业务视图完整覆盖 `loading / empty / error / ready / disabled` 五态），未获双重准入的私密内容**不渲染**而非渲染空卡。

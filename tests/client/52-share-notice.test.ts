@@ -3,7 +3,7 @@
  * 分享出站与轻提示的单元面：分享链接的线协议形态、两条出站通道的降级次序、失败必须被说出来。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createShareAction } from '../../src/core/share';
+import { createShareAction, SHARE_ORIGIN } from '../../src/core/share';
 import { createNotice } from '../../src/components/notice';
 import type { ContentItem, EpisodeItem } from '../../edge/src/types/api';
 import type { PrismNativeBridge } from '../../src/core/native/bridge';
@@ -26,7 +26,7 @@ function share(options: { clipboard: 'ok' | 'denied' | 'absent'; externalFails?:
       opened.push(url);
     }
   } as unknown as PrismNativeBridge;
-  const action = createShareAction({ bridge, report: (message) => reports.push(message), origin: 'https://play.prismos.org' });
+  const action = createShareAction({ bridge, report: (message) => reports.push(message) });
   return { action, reports, opened, writeText };
 }
 
@@ -38,7 +38,8 @@ describe('分享出站', () => {
     const h = share();
     await h.action(CONTENT, EPISODE);
     expect(h.opened).toEqual([]);
-    expect(h.writeText?.mock.calls).toEqual([['https://play.prismos.org/s/drama%201%2F?ep=7']]);
+    const expected = '【光影Play】邀请你看《凤逆天下》第7集，点开即播免下载：' + '\n' + 'https://play.prismos.org/s/drama%201%2F?ep=7';
+    expect(h.writeText?.mock.calls).toEqual([[expected]]);
     expect(h.reports).toEqual(['分享链接已复制，可直接粘贴给好友']);
   });
 
@@ -53,6 +54,18 @@ describe('分享出站', () => {
     await h.action(CONTENT, EPISODE);
     expect(h.opened).toEqual(['https://play.prismos.org/s/drama%201%2F?ep=7']);
     expect(h.reports).toEqual([]);
+  });
+
+  it('主域恒定，绝不退化到运行时 origin（Capacitor 下 window.location.origin 是 localhost）', async () => {
+    // 这是 v2.4 之前分享死链的根因：origin 从运行时读取，在 Android WebView 里变成
+    // https://localhost，拼出的链接在别人手机上必然打不开。因此主域必须是模块级常量。
+    expect(SHARE_ORIGIN).toBe('https://play.prismos.org');
+    const h = share();
+    await h.action(CONTENT, EPISODE);
+    const calls = h.writeText?.mock.calls as unknown as unknown[][];
+    const copied = String(calls?.[0]?.[0] ?? '');
+    expect(copied).toContain('https://play.prismos.org/s/');
+    expect(copied).not.toContain('localhost');
   });
 
   it('两条通道都不通才报错，且报错文案不假装成功', async () => {

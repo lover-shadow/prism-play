@@ -21,6 +21,7 @@ import { handleSearchSuggestions } from './routes/search-suggestions';
 import { handleShare } from './routes/share';
 import { handleSources } from './routes/sources';
 import { handleTitles } from './routes/titles';
+import { handleUserSync } from './routes/user-sync';
 import { handleVersion } from './routes/version';
 
 type RouteHandler = (request: Request, env: Env, clock: Clock) => Promise<Response>;
@@ -33,7 +34,7 @@ interface Route {
 }
 
 /**
- * All 18 endpoints of openapi.yaml are mounted here, in declaration order. Patterns that carry extra
+ * All 19 endpoints of openapi.yaml are mounted here, in declaration order. Patterns that carry extra
  * segments are listed before their shorter prefixes so `/api/titles/{id}/related` cannot be swallowed
  * by `/api/titles/{id}`. `/proxy/{kind}/{handle}` keeps its multi-segment shape and is never collapsed
  * into a single `{path}` wildcard (dispatch package §四.4).
@@ -52,6 +53,7 @@ const ROUTES: readonly Route[] = [
   { pattern: ['api', 'config', 'monetization'], allow: ['GET'], handle: handleMonetizationConfig },
   { pattern: ['api', 'redeem'], allow: ['POST'], handle: handleRedeem },
   { pattern: ['api', 'device', 'ping'], allow: ['GET'], handle: handleDevicePing },
+  { pattern: ['api', 'user', 'sync'], allow: ['GET', 'POST'], handle: handleUserSync },
   { pattern: ['api', 'version'], allow: ['GET'], handle: handleVersion },
   { pattern: ['s', '{dramaId}'], allow: ['GET'], handle: handleShare },
   { pattern: ['dl', 'latest', '{platform}'], allow: ['GET'], handle: handleApkDownload },

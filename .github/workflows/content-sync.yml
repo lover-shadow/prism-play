@@ -1,0 +1,42 @@
+name: Content Daily Sync & Incremental Catalog Ingest
+
+on:
+  schedule:
+    # 每日 UTC 19:00（北京时间次日凌晨 03:00）自动执行
+    - cron: '0 19 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync-catalog:
+    name: Sync Fresh Titles to Cloudflare D1
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码仓库
+        uses: actions/checkout@v4
+
+      - name: 设置 Node.js 环境 (v22)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: 安装项目依赖
+        run: |
+          npm ci
+
+      - name: 执行每日增量抓取与数据清洗
+        run: |
+          node edge/scripts/sync-incremental.mjs
+
+      - name: 部署增量数据至 Cloudflare D1 生产库
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -s edge/scripts/sync-incremental.sql ]; then
+            echo "开始执行增量 SQL 导入..."
+            cd edge && npx wrangler d1 execute prism-play-db --remote --file=scripts/sync-incremental.sql
+          else
+            echo "未生成有效增量 SQL，跳过入库。"
+          fi

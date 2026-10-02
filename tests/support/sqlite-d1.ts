@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { createRequire } from 'node:module';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 type Row = Record<string, unknown>;
 type Bindable = string | number | bigint | null | Uint8Array;
@@ -161,12 +162,24 @@ export function asD1(db: SqliteD1): D1Database {
   return db as unknown as D1Database;
 }
 
-/** Applies the authoritative migration file so tests can never drift from the production DDL. */
+/**
+ * Applies every authoritative migration in filename order so tests can never drift from the
+ * production DDL. Only reading 0001 would leave incremental migrations (0002 onward) absent from
+ * the test database, which is how a CHECK or FK constraint silently stops being covered.
+ */
 export function createInMemoryD1(): SqliteD1 {
   const Database = loadDatabaseSync();
   const handle = new Database(':memory:', { enableForeignKeyConstraints: true });
   handle.exec('PRAGMA foreign_keys = ON');
-  const schemaUrl = new URL('../../edge/migrations/0001_initial_schema.sql', import.meta.url);
-  handle.exec(readFileSync(schemaUrl, 'utf8'));
+  const migrationsDir = fileURLToPath(new URL('../../edge/migrations/', import.meta.url));
+  const files = readdirSync(migrationsDir)
+    .filter((name) => name.endsWith('.sql'))
+    .sort();
+  if (files.length === 0 || files[0] !== '0001_initial_schema.sql') {
+    throw new Error(`迁移序列必须从 0001_initial_schema.sql 起始，实际: ${files.join(', ')}`);
+  }
+  for (const name of files) {
+    handle.exec(readFileSync(new URL(name, new URL('../../edge/migrations/', import.meta.url)), 'utf8'));
+  }
   return new SqliteD1(handle);
 }

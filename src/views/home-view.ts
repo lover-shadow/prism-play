@@ -39,6 +39,11 @@ export interface HomeApi {
 export interface HomeViewDeps {
   api: HomeApi;
   root: HTMLElement;
+  /**
+   * 顶栏右侧工具槽（由外壳提供，永不被清空）。四模排版切换器挂在这里，随视图构造一次并常驻复用。
+   * 缺省时切换器退回视图内部（单测与旧宿主场景），保证不必依赖外壳也能渲染。
+   */
+  headerAccessory?: HTMLElement | null;
   posterMode: () => PosterMode;
   onPosterModeChange: (mode: PosterMode) => void;
   onOpenTitle: (contentId: string) => void;
@@ -77,18 +82,23 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
     searchBar.addEventListener('click', () => { if (deps.onSearch) deps.onSearch(); else document.querySelector<HTMLButtonElement>('.app-tab[data-tab="search"]')?.click(); });
     searchBar.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); searchBar.click(); } });
 
-    const continueHost = element('div', 'home-continue-host'), heading = element('h2', 'home-section-header');
+    const continueHost = element('div', 'home-continue-host');
+    const heading = element('h2', 'home-section-header');
     const titleGroup = element('div', 'home-section-lead');
     const channelName = element('span', 'home-section-title'), modeTag = element('span', 'home-mode-tag');
     titleGroup.append(channelName, modeTag);
-
     const switchHost = element('div', 'home-mode-switch');
     const gridHost = element('div', 'home-grid-host'), moreHost = element('div', 'home-more-host');
     continueHost.hidden = true;
 
+    if (deps.headerAccessory !== null && deps.headerAccessory !== undefined) {
+      deps.headerAccessory.replaceChildren(switchHost);
+      view.append(sticky, searchBar, continueHost, gridHost, moreHost);
+    } else {
+      heading.append(titleGroup, switchHost);
+      view.append(sticky, searchBar, continueHost, heading, gridHost, moreHost);
+    }
     sticky.append(channelHost, railHost);
-    heading.append(titleGroup, switchHost);
-    view.append(sticky, searchBar, continueHost, heading, gridHost, moreHost);
     deps.root.appendChild(view);
 
     let channels: ChannelItem[] = [], items: ContentItem[] = [];

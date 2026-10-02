@@ -261,3 +261,46 @@ git push origin main                 # 推送到 GitHub，Actions 自动开始�
 # https://github.com/lover-shadow/prism-play/actions
 # 点击最新一条绿色的 Run 记录，在页面底部 Artifacts 区域下载 prism-play-debug-apk 即可。
 ```
+
+---
+
+## 附录：Android 永久签名资产（WP1 · 2026-10-03 起生效）
+
+**问题**：未绑定 `signingConfig` 时 AGP 在 `~/.android/debug.keystore` 缺失处自动生成一份证书；GitHub Actions 每台临时虚拟机都从零开始 → 每次出包签名指纹不同 → 手机上覆盖安装必报 `-7 INSTALL_FAILED_UPDATE_INCOMPATIBLE`。
+
+**处置**：`android/app/debug.keystore` 作为工程资产提交，并在 `android/app/build.gradle` 显式绑定 `signingConfigs.debug`（debug 与 release 均绑定）。
+
+**资产参数（换机器/重建时必须逐项一致）**
+
+| 项 | 值 |
+| :--- | :--- |
+| 路径 | `android/app/debug.keystore` |
+| 格式 | **PKCS12**（openssl 生成；build.gradle 已显式声明 `storeType 'pkcs12'`） |
+| storePassword | `android` |
+| keyAlias | `androiddebugkey` |
+| keyPassword | `android` |
+| 算法/有效期 | RSA 2048 / 10000 天 |
+| DN | `CN=Android Debug, O=Android, C=US` |
+
+**签名证书 SHA-256 指纹基线（跨构建恒定的唯一判据）**
+
+```
+8B:C2:28:B3:D4:5E:2A:FA:0F:BA:9F:27:67:6D:13:B6:0C:D0:DC:FB:05:37:12:1B:F1:47:66:FF:E5:F4:D2:9D
+```
+
+复算命令（本机无 JDK，用 openssl 即可）：
+
+```bash
+openssl pkcs12 -in android/app/debug.keystore -passin pass:android -nokeys -clcerts \
+  | openssl x509 -noout -fingerprint -sha256
+```
+
+**重建条件**：只有在指纹与上表**不一致**时才算签名漂移。若需重建（例如证书到期），必须**同步更新本表指纹**，并把旧包无法覆盖安装的事实写进交付说明。
+
+**静默失效风险（必记）**：`android/.gitignore` 中 `#*.keystore` 目前是**注释状态**，故本文件可提交。**若有人取消该行注释，本机制会静默失效**——CI 不报错，只是又开始漂移。因此出包验收必须跑上面的指纹复算命令做硬校验，不能只看"CI 绿了"。
+
+**已知取舍**：口令随仓库入库 = 持有仓库者可产出同签名包。本项目为私域侧载分发（无商店签名链），取舍可接受；**不得对外宣称"安装包受签名保护"**。
+
+**本机限制**：开发环境**无 JDK / keytool**，故用 openssl 生成 PKCS12；若日后本机遇 JDK，可用
+`keytool -genkeypair -keystore android/app/debug.keystore -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"`
+重建（指纹会变，记得同步本表）。

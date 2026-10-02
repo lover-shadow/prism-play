@@ -1,10 +1,4 @@
-/**
- * Contract DTO layer.
- * Mechanical projection of docs/03-contracts/openapi.yaml (machine-readable authority).
- * Field names here are lowerCamelCase because the wire format is camelCase; D1 columns are
- * snake_case and are mapped in the repository layer only.
- */
-
+/** Contract DTO layer projected from docs/03-contracts/openapi.yaml. */
 export const CHANNEL_IDS = ['drama', 'movie', 'anime', 'documentary', 'private'] as const;
 export type ChannelId = (typeof CHANNEL_IDS)[number];
 
@@ -17,11 +11,9 @@ export type DeviceTier = (typeof DEVICE_TIERS)[number];
 export const COUPON_TIERS = ['Q', 'A', 'B', 'Y', 'S'] as const;
 export type CouponTier = (typeof COUPON_TIERS)[number];
 
-/** openapi.yaml pins the 个人探索 eligibility set to these three tiers. */
 export const PRIVATE_ELIGIBLE_TIERS = ['B', 'Y', 'S'] as const;
 export type PrivateEligibleTier = (typeof PRIVATE_ELIGIBLE_TIERS)[number];
 
-/** `devices.expires_at` sentinel meaning "never expires"; only tier S uses it. */
 export const PERMANENT_EXPIRES_AT = -1;
 
 export interface ChannelItem {
@@ -45,6 +37,10 @@ export interface ContentItem {
   episodeCount?: number;
   enabled?: boolean;
   shareable?: boolean;
+  /** AI 短剧/漫剧形式标记（CLOUD-SYNC-JIT-PIPELINE-SPEC §3.3）；缺省即 0。 */
+  isAi?: boolean;
+  /** 全网热门标记：HotScore 排名前 15%（SPEC §3.2）；缺省即 0。 */
+  isHot?: boolean;
 }
 
 export interface EpisodeItem {
@@ -111,6 +107,44 @@ export interface DevicePingResponse {
   expiresAt: number;
   token: string;
   message?: string;
+}
+
+/** Multi-device sync payload (CLOUD-SYNC-JIT-PIPELINE-SPEC §2.2). */
+export interface UserSyncHistoryInput {
+  contentId: string;
+  episodeNumber: number;
+  positionSeconds: number;
+  durationSeconds: number;
+}
+
+export interface UserSyncPreferences {
+  genres: Record<string, number>;
+  totalPlays: number;
+}
+
+export interface UserSyncRequest {
+  history: UserSyncHistoryInput | null;
+  preferences: UserSyncPreferences;
+}
+
+export interface SyncHistoryRow {
+  contentId: string;
+  episodeNumber: number;
+  positionSeconds: number;
+  durationSeconds: number;
+  updatedAt: number;
+}
+
+/** The success shape is identical for every accepted input, including the ones written nowhere. */
+export interface UserSyncAcceptedResponse {
+  success: true;
+  syncedAt: number;
+}
+
+export interface UserSyncStateResponse {
+  success: true;
+  history: SyncHistoryRow[];
+  preferences: (UserSyncPreferences & { updatedAt: number }) | null;
 }
 
 export const SEARCH_SUGGESTION_TYPES = ['title', 'alias', 'pinyin', 'category', 'correction'] as const;
@@ -206,11 +240,7 @@ export interface NudgePolicy {
 export interface MonetizationConfig {
   activeTiers: MonetizationTier[];
   nudgePolicy: NudgePolicy;
-  /**
-   * Cloud-configured tiers eligible for 个人探索. Delivered on this public endpoint precisely so the
-   * settings screen can decide whether to show the switch without `/api/channels` leaking the
-   * private channel node (supervision ruling A-3 on AC-02-1 vs AC-02-3).
-   */
+  /** Cloud-configured tiers eligible for 个人探索 (supervision ruling A-3). */
   privateAccessTiers?: PrivateEligibleTier[];
 }
 

@@ -63,3 +63,31 @@ export const PUBLIC_POSTER_MAX_AGE_SECONDS = 300;
 
 /** Share landing page: `?ep=` defaults to episode 1 (SPEC §5 /s/:drama_id). */
 export const SHARE_DEFAULT_EPISODE = 1;
+
+/**
+ * `/api/user/sync` throttling (CLOUD-SYNC-JIT-PIPELINE-SPEC §2.4).
+ *
+ * Keyed by deviceId, NOT by IP: one coupon may bind up to 10 devices that share a household
+ * egress IP, so an IP bucket would punish a normal family while still allowing a single device
+ * to write freely. Every `INSERT OR REPLACE` here is a real D1 row write, and the free tier caps
+ * the whole account at 100,000 rows/day — an unthrottled device can take the entire database
+ * offline, so this limit is load-bearing rather than cosmetic.
+ */
+export const USER_SYNC_WINDOW_SECONDS = 300;
+export const USER_SYNC_POST_MAX_ATTEMPTS = 20;
+export const USER_SYNC_GET_MAX_ATTEMPTS = 60;
+
+/** Maximum rows `GET /api/user/sync` returns, newest first (SPEC §2.2). */
+export const USER_SYNC_HISTORY_LIMIT = 50;
+
+/**
+ * HotScore weights (SPEC §3.2). Weekly clicks dominate so an older title with a huge lifetime
+ * count cannot permanently outrank what people are watching now; `RecencyBoost` lifts anything
+ * first published inside the freshness window.
+ */
+export const HOTSCORE_WEEK_WEIGHT = 0.6;
+export const HOTSCORE_TOTAL_WEIGHT = 0.2;
+export const HOTSCORE_RECENCY_BOOST = 0.8;
+export const HOTSCORE_FRESH_WINDOW_SECONDS = 72 * 3600;
+/** Top slice by HotScore that earns `is_hot = 1` (SPEC §3.2). */
+export const HOT_TOP_PERCENT = 0.15;

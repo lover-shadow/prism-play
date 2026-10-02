@@ -118,6 +118,14 @@ components:
           type: boolean
           description: 经单独确认可分享才为 true；入库默认 false，私密恒 false
           example: true
+        isAi:
+          type: boolean
+          description: AI 短剧/漫剧形式标记；由云端批次任务标定（CLOUD-SYNC-JIT-PIPELINE-SPEC §3.3）。缺省即 false
+          example: false
+        isHot:
+          type: boolean
+          description: 全网热门标记：HotScore 排名前 15% 置 1（SPEC §3.2）。缺省即 false
+          example: true
 
     EpisodeItem:
       type: object
@@ -292,6 +300,99 @@ components:
           description: 本次在线校验后重新签发的 Ed25519 JWT；若授权已撤销则返回 401，不签新凭证
         message:
           type: string
+
+    UserSyncHistoryInput:
+      type: object
+      required: [contentId, episodeNumber, positionSeconds, durationSeconds]
+      properties:
+        contentId:
+          type: string
+          example: drama_modu_90567
+        episodeNumber:
+          type: integer
+          minimum: 1
+          example: 12
+        positionSeconds:
+          type: number
+          minimum: 0
+          example: 145.5
+        durationSeconds:
+          type: number
+          minimum: 0
+          example: 300
+
+    UserSyncPreferences:
+      type: object
+      required: [genres, totalPlays]
+      properties:
+        genres:
+          type: object
+          description: 21 个双字题材的偏好得分向量；由客户端本地计算，服务端只存储与回放，不解释其值
+          additionalProperties:
+            type: number
+            minimum: 0
+          example: { "战神": 24.5, "逆袭": 18.0 }
+        totalPlays:
+          type: integer
+          minimum: 0
+          example: 48
+
+    UserSyncRequest:
+      type: object
+      required: [history, preferences]
+      properties:
+        history:
+          nullable: true
+          description: 当前退出的这单部剧集断点；仅程序退出且无播放时可为 null
+          allOf:
+            - $ref: "#/components/schemas/UserSyncHistoryInput"
+        preferences:
+          $ref: "#/components/schemas/UserSyncPreferences"
+
+    UserSyncAcceptedResponse:
+      type: object
+      required: [success, syncedAt]
+      properties:
+        success:
+          type: boolean
+          enum: [true]
+        syncedAt:
+          type: integer
+          example: 1790945000
+
+    SyncHistoryRow:
+      type: object
+      required: [contentId, episodeNumber, positionSeconds, durationSeconds, updatedAt]
+      properties:
+        contentId:
+          type: string
+        episodeNumber:
+          type: integer
+        positionSeconds:
+          type: number
+        durationSeconds:
+          type: number
+        updatedAt:
+          type: integer
+
+    UserSyncStateResponse:
+      type: object
+      required: [success, history, preferences]
+      properties:
+        success:
+          type: boolean
+          enum: [true]
+        history:
+          type: array
+          maxItems: 50
+          description: 按 updated_at 倒序的最近断点；未核销卡密时为空数组
+          items:
+            $ref: "#/components/schemas/SyncHistoryRow"
+        preferences:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/UserSyncPreferences"
+          example: { "genres": { "战神": 24.5 }, "totalPlays": 48, "updatedAt": 1790945000 }
 
     SearchSuggestion:
       type: object
@@ -937,6 +1038,68 @@ paths:
                 $ref: "#/components/schemas/DevicePingResponse"
         "401":
           description: 凭证无效或已过期，需要重新核销
+
+  /api/user/sync:
+    get:
+      tags: [系统]
+      summary: 拉取云端多端同步状态（观看断点与偏好画像）
+      description: |
+        以卡密为身份锚点返回该家庭共享域下的最近观看断点与题材偏好画像，供电视 / PC / 新手机首次打开时继承。
+        未核销卡密的设备同样返回 200，但 history 为空、preferences 为 null —— 保持与已同步成员同形，
+        避免状态码本身成为"是否为付费成员"的判别通道。
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: 成功返回同步状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserSyncStateResponse"
+        "401":
+          description: 凭证无效或已过期
+        "429":
+          description: 同步请求过于频繁
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      tags: [系统]
+      summary: 上报观看断点与偏好画像
+      description: |
+        客户端在退出播放页与程序挂起两个离场时点上报。个人探索（is_private = 1）内容物理禁止同步：
+        服务端在写入前即拒绝，且"内容不存在"与"存在但私密"返回字节完全一致的响应，
+        杜绝通过外键异常差异探测私密作品存在性（AC-02-3）。
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserSyncRequest"
+      responses:
+        "200":
+          description: 已接受；无论是否实际写入均返回同形成功响应
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserSyncAcceptedResponse"
+        "400":
+          description: 同步载荷格式不正确
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: 凭证无效或已过期
+        "429":
+          description: 同步请求过于频繁
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/version:
     get:

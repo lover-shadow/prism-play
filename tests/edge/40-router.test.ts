@@ -26,6 +26,7 @@ const MOUNTED: readonly { path: string; allow: string; wrongMethod: string }[] =
   { path: '/api/config/monetization', allow: 'GET', wrongMethod: 'POST' },
   { path: '/api/redeem', allow: 'POST', wrongMethod: 'GET' },
   { path: '/api/device/ping', allow: 'GET', wrongMethod: 'POST' },
+  { path: '/api/user/sync', allow: 'GET, POST', wrongMethod: 'DELETE' },
   { path: '/api/version', allow: 'GET', wrongMethod: 'POST' },
   { path: '/s/d_8f31c2', allow: 'GET', wrongMethod: 'POST' },
   { path: '/dl', allow: 'GET', wrongMethod: 'POST' },
@@ -37,7 +38,7 @@ async function call(env: PrismTestEnv, method: string, path: string): Promise<Re
   return worker.fetch(new Request(`http://localhost:8787${path}`, { method }), env, ctx);
 }
 
-describe('edge router mounts all 18 contract endpoints', () => {
+describe('edge router mounts all 19 contract endpoints', () => {
   it('answers 405 with the declared verbs instead of 404, proving each route is registered', async () => {
     const env = await createTestEnv();
     for (const route of MOUNTED) {

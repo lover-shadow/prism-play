@@ -20,6 +20,10 @@ export interface ContentRow {
   first_published_at: number | null;
   updated_at: number;
   episode_count: number | null;
+  /** 客观属性（0002 迁移扩列）。测试中可能缺失，故按可选声明并由序列化层兜底为 0。 */
+  is_ai?: number;
+  is_hot?: number;
+  hot_score?: number;
 }
 
 export interface EpisodeRow {
@@ -51,6 +55,7 @@ export interface PlaybackCandidate {
 const CONTENT_SELECT =
   'SELECT c.id, c.channel_id, c.title, c.cover_url, c.cover_version, c.synopsis, c.category, c.is_private, ' +
   'c.shareable, c.enabled, c.first_published_at, c.updated_at, ' +
+  'c.is_ai, c.is_hot, c.hot_score, ' +
   '(SELECT COUNT(*) FROM content_episodes e WHERE e.content_id = c.id) AS episode_count FROM content_items c';
 
 const PRIVATE_CHANNEL_ID: ChannelId = 'private';

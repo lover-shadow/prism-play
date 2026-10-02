@@ -30,8 +30,9 @@
 │    • 数据库名称：prism-play-db                                                   │
 │    • Database UUID：e54f7f0b-1be7-4d40-89bd-b91c8faf576b                         │
 │    • 存储格式：SQLite 分布式复制实例（亚太 APAC 主节点）                          │
-│    • 表结构规模：20 张真实业务表 + 5 张 FTS5 全文索引影子表                      │
-│    • 当前数据规模：154 部作品（短剧 66/电影 34/动漫 30/纪录 24）、FTS5 154 条、rev: 136│
+│    • 表结构规模：22 张真实业务表 + 5 张 FTS5 全文索引影子表（0001+0002 迁移）    │
+│    • 当前数据规模：8,874 部全量作品（短剧 4,066/电影 2,234/动漫 1,350/纪录 1,224） │
+│    • 核心扩展：客观 HotScore、AI剧标定、多端断点同步与偏好画像                   │
 ├──────────────────────────────────────────────────────────────────────────────────┤
 │ 4. 键值极速缓存 (KV)                                                             │
 │    • 空间名称：prism-play-kv                                                     │
@@ -73,6 +74,8 @@ D1 物理建表定义位于 `edge/migrations/0001_initial_schema.sql`，全量�
 - **`card_coupons` (卡密台账表)**：预制卡密库（Q 季卡、A 普通卡、B 高级卡、Y 年卡、S 极客卡），记录有效期、核销设备数；
 - **`coupon_bindings` (设备绑定表)**：卡密与设备物理 ID 的一对多幂等绑定记录；
 - **`devices` (激活设备表)**：终端设备 ID、激活档位、最后活跃时间；
+- **`cloud_watch_history` (多端观看历史表)**：以 `(coupon_code, content_id)` 为复合主键，记录会员在手机/TV/PC间接力续播的最新分集与时间戳；
+- **`cloud_user_profile` (多端偏好画像表)**：以 `coupon_code` 为主键，记录多端共享的 21 题材偏好得分向量 JSON 与总播放次数；
 - **`public_search_fts` (FTS5 虚拟全文检索表)**：中文 CJK 原生倒排分词索引表，纯 SQLite 词法计算，无需外部 AI 大模型。
 
 ### 2. 数据库级三大刚性安全约束 (CHECK 铁律)
@@ -199,8 +202,20 @@ cd D:\DEV\prism-play\edge
 
 # 一键灌装进线上远程 D1 数据库 (自动更新 items, episodes, sources, FTS5 与 catalog_changes)
 npx wrangler d1 execute prism-play-db --remote --file=scripts/seed-data.sql
+### 5. 多端状态同步与无人值守追新管线
+```bash
+# 1. 回填与重算客观 HotScore 与 AI 短剧标定
+node edge/scripts/compute-hotscore.mjs
+cd edge && npx wrangler d1 execute prism-play-db --remote --file=scripts/backfill-hotscore.sql
+
+# 2. 本地触发增量追新采集与入库测试
+node edge/scripts/sync-incremental.mjs
+cd edge && npx wrangler d1 execute prism-play-db --remote --file=scripts/sync-incremental.sql
+
+# 3. 生产环境由 GitHub Actions 每日凌晨 03:00 (UTC 19:00) 自动无人值守执行
+#    详见工作流定义：.github/workflows/content-sync.yml
 ```
-*详见专门事实正本：《大视界内容拓扑、分类规范与数据运维事实正本》(`docs/02-architecture/CONTENT-CATALOG-FACTS.md`)。*
+*详见专门事实正本：《大视界内容拓扑、分类规范与数据运维事实正本》(`docs/02-architecture/CONTENT-CATALOG-FACTS.md`) 与《云端多端同步中枢、JIT穿透引擎与定时追新工程规格书》(`docs/04-spec/CLOUD-SYNC-JIT-PIPELINE-SPEC.md`)。*
 
 ---
 

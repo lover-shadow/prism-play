@@ -169,6 +169,7 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
       const view = createHomeView({
         api: homeApi,
         root,
+        headerAccessory: shell.headerAccessory(),
         posterMode: () => posterMode,
         onPosterModeChange: (mode) => { posterMode = mode; void writePosterMode(prefs, mode); },
         onOpenTitle: (contentId) => void player.open(contentId),
@@ -252,7 +253,6 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
       report(error instanceof Error ? error.message : '授权凭证写入失败');
     }
   }
-
   const shell: AppShell = createAppShell({
     header,
     main,
@@ -268,7 +268,6 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
   if (started.outcome !== null && started.outcome.offline === false) await grant.recordOnlineCheck(now());
   catalog.onSynced(() => { if (homeView !== null) void homeView.refresh(); });
   const releaseNotifications = bindNotificationActions((action) => player.onNotification(action));
-
   await shell.activate('home');
   if (started.hadSnapshot === false && storage.cache.snapshotRevision() === 0) {
     report('离线或目录拉取失败：本机尚无公开快照，点播需联网。');

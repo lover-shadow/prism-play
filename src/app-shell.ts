@@ -46,6 +46,14 @@ export interface AppShell {
   current(): ShellTab;
   /** 供视图回调里拿到自己那一份宿主（例如搜索视图的键盘聚焦）。 */
   rootOf(tab: ShellTab): HTMLElement | null;
+  /**
+   * 顶栏右侧「工具槽」：本波次用于承载首页的四模排版切换器（视觉精致化 §1.7.3）。
+   *
+   * 槽位在 shell 构造时就存在且**永不被 replaceChildren 清空**——槽里的控件由视图构造一次后常驻，
+   * 切 Tab 只切换槽的可见性。若像旧实现那样每次 paint 重建 header 子节点，排版切换器会随 Tab 切换
+   * 反复重建并丢失 `aria-pressed` 与偏好态。
+   */
+  headerAccessory(): HTMLElement;
   destroy(): void;
 }
 
@@ -91,8 +99,11 @@ export function createAppShell(deps: AppShellDeps): AppShell {
         button.setAttribute('aria-current', id === active ? 'true' : 'false');
         button.classList.toggle('is-active', id === active);
       }
-      if (id === active) deps.header.replaceChildren(brand(label));
+      // 只换品牌文案，绝不重建顶栏结构：槽内控件（首页排版切换器）必须常驻复用。
+      if (id === active) brandHost.replaceChildren(brand(label));
     }
+    // 工具槽只属于承载它的那个 Tab；其余 Tab 隐藏，控件实例本身不被销毁。
+    accessoryHost.hidden = active !== accessoryTab;
     deps.main.scrollTop = 0;
   }
 
@@ -107,6 +118,26 @@ export function createAppShell(deps: AppShellDeps): AppShell {
     current.textContent = label;
     wrap.append(name, current);
     return wrap;
+  }
+
+  /**
+   * 顶栏一次成型：左品牌 + 右工具槽。
+   *
+   * 旧实现每次 paint 都 `header.replaceChildren(brand(...))`，顶栏因此永远只有一个品牌区、右侧一大片
+   * 留白，且任何挂上去的控件都会被下一次切 Tab 抹掉。这里改成固定骨架 + 局部更新。
+   */
+  const headerRow = element('div', 'app-header-row');
+  const brandHost = element('div', 'app-header-brand');
+  const accessoryHost = element('div', 'app-header-accessory');
+  const accessoryTab: ShellTab = 'home';
+  accessoryHost.hidden = (deps.initialTab ?? 'home') !== accessoryTab;
+  headerRow.append(brandHost, accessoryHost);
+  deps.header.replaceChildren(headerRow);
+
+  function element(tag: string, className: string): HTMLElement {
+    const node = document.createElement(tag);
+    node.className = className;
+    return node;
   }
 
   function buildTabs(): void {
@@ -158,6 +189,7 @@ export function createAppShell(deps: AppShellDeps): AppShell {
     activate,
     current: () => active,
     rootOf: (tab) => hosts.get(tab) ?? null,
+    headerAccessory: () => accessoryHost,
     destroy() {
       destroyed = true;
       for (const view of views.values()) view.destroy?.();

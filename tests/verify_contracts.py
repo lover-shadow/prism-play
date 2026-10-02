@@ -33,6 +33,7 @@ def check_openapi():
         "/api/config/monetization",
         "/api/redeem",
         "/api/device/ping",
+        "/api/user/sync",
         "/api/version",
         "/s/{drama_id}",
         "/dl",
@@ -67,25 +68,51 @@ def check_openapi():
     assert schemas["RedeemRequest"]["properties"]["platform"]["enum"] == ["android"], "本期平台仅限 android"
     assert "windows" not in schemas["VersionResponse"]["properties"], "VersionResponse 不得包含未交付的 windows 产物属性"
     assert "oneOf" in schemas["CatalogChange"], "CatalogChange 必须使用 oneOf 区分 upsert 与 delete"
-    print("  -> OpenAPI 18 个路由与 Schema 全部闭环，无悬空引用，错误码与代理路由已收口。")
+    print(f"  -> OpenAPI {len(expected_paths)} 个路由与 Schema 全部闭环，无悬空引用，错误码与代理路由已收口。")
+
+def load_migration_sql():
+    """按序读取全部迁移文件。
+
+    0002 之前本脚本只读 0001，导致增量迁移的 CHECK / FK 约束游离于契约复核之外
+    （复审 A-2：迁移正本被劈成两份而门禁只认其一）。此处改为全量按序拼接，
+    使每一份迁移都进入同一份内存库并接受同样的约束断言。
+    """
+    migration_dir = ROOT / "edge" / "migrations"
+    files = sorted(p.name for p in migration_dir.glob("*.sql"))
+    assert files, "未找到任何 D1 迁移文件"
+    assert files[0] == "0001_initial_schema.sql", f"迁移序列必须从 0001 起始，实际: {files}"
+    return "\n".join((migration_dir / name).read_text(encoding="utf-8") for name in files), files
+
 
 def check_sqlite_schema():
     print("[2/5] 检验 Cloudflare D1 (SQLite) 数据模型与真实业务表结构...")
-    schema_path = ROOT / "edge" / "migrations" / "0001_initial_schema.sql"
-    sql = schema_path.read_text(encoding="utf-8")
-    
+    sql, migration_files = load_migration_sql()
+    print(f"        迁移文件: {', '.join(migration_files)}")
+
     conn = sqlite3.connect(":memory:")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(sql)
-    
+
     all_tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%'").fetchall()]
     fts_shadow = [t for t in all_tables if any(t.endswith(s) for s in ['_config', '_content', '_data', '_docsize', '_idx'])]
     business_tables = [t for t in all_tables if t not in fts_shadow]
-    
+
     # 诚实校验业务表与 FTS 影子表 (消除 R-7 虚假表数)
-    assert len(business_tables) == 20, f"业务表数量不符: 期望 20, 实际 {len(business_tables)}: {business_tables}"
+    # 0002 新增 cloud_watch_history 与 cloud_user_profile 两张同步表。
+    assert len(business_tables) == 22, f"业务表数量不符: 期望 22, 实际 {len(business_tables)}: {business_tables}"
     assert len(fts_shadow) == 5, f"FTS5 影子表数量不符: 期望 5, 实际 {len(fts_shadow)}: {fts_shadow}"
-    
+
+    # 验证多端同步表存在且幂等主键成立 (SPEC §2.1)
+    sync_tables = {"cloud_watch_history", "cloud_user_profile"}
+    assert sync_tables.issubset(set(business_tables)), f"缺少多端同步表: {sync_tables - set(business_tables)}"
+    pk_cols = [r[1] for r in conn.execute("PRAGMA table_info(cloud_watch_history)").fetchall() if r[5] > 0]
+    assert sorted(pk_cols) == ["content_id", "coupon_code"], f"cloud_watch_history 主键必须是 (coupon_code, content_id)，实际: {pk_cols}"
+
+    # 验证 content_items 客观属性列已就位 (SPEC §3.1)
+    content_cols = {r[1] for r in conn.execute("PRAGMA table_info(content_items)").fetchall()}
+    for col in ("hits_week", "hits_total", "hot_score", "is_ai", "is_hot"):
+        assert col in content_cols, f"content_items 缺少客观属性列: {col}"
+
     # 验证动态频道约束 (M-3 云端可配)
     conn.execute("INSERT INTO channels(id, name, categories_json, created_at, updated_at) VALUES(?,?,?,?,?)",
                  ("drama", "短剧精选", "[]", 1, 1))
@@ -195,7 +222,7 @@ if __name__ == "__main__":
         check_design_tokens()
         print("\n==================================================")
         print("  【阶段 0：施工前契约复核门禁 (Gate G0)】通过检验！")
-        print("   (覆盖 18 API / 20 业务表 / 13 功能 / 18 AC 验收)")
+        print("   (覆盖 19 API / 22 业务表 / 13 功能 / 18 AC 验收)")
         print("==================================================")
     except Exception as e:
         print(f"\n[FAILED] 契约复核未通过: {e}", file=sys.stderr)

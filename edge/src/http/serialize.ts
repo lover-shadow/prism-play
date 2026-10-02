@@ -61,6 +61,9 @@ export function toContentItem(row: ContentRow, context: ItemContext): ContentIte
   const synopsis = optional(row.synopsis);
   if (synopsis !== undefined) item.synopsis = synopsis;
   if (row.episode_count !== null) item.episodeCount = Number(row.episode_count);
+  // 客观标定字段（0002 扩列）。缺省视为 0，仅在为真时下发，保持与既有 optional 字段一致的"缺席而非假值"口径。
+  if (Number(row.is_ai ?? 0) === 1) item.isAi = true;
+  if (Number(row.is_hot ?? 0) === 1) item.isHot = true;
   return item;
 }
 

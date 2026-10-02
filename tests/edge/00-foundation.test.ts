@@ -9,8 +9,20 @@ describe('Stage 1 foundation: in-memory D1 stand-in', () => {
       .selectAll("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%'")
       .map((row) => String(row.name));
     const ftsShadow = tables.filter((name) => /_(config|content|data|docsize|idx)$/.test(name));
-    expect(tables.length - ftsShadow.length).toBe(20);
+    // 0001 的 20 张业务表 + 0002 增量迁移新增的 cloud_watch_history 与 cloud_user_profile。
+    expect(tables.length - ftsShadow.length).toBe(22);
     expect(ftsShadow.length).toBe(5);
+  });
+
+  it('applies incremental migrations, not only 0001', async () => {
+    const db = await createInMemoryD1();
+    const columns = db
+      .selectAll('SELECT name FROM pragma_table_info(\'content_items\')')
+      .map((row) => String(row.name));
+    // 客观标定列来自 0002；若测试库只建 0001，这些列会静默消失而其余断言仍全绿。
+    for (const column of ['is_ai', 'is_hot', 'hot_score', 'hits_week', 'hits_total']) {
+      expect(columns, `content_items 缺少列 ${column}`).toContain(column);
+    }
   });
 
   it('enforces the private/shareable equality at the storage layer (AC-02 red line)', async () => {
