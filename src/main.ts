@@ -294,15 +294,7 @@ if (typeof document !== 'undefined' && import.meta.env?.MODE !== 'test') {
     const appEl = document.getElementById('app');
     if (appEl) {
       const errMsg = error instanceof Error ? error.stack || error.message : String(error);
-      appEl.innerHTML = `
-        <div style="padding: 48px 24px; color: var(--text); font-family: -apple-system, BlinkMacSystemFont, sans-serif; text-align: center;">
-          <div style="width: 56px; height: 56px; line-height: 56px; border-radius: 28px; background: rgba(229,169,60,0.15); color: var(--accent); font-size: 26px; margin: 0 auto 16px auto;">!</div>
-          <h2 style="color: var(--accent); margin-bottom: 12px; font-size: 20px; font-weight: 600;">光影Play 初始化未完成</h2>
-          <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 24px; line-height: 1.6;">移动端环境装配异常，已自动拦截保护。错误详情如下：</p>
-          <pre style="text-align: left; background: rgba(255,255,255,0.06); padding: 14px; border-radius: 8px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; color: var(--accent); margin-bottom: 24px; line-height: 1.5; border: 1px solid rgba(255,255,255,0.1);">${errMsg}</pre>
-          <button onclick="window.location.reload()" style="background: var(--accent); color: var(--bg); border: none; padding: 14px 32px; font-size: 15px; font-weight: bold; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 12px rgba(229,169,60,0.3);">重新加载应用</button>
-        </div>
-      `;
+      appEl.innerHTML = `<div style="padding:48px 24px;color:var(--fg);text-align:center;"><h2 style="color:var(--accent);font-size:20px;">光影Play 初始化未完成</h2><pre style="text-align:left;background:rgba(255,255,255,0.06);padding:14px;border-radius:8px;font-size:12px;color:var(--accent);">${errMsg}</pre><button onclick="window.location.reload()" style="background:var(--accent);color:var(--accent-on);border:none;padding:12px 24px;border-radius:8px;cursor:pointer;">重新加载</button></div>`;
     }
   });
 }

@@ -69,82 +69,40 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
 
   function build(): void {
     const pageSize = deps.pageSize ?? DEFAULT_PAGE_SIZE;
-    const view = element('div', 'home-view');
-    const sticky = element('div', 'home-sticky');
-    const channelHost = element('div', 'home-channel-host');
-    const railHost = element('div', 'home-capsule-host');
+    const view = element('div', 'home-view'), sticky = element('div', 'home-sticky');
+    const channelHost = element('div', 'home-channel-host'), railHost = element('div', 'home-capsule-host');
     const searchBar = element('div', 'home-search-bar');
-    searchBar.setAttribute('role', 'button');
-    searchBar.setAttribute('tabindex', '0');
-    searchBar.setAttribute('aria-label', '搜索全网剧目');
+    searchBar.setAttribute('role', 'button'); searchBar.setAttribute('tabindex', '0'); searchBar.setAttribute('aria-label', '搜索全网剧目');
     searchBar.innerHTML = `<span class="home-search-lead">${icon('search', { size: 16 })}<span>搜索剧名 / 题材</span></span>`;
-    searchBar.addEventListener('click', () => {
-      if (deps.onSearch) deps.onSearch();
-      else {
-        const btn = document.querySelector<HTMLButtonElement>('.app-tab[data-tab="search"]');
-        btn?.click();
-      }
-    });
-    searchBar.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        searchBar.click();
-      }
-    });
+    searchBar.addEventListener('click', () => { if (deps.onSearch) deps.onSearch(); else document.querySelector<HTMLButtonElement>('.app-tab[data-tab="search"]')?.click(); });
+    searchBar.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); searchBar.click(); } });
 
-    const continueHost = element('div', 'home-continue-host');
-    const heading = element('h2', 'home-section-header');
+    const continueHost = element('div', 'home-continue-host'), heading = element('h2', 'home-section-header');
     const titleGroup = element('div', 'home-section-lead');
-    const channelName = element('span', 'home-section-title');
-    const modeTag = element('span', 'home-mode-tag');
-    titleGroup.appendChild(channelName);
-    titleGroup.appendChild(modeTag);
+    const channelName = element('span', 'home-section-title'), modeTag = element('span', 'home-mode-tag');
+    titleGroup.append(channelName, modeTag);
 
     const switchHost = element('div', 'home-mode-switch');
-    const gridHost = element('div', 'home-grid-host');
-    const moreHost = element('div', 'home-more-host');
+    const gridHost = element('div', 'home-grid-host'), moreHost = element('div', 'home-more-host');
     continueHost.hidden = true;
 
-    sticky.appendChild(channelHost);
-    sticky.appendChild(railHost);
-    heading.appendChild(titleGroup);
-    heading.appendChild(switchHost);
-
-    view.appendChild(sticky);
-    view.appendChild(searchBar);
-    view.appendChild(continueHost);
-    view.appendChild(heading);
-    view.appendChild(gridHost);
-    view.appendChild(moreHost);
-    view.appendChild(gridHost);
-    view.appendChild(moreHost);
+    sticky.append(channelHost, railHost);
+    heading.append(titleGroup, switchHost);
+    view.append(sticky, searchBar, continueHost, heading, gridHost, moreHost);
     deps.root.appendChild(view);
 
-    let channels: ChannelItem[] = [];
-    let items: ContentItem[] = [];
-    let selectedChannelId: ChannelId | null = null;
-    let selectedCategory = ALL_CATEGORIES_LABEL;
-    let page = 1;
-    let total = 0;
-    let pageRevision: number | undefined;
-    let token = 0;
+    let channels: ChannelItem[] = [], items: ContentItem[] = [];
+    let selectedChannelId: ChannelId | null = null, selectedCategory = ALL_CATEGORIES_LABEL;
+    let page = 1, total = 0, pageRevision: number | undefined, token = 0;
 
     const bar = createChannelBar({ root: channelHost, onSelect: (channelId) => { if (channelId !== selectedChannelId) selectChannel(channelId); } });
-    const rail = createCapsuleRail({
-      root: railHost,
-      onSelect: (category) => {
-        if (category === selectedCategory) return;
-        selectedCategory = category;
-        rail.select(category);
-        void loadCatalog(++token, 1);
-      }
-    });
-    const grid = createPosterGrid({
-      root: gridHost,
-      mode: deps.posterMode,
-      onOpenTitle: deps.onOpenTitle,
-      onShare: deps.onShare
-    });
+    const rail = createCapsuleRail({ root: railHost, onSelect: (category) => {
+      if (category === selectedCategory) return;
+      selectedCategory = category;
+      rail.select(category);
+      void loadCatalog(++token, 1);
+    } });
+    const grid = createPosterGrid({ root: gridHost, mode: deps.posterMode, onOpenTitle: deps.onOpenTitle, onShare: deps.onShare });
     const card = createContinueCard({ root: continueHost, onResume: deps.onResume });
     const modeSwitch = createModeSwitch({ root: switchHost, mode: deps.posterMode, onChange: setMode });
 
@@ -196,29 +154,18 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
     function emptyOptions(): { detail: string; actionLabel?: string; onAction?: () => void } {
       const fallback = channels.find((channel) => channel.id === DEFAULT_CHANNEL_ID) ?? null;
       if (fallback === null || selectedChannelId === fallback.id) {
-        // 没有可退回的默认视界时也要给一条出路：五态里每一态都得是可操作的（SPEC §10）。
         return { detail: '该视界尚未上架内容，换个频道或稍后再来。', actionLabel: '重新加载', onAction: () => void loadCatalog(++token, 1) };
       }
-      return {
-        detail: '该视界暂无可播放剧目。',
-        actionLabel: `返回${fallback.name}`,
-        onAction: () => selectChannel(fallback.id)
-      };
+      return { detail: '该视界暂无可播放剧目。', actionLabel: `返回${fallback.name}`, onAction: () => selectChannel(fallback.id) };
     }
 
     async function loadCatalog(nextToken: number, targetPage: number): Promise<void> {
       const channel = selectedChannelId;
       if (channel === null) {
-        presentState('disabled', {
-          detail: '没有可展示的视界频道。',
-          actionLabel: '重新加载',
-          onAction: () => void refreshTopology()
-        });
+        presentState('disabled', { detail: '没有可展示的视界频道。', actionLabel: '重新加载', onAction: () => void refreshTopology() });
         return;
       }
-      if (targetPage === 1 && items.length === 0) {
-        grid.showSkeleton();
-      }
+      if (targetPage === 1 && items.length === 0) grid.showSkeleton();
       const query = {
         channel,
         ...(selectedCategory === ALL_CATEGORIES_LABEL ? {} : { category: selectedCategory }),
@@ -243,11 +190,7 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
         renderMore();
       } catch (error) {
         if (nextToken !== token) return;
-        presentState(stateKindForError(error), {
-          detail: detailForError(error),
-          actionLabel: '重试',
-          onAction: () => void loadCatalog(++token, 1)
-        });
+        presentState(stateKindForError(error), { detail: detailForError(error), actionLabel: '重试', onAction: () => void loadCatalog(++token, 1) });
       }
     }
 
@@ -256,7 +199,6 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
         const rows = await deps.historyPreview();
         if (nextToken === token) card.show(rows);
       } catch {
-        // 历史域由并行施工的兄弟模块持有：它的失败只让续播卡缺席，绝不拖垮片单。
         if (nextToken === token) card.hide();
       }
     }
@@ -287,13 +229,11 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
     async function refreshTopology(): Promise<void> {
       const nextToken = ++token;
       if (items.length === 0 && !hydrateFromLocalCache()) grid.showSkeleton();
-      // 续播卡与拓扑并行拉取；`mount()` resolve 时两者都已落定，测试与组合根都不必再等空转的微任务。
       const continueTask = loadContinue(nextToken);
       try {
         const response = await deps.api.channels();
         if (nextToken !== token) return;
         channels = [...response.channels];
-        // AC-01 默认高亮短剧精选；refresh 时用户已选频道若仍在响应里就尊重它。
         const keep = currentChannel();
         const target = keep ?? pickDefaultChannel(channels);
         selectedChannelId = target?.id ?? null;
@@ -307,11 +247,7 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
         await loadCatalog(nextToken, 1);
       } catch (error) {
         if (nextToken !== token) return;
-        presentState(stateKindForError(error), {
-          detail: detailForError(error),
-          actionLabel: '重试',
-          onAction: () => void refreshTopology()
-        });
+        presentState(stateKindForError(error), { detail: detailForError(error), actionLabel: '重试', onAction: () => void refreshTopology() });
       } finally {
         await continueTask;
       }
@@ -320,14 +256,9 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
     reload = refreshTopology;
     changeMode = setMode;
     teardown = () => {
-      bar.destroy();
-      rail.destroy();
-      grid.destroy();
-      card.destroy();
+      bar.destroy(); rail.destroy(); grid.destroy(); card.destroy();
       clearChildren(deps.root);
-      reload = null;
-      changeMode = null;
-      teardown = null;
+      reload = null; changeMode = null; teardown = null;
     };
 
     paintHeading();

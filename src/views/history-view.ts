@@ -259,11 +259,7 @@ export function createHistoryView(deps: HistoryViewDeps): HistoryView {
       await paintCache();
       return stateBand(related, 'disabled', '无历史记录时不启动同类召回。');
     }
-    const [history, grant] = await Promise.all([
-      attempt(() => deps.history.list()),
-      attempt(() => deps.credentials.readGrant()),
-      paintCache()
-    ]);
+    const [history, grant] = await Promise.all([attempt(() => deps.history.list()), attempt(() => deps.credentials.readGrant()), paintCache()]);
     if (disposed) return;
     if (!history.ok) {
       deps.root.dataset.state = 'error';
@@ -271,9 +267,7 @@ export function createHistoryView(deps: HistoryViewDeps): HistoryView {
       offlineNote.textContent = isNetworkError(history.error) ? NETWORK_COPY : OFFLINE_COPY;
       return;
     }
-    const rows = history.value;
-    const watching = rows.filter((row) => !isFinished(row));
-    const completed = rows.filter(isFinished);
+    const rows = history.value, watching = rows.filter((row) => !isFinished(row)), completed = rows.filter(isFinished);
     deps.root.dataset.state = rows.length === 0 ? 'empty' : 'ready';
     if (watching.length === 0) stateBand(resume, 'empty', '还没有在追的剧，去大视界挑一部就能自动记住断点。');
     else readyBand(resume, watching.map((row) => resumeCard(row)));
