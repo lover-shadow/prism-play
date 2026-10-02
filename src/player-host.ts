@@ -6,7 +6,7 @@
  * FLAG_SECURE 的决策也不在这里下：宿主只回报"当前是否在播私密内容"，由组合根合并频道状态后一次设定。
  */
 import { icon } from './components/icons';
-import type { ContentItem, EpisodeItem, TitleDetail } from '../edge/src/types/api';
+import type { ContentItem, EpisodeItem, RelatedResponse, TitleDetail } from '../edge/src/types/api';
 import type { PrismNativeBridge } from './core/native/bridge';
 import type { WatchHistoryRow } from './core/storage/storage-domains';
 import { registerBackHandler } from './core/native/back-button';
@@ -16,11 +16,15 @@ import type { EngineFactory, PlayerApi, PlayerFailure, PrismPlayer } from './pla
 import type { ProgressContext } from './player/episode-drawer';
 import type { NotificationAction } from './core/native/capacitor-bridge';
 
+export interface PlayerHostApi extends PlayerApi {
+  related?(titleId: string): Promise<RelatedResponse>;
+}
+
 export interface PlayerHostDeps {
   /** 浮层挂到这里（通常是 `.app-shell`，让 safe-area 与 `--native-dim` 继续生效）。 */
   mount: HTMLElement;
   bridge: PrismNativeBridge;
-  api: PlayerApi;
+  api: PlayerHostApi;
   /** 进度落库路由由组合根提供：私密内容必须进内存域，这条分支不许出现在宿主里重复实现。 */
   onProgress(row: WatchHistoryRow, context: ProgressContext): void;
   /** AC-10 权限位：未开启"后台/息屏播放"时播放器不得拉起前台服务。 */
@@ -148,7 +152,21 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
         detailBody.markEpisode(epId);
       },
       () => player?.openDrawer(),
-      deps.onShare === undefined ? undefined : (episode) => void deps.onShare?.(loaded.item, episode)
+      deps.onShare === undefined ? undefined : (episode) => void deps.onShare?.(loaded.item, episode),
+      () => {
+        const stageEl = stage.querySelector<HTMLElement>('.prism-player') ?? stage;
+        stageEl.classList.toggle('prism-player--fullscreen');
+      },
+      async () => {
+        if (loaded.item.isPrivate || loaded.item.channelId === 'private' || !deps.api.related) return [];
+        try {
+          const res = await deps.api.related(loaded.item.id);
+          return res.items.filter((entry: ContentItem) => entry.id !== loaded.item.id && !entry.isPrivate);
+        } catch {
+          return [];
+        }
+      },
+      (contentId) => { void open(contentId); }
     );
     detailBodyRef = detailBody;
     shell.append(detailBody.body);

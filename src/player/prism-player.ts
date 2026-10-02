@@ -11,9 +11,9 @@
 import './player.css';
 import type { EpisodeItem, PlaybackInfo, TitleDetail } from '../../edge/src/types/api';
 import { ApiError } from '../core/api/client';
+import { icon } from '../components/icons';
 import type { PrismNativeBridge } from '../core/native/bridge';
-import { isPrivateSubject } from '../core/storage/storage-domains';
-import type { WatchHistoryRow } from '../core/storage/storage-domains';
+import { isPrivateSubject, type WatchHistoryRow } from '../core/storage/storage-domains';
 import { createEpisodeDrawer, createProgressReporter } from './episode-drawer';
 import type { ProgressContext } from './episode-drawer';
 import { attachGestureLayer, clamp, createGestureController } from './gestures';
@@ -71,7 +71,7 @@ export const createArtEngine: EngineFactory = async ({ container, theme, onError
   const [{ default: Artplayer }, { default: Hls }] = await Promise.all([import('artplayer'), import('hls.js')]);
   let hls: InstanceType<typeof Hls> | null = null;
   const art = new Artplayer({
-    container, url: '', theme, volume: 1, autoplay: false, autoSize: true, isLive: false, lang: 'zh-cn',
+    container, url: '', theme, volume: 1, autoplay: true, autoSize: true, isLive: false, lang: 'zh-cn', playsInline: true,
     customType: {
       m3u8: (video: HTMLVideoElement, url: string) => {
         hls?.destroy();
@@ -79,9 +79,7 @@ export const createArtEngine: EngineFactory = async ({ container, theme, onError
           hls = new Hls({ lowLatencyMode: false });
           hls.loadSource(url);
           hls.attachMedia(video);
-          hls.on(Hls.Events.ERROR, (_event, data) => {
-            if (data.fatal) onError('播放中断，正在尝试重新解析');
-          });
+          hls.on(Hls.Events.ERROR, (_event, data) => { if (data.fatal) onError('播放中断，正在尝试重新解析'); });
         } else if (video.canPlayType('application/vnd.apple.mpegurl')) video.src = url;
         else onError('当前设备不支持 HLS 播放，需在 Android 端验证');
       }
@@ -93,7 +91,7 @@ export const createArtEngine: EngineFactory = async ({ container, theme, onError
     duration: () => art.duration, volume: () => art.video.volume,
     setVolume: (value) => void (art.video.volume = clamp(value, 0, 1)),
     toggleControls: () => art.controls.toggle(),
-    setSource: (url, mimeType) => { art.type = mimeType === 'video/mp4' ? 'mp4' : 'm3u8'; art.url = url; },
+    setSource: (url, mimeType) => { art.type = mimeType === 'video/mp4' ? 'mp4' : 'm3u8'; art.url = url; void art.play().catch(() => {}); },
     on: (event, handler) => { const name = `video:${event}`; art.on(name, handler); return () => art.off(name, handler); },
     destroy: () => { hls?.destroy(); art.destroy(); }
   };
@@ -117,12 +115,12 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
   const readSurface = (): GestureBounds => { const r = chrome.surface.getBoundingClientRect(); return { width: r.width, height: r.height, top: r.top, left: r.left, topBandPx: 0, bottomBandPx: 0 }; };
 
   root.classList.add('prism-player');
-  const backdrop = document.createElement('div'), speedPill = document.createElement('div');
+  const backdrop = document.createElement('div'), speedPill = document.createElement('div'), pulse = document.createElement('div');
   backdrop.className = 'prism-player__backdrop';
   if (detail?.item.coverUrl) backdrop.innerHTML = `<img class="prism-player__backdrop-img" src="${detail.item.coverUrl}" alt="" /><div class="prism-player__backdrop-glow"></div>`;
-  speedPill.className = 'prism-player__speed-pill';
-  speedPill.innerHTML = '<span>▶▶</span><span>2.0X 极速快进</span>';
-  root.append(backdrop, speedPill);
+  pulse.className = 'prism-player__pulse'; pulse.innerHTML = icon('play', { size: 24 }); pulse.addEventListener('click', () => { engine?.play(); });
+  speedPill.className = 'prism-player__speed-pill'; speedPill.innerHTML = '<span>▶▶</span><span>2.0X 极速快进</span>';
+  root.append(backdrop, pulse, speedPill);
   const overlay = createStateOverlay(root);
   const hud = createGestureHud(root, clock);
   const chrome = createPlayerChrome(root, (action) => {
@@ -269,8 +267,7 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
     }
   }
 
-  function setLocked(value: boolean): void { locked = value; render(); }
-  function scheduleSleep(mode: SleepMode): void { sleep.schedule(mode); render(); }
+  const setLocked = (v: boolean): void => { locked = v; render(); }; const scheduleSleep = (m: SleepMode): void => { sleep.schedule(m); render(); };
 
   return {
     load,

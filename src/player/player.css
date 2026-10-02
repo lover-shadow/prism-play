@@ -142,20 +142,21 @@
 .prism-drawer__switch { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 38px; font-size: var(--text-xs); color: var(--fg-2); }
 .prism-drawer__checkbox { width: 18px; height: 18px; accent-color: var(--accent); }
 
-/* 等待底片与高斯模糊环境光 */
-.prism-player__backdrop {
-  position: absolute; inset: 0; z-index: 1; overflow: hidden; pointer-events: none;
-  background: var(--player-bg); opacity: 1; transition: opacity 0.4s ease;
-}
-.prism-player__backdrop-img {
-  width: 100%; height: 100%; object-fit: cover; filter: blur(24px) brightness(0.65);
-  transform: scale(1.1);
-}
-.prism-player__backdrop-glow {
-  position: absolute; inset: 0;
-  background: radial-gradient(circle at center, rgba(229, 169, 60, 0.15) 0%, rgba(8, 10, 16, 0.8) 100%);
-}
-.prism-player.is-playing .prism-player__backdrop { opacity: 0; visibility: hidden; }
+/* Artplayer 容器样式覆盖：消除粗糙黑白椭圆图标与黑屏背景 */
+.art-video-player { background-color: transparent !important; }
+.art-video-player .art-state, .art-video-player .art-icon-state, .art-state, .art-icon-state { display: none !important; }
+.art-video-player video { background-color: transparent !important; }
+
+/* 等待底片与高斯模糊环境光 (电影级拉幕感) */
+.prism-player__backdrop { position: absolute; inset: 0; z-index: 1; overflow: hidden; pointer-events: none; background: var(--player-bg); opacity: 1; transition: opacity 0.4s ease; }
+.prism-player__backdrop-img { width: 100%; height: 100%; object-fit: cover; filter: blur(28px) brightness(0.6); transform: scale(1.18); }
+.prism-player__backdrop-glow { position: absolute; inset: 0; background: radial-gradient(circle at center, transparent 30%, rgba(0, 0, 0, 0.8) 100%), linear-gradient(to bottom, rgba(8, 10, 16, 0.75) 0%, transparent 40%, rgba(8, 10, 16, 0.95) 100%); }
+.prism-player.is-playing .prism-player__backdrop { opacity: 0; visibility: hidden; pointer-events: none; }
+
+/* 播放起播微光指示标 (呼吸动效) */
+.prism-player__pulse { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 54px; height: 54px; border-radius: var(--radius-pill); background: var(--accent); color: var(--accent-on); display: flex; align-items: center; justify-content: center; box-shadow: 0 0 25px var(--accent); cursor: pointer; animation: prismPulseGlow 2.2s infinite ease-in-out; z-index: 5; transition: opacity 0.3s ease; }
+.prism-player.is-playing .prism-player__pulse { opacity: 0; pointer-events: none; }
+@keyframes prismPulseGlow { 0%, 100% { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 20px rgba(229, 169, 60, 0.5); } 50% { transform: translate(-50%, -50%) scale(1.08); box-shadow: 0 0 35px rgba(229, 169, 60, 0.85); } }
 
 /* 长按 2x 倍速微动效指示灯 */
 .prism-player__speed-pill {
