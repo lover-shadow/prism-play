@@ -7,12 +7,25 @@
  */
 
 import type { ContentItem } from '../../edge/src/types/api';
+import type { BadgeKind } from '../core/recommendation';
 import { POSTER_MODE_CLASS, POSTER_MODE_LABEL, POSTER_MODES, isPosterMode, type PosterMode } from '../core/state/theme';
 import { clearChildren, element, iconNode } from './state-views';
 import type { IconName } from './icons';
 
 export const POSTER_GRID_BASE_CLASS = 'home-poster-grid';
 export const DEFAULT_SKELETON_COUNT = 12;
+
+/** 左上角微光角标文案（§1.8.5 / AC-29）：文字本身就是依据，不借任何图形符号（P0-1 零 Emoji）。 */
+export const CORNER_BADGE_LABEL: Readonly<Record<BadgeKind, string>> = {
+  ai: 'AI精品',
+  hot: '热门',
+  recommend: '推荐'
+};
+
+/** 角标类名唯一生成点：判定权在 `recommendation.ts`，本组件只负责把它翻译成 tokens 样式，绝不自行定性。 */
+export function cornerBadgeClass(kind: BadgeKind): string {
+  return `poster-corner-badge poster-corner-badge--${kind}`;
+}
 
 const MODE_GLYPHS: Readonly<Record<PosterMode, IconName>> = {
   'compact-3': 'grid',
@@ -54,7 +67,11 @@ export interface PosterGridDeps {
 }
 
 export interface PosterGrid {
-  render(items: readonly ContentItem[]): void;
+  /**
+   * `badges` 是混排引擎给出的**判定表**（contentId → 角标种类）：缺项即留白不贴标。
+   * 本组件不读 `isAi` / `isHot`、也不按 tags 猜——贴标唯一判据必须集中在 `recommendation.ts` 一处。
+   */
+  render(items: readonly ContentItem[], badges?: ReadonlyMap<string, BadgeKind>): void;
   showSkeleton(count?: number): void;
   applyMode(mode: PosterMode): void;
   clear(): void;
@@ -124,7 +141,7 @@ export function createPosterGrid(deps: PosterGridDeps): PosterGrid {
     return grid;
   }
 
-  function media(item: ContentItem): HTMLElement {
+  function media(item: ContentItem, badge?: BadgeKind): HTMLElement {
     const box = element('span', 'poster-media');
     const placeholder = iconNode('image', { size: 24, className: 'poster-fallback' });
     placeholder.setAttribute('aria-hidden', 'true');
@@ -149,6 +166,8 @@ export function createPosterGrid(deps: PosterGridDeps): PosterGrid {
     if (typeof item.episodeCount === 'number' && item.episodeCount > 0) {
       box.appendChild(element('span', 'poster-ep-badge', episodeBadgeText(item.episodeCount)));
     }
+    // 左上角微光角标与右下角 `.poster-ep-badge` 形成黄金对角呼应；后者的位置是既有权威，不得移动（§1.8.5）。
+    if (badge !== undefined) box.appendChild(element('span', cornerBadgeClass(badge), CORNER_BADGE_LABEL[badge]));
     return box;
   }
 
@@ -166,14 +185,14 @@ export function createPosterGrid(deps: PosterGridDeps): PosterGrid {
     return button;
   }
 
-  function card(item: ContentItem): HTMLElement {
+  function card(item: ContentItem, badge?: BadgeKind): HTMLElement {
     const box = element('article', 'poster-card');
     box.dataset.contentId = item.id;
 
     const open = element('button', 'poster-open');
     open.type = 'button';
     open.setAttribute('aria-label', `《${item.title}》`);
-    open.appendChild(media(item));
+    open.appendChild(media(item, badge));
 
     const body = element('span', 'poster-body');
     body.appendChild(element('span', 'poster-title', item.title));
@@ -203,10 +222,10 @@ export function createPosterGrid(deps: PosterGridDeps): PosterGrid {
   }
 
   return {
-    render: (items) => {
+    render: (items, badges) => {
       clearChildren(deps.root);
       const grid = mountGrid('ready');
-      for (const item of items) grid.appendChild(card(item));
+      for (const item of items) grid.appendChild(card(item, badges?.get(item.id)));
     },
     showSkeleton: (count = DEFAULT_SKELETON_COUNT) => {
       clearChildren(deps.root);

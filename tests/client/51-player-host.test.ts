@@ -6,7 +6,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPlayerHost } from '../../src/player-host';
 import type { PlayerHostDeps } from '../../src/player-host';
-import type { PlayerEngine } from '../../src/player/prism-player';
+import type { PlayerEngine } from '../../src/player/engine-seam';
 import type { CallState, PrismNativeBridge } from '../../src/core/native/bridge';
 import type { TitleDetail } from '../../edge/src/types/api';
 import type { WatchHistoryRow } from '../../src/core/storage/storage-domains';

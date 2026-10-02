@@ -1,10 +1,12 @@
 /**
  * 竖屏非全屏剧集详情生态台 (Portrait Media Stage)
- * 包含：剧名标题与分类胶囊、折叠简介、核心操作工具岛（追剧/缓存/分享/全屏）、常驻选集横滑轨、同类好剧推荐流。
+ * 包含：剧名标题与分类胶囊、折叠简介、核心操作工具岛（追剧/投屏/分享/全屏）、常驻选集横滑轨、同类好剧推荐流。
  */
 
 import type { ContentItem, EpisodeItem, TitleDetail } from '../../edge/src/types/api';
 import { icon } from '../components/icons';
+import { isPrivateSubject } from '../core/storage/storage-domains';
+import { createCastPanel } from './cast-panel';
 
 export interface PlayerDetailStage {
   body: HTMLElement;
@@ -78,7 +80,7 @@ export function buildDetailBody(
 
   infoCard.append(titleRow, metaRow, synopsisBox);
 
-  // 3. 核心操作工具岛 (Action Island - 4 键网格)
+  // 3. 核心操作工具岛 (Action Island - 4 键网格：追剧 / 投屏 / 分享 / 沉浸全屏，SPEC §1.5.1)
   const actionIsland = document.createElement('div');
   actionIsland.className = 'detail-action-island';
 
@@ -88,20 +90,21 @@ export function buildDetailBody(
   favBtn.innerHTML = `${icon('bookmark', { size: 20 })}<span>追剧</span>`;
   favBtn.addEventListener('click', () => {
     favBtn.classList.toggle('active');
-    const active = favBtn.classList.contains('active');
+    const favourited = favBtn.classList.contains('active');
     const label = favBtn.querySelector('span');
-    if (label) label.textContent = active ? '已追剧' : '追剧';
+    if (label) label.textContent = favourited ? '已追剧' : '追剧';
   });
 
-  const cacheBtn = document.createElement('button');
-  cacheBtn.type = 'button';
-  cacheBtn.className = 'action-island-item';
-  cacheBtn.innerHTML = `${icon('download', { size: 20 })}<span>缓存本集</span>`;
-  cacheBtn.addEventListener('click', () => {
-    const label = cacheBtn.querySelector('span');
-    if (label) label.textContent = '已在队列';
-    cacheBtn.classList.add('active');
-  });
+  /**
+   * 【投屏】取代原来的第二键。原第二键「缓存本集」是**没有任何机制的死键**：点击只把自身文字改成
+   * "已在队列"、给自己加一个 active 类，既不入队、不落盘、不查 `public-cache`，也没有任何消费方读它——
+   * 属于 AGENTS.md「任何前端开关必有真实机制对应」明令禁止的那类假 UI，因此换成有真实原生机制的投屏，
+   * 不是砍掉一个活功能。（真正的离线缓存若要回来，应作为独立工作包接 `cache` 域，而不是挂回这里。）
+   */
+  const castBtn = document.createElement('button');
+  castBtn.type = 'button';
+  castBtn.className = 'action-island-item';
+  castBtn.innerHTML = `${icon('cast', { size: 20 })}<span>投屏</span>`;
 
   const shareBtn = document.createElement('button');
   shareBtn.type = 'button';
@@ -118,7 +121,24 @@ export function buildDetailBody(
   cinemaBtn.innerHTML = `${icon('fullscreen', { size: 20 })}<span>沉浸全屏</span>`;
   cinemaBtn.addEventListener('click', () => onFullscreen?.());
 
-  actionIsland.append(favBtn, cacheBtn, shareBtn, cinemaBtn);
+  actionIsland.append(favBtn, castBtn, shareBtn, cinemaBtn);
+
+  /**
+   * 投屏状态机挂在这里：详情台是唯一同时知道"当前是哪一集""这部剧私不私密""选集清单顺序"的地方，
+   * 连播与拒播都必须以它为准，而不是让宿主再广播一份平行状态。
+   * `currentEpisodeId()` 读的是 `markEpisode` 会改写的那个形参闭包，所以切集后推的就是新的一集。
+   */
+  const castPanel = createCastPanel({
+    root: body,
+    episodes: info.episodes,
+    titleOf: () => info.item.title,
+    currentEpisodeId: () => currentEpisodeId,
+    isPrivate: () => isPrivateSubject(info.item),
+    onPhase: (state, device) => {
+      castBtn.classList.toggle('active', device !== null && (state === 'casting' || state === 'paused'));
+    }
+  });
+  castBtn.addEventListener('click', () => castPanel.toggle());
 
   // 4. 常驻选集播放轨
   const epSection = document.createElement('div');
@@ -204,9 +224,14 @@ export function buildDetailBody(
   }
 
   body.append(infoCard, actionIsland, epSection, relatedSection);
+  // attach 必须在 body.append 之后：`anchor.after()` 在没有父节点时是静默 no-op，
+  // 放在 append 之前会让呼吸状态条永远挂不上树——面板照常工作、状态条却不出现，正是最难查的那类错位。
+  castPanel.attach(actionIsland);
 
   const markEpisode = (id: number): void => {
     currentEpisodeId = id;
+    // 手机上切集，大屏必须跟到同一集；未在投屏时 syncNow() 自己就是空操作。
+    void castPanel.syncNow();
     const ep = info.episodes.find((e) => e.episodeId === id);
     epTag.textContent = `第 ${ep?.episodeNumber ?? 1} 集`;
     for (const [epId, btn] of pills.entries()) {

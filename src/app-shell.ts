@@ -141,7 +141,10 @@ export function createAppShell(deps: AppShellDeps): AppShell {
   }
 
   function buildTabs(): void {
-    deps.tabbar.replaceChildren();
+    // Tab 挤在 `.app-tabbar-inner` 而不是 `.app-tabbar` 上：限宽 360px 只能收内容，
+    // 挂在栏本体会把底色与分隔线一起缩掉（AC-27）。
+    const inner = element('div', 'app-tabbar-inner');
+    deps.tabbar.replaceChildren(inner);
     for (const tab of SHELL_TABS) {
       const button = document.createElement('button');
       button.type = 'button';
@@ -154,7 +157,7 @@ export function createAppShell(deps: AppShellDeps): AppShell {
       caption.textContent = tab.label;
       button.appendChild(caption);
       button.addEventListener('click', () => void activate(tab.id));
-      deps.tabbar.appendChild(button);
+      inner.appendChild(button);
       buttons.set(tab.id, button);
     }
   }

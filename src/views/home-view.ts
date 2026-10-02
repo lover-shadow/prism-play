@@ -11,7 +11,8 @@ import '../styles/home.css';
 
 import type { CatalogResponse, ChannelId, ChannelItem, ChannelsResponse, ContentItem } from '../../edge/src/types/api';
 import type { WatchHistoryRow } from '../core/storage/storage-domains';
-import { POSTER_MODE_LABEL, isPosterMode, type PosterMode } from '../core/state/theme';
+import { genrePreference, weave, type GenreOf } from '../core/recommendation';
+import { isPosterMode, type PosterMode } from '../core/state/theme';
 import { ALL_CATEGORIES_LABEL, createCapsuleRail } from '../components/capsule-rail';
 import { createChannelBar, DEFAULT_CHANNEL_ID, pickDefaultChannel } from '../components/channel-bar';
 import { createContinueCard } from '../components/continue-card';
@@ -83,25 +84,22 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
     searchBar.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); searchBar.click(); } });
 
     const continueHost = element('div', 'home-continue-host');
-    const heading = element('h2', 'home-section-header');
-    const titleGroup = element('div', 'home-section-lead');
-    const channelName = element('span', 'home-section-title'), modeTag = element('span', 'home-mode-tag');
-    titleGroup.append(channelName, modeTag);
     const switchHost = element('div', 'home-mode-switch');
     const gridHost = element('div', 'home-grid-host'), moreHost = element('div', 'home-more-host');
     continueHost.hidden = true;
 
+    // 频道名与一级频道栏 100% 重复，排版器单占一行又把海报流下压 40px，故这一整行区块头已拔除（§1.7.3）。
+    // 排版切换器优先住外壳顶栏右侧工具槽；无槽位（单测/旧宿主）时退化为视图内独立一行，功能不因此丢失。
     if (deps.headerAccessory !== null && deps.headerAccessory !== undefined) {
       deps.headerAccessory.replaceChildren(switchHost);
       view.append(sticky, searchBar, continueHost, gridHost, moreHost);
     } else {
-      heading.append(titleGroup, switchHost);
-      view.append(sticky, searchBar, continueHost, heading, gridHost, moreHost);
+      view.append(sticky, searchBar, continueHost, switchHost, gridHost, moreHost);
     }
     sticky.append(channelHost, railHost);
     deps.root.appendChild(view);
 
-    let channels: ChannelItem[] = [], items: ContentItem[] = [];
+    let channels: ChannelItem[] = [], items: ContentItem[] = [], historyRows: WatchHistoryRow[] = [];
     let selectedChannelId: ChannelId | null = null, selectedCategory = ALL_CATEGORIES_LABEL;
     let page = 1, total = 0, pageRevision: number | undefined, token = 0;
 
@@ -116,13 +114,19 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
     const card = createContinueCard({ root: continueHost, onResume: deps.onResume });
     const modeSwitch = createModeSwitch({ root: switchHost, mode: deps.posterMode, onChange: setMode });
 
-    function currentChannel(): ChannelItem | null {
-      return channels.find((channel) => channel.id === selectedChannelId) ?? null;
+    // 混排只重排**展示层**（§1.8.4 / AC-28）：输入是累积集合 `items`，page / revision / 游标 语义一字不动。
+    // 题材归属由片单注入给画像引擎——`WatchHistoryRow` 没有 category 列，端侧不猜题材，查不到即不计分。
+    function paintGrid(): void {
+      // 题材查表用 Map：排序里每次比较都要取题材，线性 find 会把 2ms 端侧预算整个吃光。
+      const genres = new Map(items.map((entry) => [entry.id, entry.category] as const));
+      const genreOf: GenreOf = (contentId) => genres.get(contentId);
+      const scores = genrePreference(historyRows, Math.floor(Date.now() / 1000), genreOf);
+      const woven = weave(items, scores, { genreOf });
+      grid.render(woven.items, woven.badges);
     }
 
-    function paintHeading(active?: PosterMode): void {
-      channelName.textContent = currentChannel()?.name ?? '大视界';
-      modeTag.textContent = `【${POSTER_MODE_LABEL[active ?? deps.posterMode()]}】`;
+    function currentChannel(): ChannelItem | null {
+      return channels.find((channel) => channel.id === selectedChannelId) ?? null;
     }
 
     function setMode(mode: PosterMode): void {
@@ -130,7 +134,6 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
       // 先交给偏好域持久化，再就地乐观重贴类名：渲染读的是注入的 `posterMode()`，偏好天然穿越重绘。
       deps.onPosterModeChange(mode);
       grid.applyMode(mode);
-      paintHeading(mode);
       modeSwitch.paint(mode);
     }
 
@@ -139,7 +142,6 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
       selectedCategory = ALL_CATEGORIES_LABEL;
       bar.select(channelId);
       rail.render(currentChannel()?.categories ?? [], selectedCategory);
-      paintHeading();
       deps.onChannelChange?.(currentChannel());
       void loadCatalog(++token, 1);
     }
@@ -196,7 +198,7 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
           presentState('empty', emptyOptions());
           return;
         }
-        grid.render(items);
+        paintGrid();
         renderMore();
       } catch (error) {
         if (nextToken !== token) return;
@@ -207,9 +209,10 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
     async function loadContinue(nextToken: number): Promise<void> {
       try {
         const rows = await deps.historyPreview();
-        if (nextToken === token) card.show(rows);
+        // 画像原料与续播卡同源（同一个注入 seam），本视图不开第二条存储路径；取回失败即清空，不留旧画像。
+        if (nextToken === token) { historyRows = rows; card.show(rows); }
       } catch {
-        if (nextToken === token) card.hide();
+        if (nextToken === token) { historyRows = []; card.hide(); }
       }
     }
 
@@ -222,14 +225,13 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
       if (!target?.categories.includes(selectedCategory)) selectedCategory = ALL_CATEGORIES_LABEL;
       bar.render(channels, selectedChannelId);
       rail.render(target?.categories ?? [], selectedCategory);
-      paintHeading();
       deps.onChannelChange?.(target);
       modeSwitch.paint();
       const local = selectedChannelId ? snapshot.items(selectedChannelId) : [];
       if (local.length > 0) {
         items = local.slice(0, pageSize);
         total = local.length;
-        grid.render(items);
+        paintGrid();
         renderMore();
         return true;
       }
@@ -251,7 +253,6 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
         if (!known) selectedCategory = ALL_CATEGORIES_LABEL;
         bar.render(channels, selectedChannelId);
         rail.render(target?.categories ?? [], selectedCategory);
-        paintHeading();
         deps.onChannelChange?.(target);
         modeSwitch.paint();
         await loadCatalog(nextToken, 1);
@@ -271,7 +272,6 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
       reload = null; changeMode = null; teardown = null;
     };
 
-    paintHeading();
     modeSwitch.paint();
   }
 

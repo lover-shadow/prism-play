@@ -9,6 +9,9 @@
  */
 /// <reference types="vite/client" />
 import './player.css';
+import { createArtEngine } from './art-engine';
+import type { EngineFactory, MediaEvent, PlayerEngine } from './engine-seam';
+import { probeStageOrientation, type AspectOrientation } from './aspect';
 import type { EpisodeItem, PlaybackInfo, TitleDetail } from '../../edge/src/types/api';
 import { ApiError } from '../core/api/client';
 import { icon } from '../components/icons';
@@ -24,18 +27,6 @@ import { createCallInterruptPolicy, createSleepTimer, SLEEP_CHOICES, SLEEP_LABEL
 import type { Clock, SleepMode } from './sleep-timer';
 
 export type PlayerPhase = 'idle' | 'loading' | 'ready' | 'ended' | 'error' | 'destroyed';
-export type MediaEvent = 'ended' | 'timeupdate' | 'play' | 'pause' | 'error';
-
-/** What this module drives inside ArtPlayer; a fake satisfies it under test. */
-export interface PlayerEngine {
-  play(): void; pause(): void; playing(): boolean; destroy(): void;
-  currentTime(): number; setCurrentTime(seconds: number): void; duration(): number;
-  volume(): number; setVolume(value: number): void; setSource(url: string, mimeType?: string): void;
-  toggleControls(): void; on(event: MediaEvent, handler: () => void): () => void;
-  setFullscreen?(fullscreen: boolean): void; resize?(): void;
-}
-export interface EngineContext { container: HTMLDivElement; theme: string; poster?: string; onError(message: string): void }
-export type EngineFactory = (context: EngineContext) => PlayerEngine | Promise<PlayerEngine>;
 export interface PlayerApi { playback(episodeId: number): Promise<PlaybackInfo>; title(titleId: string): Promise<TitleDetail> }
 export interface PlayerFailure { kind: PlayerErrorKind | 'media' | 'progress-blocked'; message: string }
 
@@ -49,6 +40,11 @@ export interface PrismPlayerOptions {
   allowBackgroundAudio?: boolean;
   /** Geometry override: jsdom has no layout, so integration tests inject the play-surface box. */
   measure?: () => GestureBounds; requestFrame?(callback: () => void): number; cancelFrame?(handle: number): void;
+  /**
+   * 画幅嗅探出口（SPEC §1.2.1）：元数据就绪后报告真实画幅朝向。
+   * 播放器只**报告**，不据此锁屏或改全屏——方向锁与全屏态都是宿主的权威范围（§1.2.0）。
+   */
+  onAspect?: (orientation: AspectOrientation | null) => void;
 }
 export interface PlayerState {
   phase: PlayerPhase; errorKind: PlayerErrorKind | null; episodeId: number | null; contentId: string | null;
@@ -62,45 +58,12 @@ export interface PrismPlayer {
   setLocked(locked: boolean): void; scheduleSleep(mode: SleepMode): void; openDrawer(): void; closeDrawer(): void;
   /** AC-11: audio focus is the host's fact, not the page's, so the caller reports it. */
   notifyAudioFocus(focus: 'restored' | 'lost'): void; notifyLeave(): void;
-  setFullscreen?(fullscreen: boolean): void;
+  /** 视口几何变了（进出全屏、转屏）：只让内核重算内部尺寸，不触碰任何全屏通道（SPEC §1.2.0）。 */
+  relayout(): void;
 }
 
 const errorKindOf = (error: unknown): PlayerErrorKind =>
   error instanceof ApiError ? (error.treatedAsMissing ? 'missing' : error.code === 'NETWORK_ERROR' ? 'offline' : 'retryable') : 'retryable';
-
-/** Production engine: ArtPlayer for chrome and events, hls.js for the controlled proxy manifest. */
-export const createArtEngine: EngineFactory = async ({ container, theme, poster, onError }) => {
-  const [{ default: Artplayer }, { default: Hls }] = await Promise.all([import('artplayer'), import('hls.js')]);
-  let hls: InstanceType<typeof Hls> | null = null;
-  const blank = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-  const initialPoster = poster || blank;
-  const art = new Artplayer({
-    container, url: '', poster: initialPoster, theme, volume: 1, autoplay: true, autoSize: false, isLive: false, lang: 'zh-cn', playsInline: true,
-    customType: {
-      m3u8: (video: HTMLVideoElement, url: string) => {
-        hls?.destroy();
-        video.poster = initialPoster; video.playsInline = true;
-        video.setAttribute('playsinline', 'true'); video.setAttribute('webkit-playsinline', 'true');
-        if (Hls.isSupported()) {
-          hls = new Hls({ lowLatencyMode: false }); hls.loadSource(url); hls.attachMedia(video);
-          hls.on(Hls.Events.MANIFEST_PARSED, () => { void video.play().catch(() => { video.muted = true; void video.play().catch(() => {}); }); });
-          hls.on(Hls.Events.ERROR, (_e, data) => { if (data.fatal) onError('播放中断，正在尝试重新解析'); });
-        } else if (video.canPlayType('application/vnd.apple.mpegurl')) { video.src = url; void video.play().catch(() => {}); }
-        else onError('当前设备不支持 HLS 播放，需在 Android 端验证');
-      }
-    }
-  });
-  return {
-    play: () => void art.play(), pause: () => art.pause(), playing: () => art.playing,
-    currentTime: () => art.currentTime, setCurrentTime: (s) => void (art.currentTime = s),
-    duration: () => art.duration, volume: () => art.video.volume, setVolume: (v) => void (art.video.volume = clamp(v, 0, 1)),
-    toggleControls: () => art.controls.toggle(),
-    setSource: (u, m) => { art.type = m === 'video/mp4' ? 'mp4' : 'm3u8'; art.url = u; void art.play().catch(() => {}); },
-    on: (event, handler) => { const name = `video:${event}`; art.on(name, handler); return () => art.off(name, handler); },
-    setFullscreen: (f: boolean) => { art.fullscreenWeb = f; art.autoSize(); },
-    resize: () => art.autoSize(), destroy: () => { hls?.destroy(); art.destroy(); }
-  };
-};
 
 export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
   const clock = options.clock ?? systemClock;
@@ -214,6 +177,8 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
     else if (event === 'pause') { root.classList.remove('is-playing'); if (!interruption.pausingForCall()) interruption.noteUserAction(); progress.emit(true); }
     else if (event === 'timeupdate') { if (progress.due()) progress.emit(); }
     else if (event === 'error') { root.classList.remove('is-playing'); phase = 'error'; errorKind = 'retryable'; overlay.show('retryable'); report({ kind: 'media', message: '播放失败' }); }
+    // 必须显式一条分支：`loadedmetadata` 落到末尾的 `else` 会被当成 `ended`，于是每集刚出画面就自动跳下一集。
+    else if (event === 'loadedmetadata') options.onAspect?.(probeStageOrientation(chrome.stage));
     else void onEnded();
   }
 
@@ -224,7 +189,7 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
       container: chrome.stage, theme, poster: detail?.item.coverUrl, onError: (message) => report({ kind: 'media', message })
     });
     const live = engine;
-    mediaOff = (['ended', 'timeupdate', 'play', 'pause', 'error'] as const).map((event) => live.on(event, () => handleMediaEvent(event)));
+    mediaOff = (['ended', 'timeupdate', 'play', 'pause', 'error', 'loadedmetadata'] as const).map((event) => live.on(event, () => handleMediaEvent(event)));
     const [volume, brightness] = await Promise.all([bridge.getSystemVolume(), bridge.getBrightness()]);
     systemVolumeSupported = volume.supported; brightnessSupported = brightness.supported;
     gesture.seed('volume', volume.supported ? volume.volume : live.volume());
@@ -279,7 +244,7 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
     setLocked, scheduleSleep, closeDrawer: () => drawer.close(),
     openDrawer: () => { if (detail !== null && episodeId !== null) drawer.open(detail, episodeId); },
     notifyAudioFocus: (value) => interruption.audioFocus(value), notifyLeave: () => { interruption.noteUserAction(); progress.emit(true); },
-    setFullscreen: (on: boolean) => { root.classList.toggle('prism-player--fullscreen', on); engine?.setFullscreen?.(on); },
+    relayout: () => engine?.resize?.(),
     state: (): PlayerState => ({
       phase, errorKind, episodeId, contentId: detail?.item.id ?? null, playing: engine?.playing() ?? false,
       locked, sleepMode: sleep.mode(), isPrivate: isPrivateSubject(detail?.item ?? {}),

@@ -4,8 +4,21 @@
  * 这里钉住的最重要一条是"同一 Tab 的视图每 App 生命周期只构造一次"——【设置】视图构造即关私密会话，
  * 若随切换重建，用户切走再切回就被强制结束当次会话（AC-02-2 的边界是冷启动，不是 Tab 切换）。
  */
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createAppShell, SHELL_TABS, type ManagedView, type ShellTab } from '../../src/app-shell';
+
+/** 从当前工作目录向上找到仓库根，避免依赖 vitest 的 cwd 假设。 */
+const readSource = (relative: string): string => {
+  let directory = process.cwd();
+  for (let depth = 0; depth < 5; depth += 1) {
+    const candidate = join(directory, relative);
+    if (existsSync(candidate)) return readFileSync(candidate, 'utf8');
+    directory = dirname(directory);
+  }
+  throw new Error(`找不到样式正本 ${relative}`);
+};
 
 const flush = async (): Promise<void> => { for (let i = 0; i < 8; i += 1) await Promise.resolve(); };
 
@@ -165,5 +178,75 @@ describe('app-shell Tab 拓扑', () => {
     await h.shell.activate('private' as ShellTab);
     expect(h.main.querySelectorAll('.app-view')).toHaveLength(0);
     expect(h.tabs).toEqual([]);
+  });
+});
+
+describe('app-shell 顶栏与底栏骨架（AC-25 / AC-27）', () => {
+  beforeEach(() => { document.body.replaceChildren(); });
+
+  it('AC-25 顶栏一次成型为"左品牌 + 右工具槽"，且槽位永不被 paint 清空', async () => {
+    const h = harness();
+    const row = h.header.querySelector('.app-header-row');
+    expect(row).not.toBeNull();
+    expect(row?.querySelector('.app-header-brand')).not.toBeNull();
+    expect(row?.querySelector('.app-header-accessory')).not.toBeNull();
+    // 槽里放进一颗常驻控件后，切四次 Tab 都必须是同一颗实例：重建会丢 aria-pressed 与偏好态。
+    const accessory = h.shell.headerAccessory();
+    const kept = document.createElement('button');
+    kept.type = 'button';
+    kept.setAttribute('aria-pressed', 'true');
+    accessory.replaceChildren(kept);
+    for (const tab of ['search', 'settings', 'history', 'home'] as ShellTab[]) await h.shell.activate(tab);
+    expect(accessory.children).toHaveLength(1);
+    expect(accessory.firstElementChild).toBe(kept);
+    expect(kept.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('AC-25 工具槽只在承载它的那个 Tab 可见，其余 Tab 隐藏实例本身', async () => {
+    const h = harness();
+    expect(h.shell.headerAccessory().hidden).toBe(false);
+    await h.shell.activate('settings');
+    expect(h.shell.headerAccessory().hidden).toBe(true);
+    await h.shell.activate('home');
+    expect(h.shell.headerAccessory().hidden).toBe(false);
+  });
+
+  it('AC-27 四颗 Tab 住在 .app-tabbar-inner 内容区，栏本体仍可铺满背景', async () => {
+    const h = harness();
+    const inner = h.tabbar.querySelector('.app-tabbar-inner');
+    expect(inner).not.toBeNull();
+    // 限宽只能挂在内层：按钮直接挂在 .app-tabbar 上时，缩宽度会把底色与分隔线一起缩掉。
+    expect(inner?.children).toHaveLength(4);
+    expect(h.tabbar.children).toHaveLength(1);
+  });
+});
+
+describe('外壳样式静态对账（AC-25 / AC-26 / AC-27）', () => {
+  const appCss = readSource('src/styles/app.css');
+  const tokensCss = readSource('src/styles/design-tokens.css');
+
+  it('AC-25 顶栏行垂直居中并拉满 --header-height，品牌区不再用 baseline 贴顶', () => {
+    const row = appCss.match(/\.app-header-row\s*\{([^}]*)\}/)?.[1] ?? '';
+    expect(row).toMatch(/display:\s*flex/);
+    expect(row).toMatch(/align-items:\s*center/);
+    expect(row).toMatch(/justify-content:\s*space-between/);
+    expect(row).toMatch(/height:\s*var\(--header-height\)/);
+    const brand = appCss.match(/\.app-brand\s*\{([^}]*)\}/)?.[1] ?? '';
+    expect(brand).toMatch(/align-items:\s*center/);
+    expect(brand).not.toMatch(/baseline/);
+  });
+
+  it('AC-27 底栏内容区限宽来自 token 且等于 360px，居中收拢', () => {
+    const inner = appCss.match(/\.app-tabbar-inner\s*\{([^}]*)\}/)?.[1] ?? '';
+    expect(inner).toMatch(/max-width:\s*var\(--tabbar-content-max\)/);
+    expect(inner).toMatch(/margin:\s*0 auto/);
+    expect(inner).toMatch(/width:\s*100%/);
+    expect(tokensCss).toMatch(/--tabbar-content-max:\s*360px/);
+  });
+
+  it('AC-26 胶囊双口径的两个 token 都真实存在，且 app.css 未把 44px 写死', () => {
+    expect(tokensCss).toMatch(/--capsule-height:\s*28px/);
+    expect(tokensCss).toMatch(/--capsule-hit:\s*44px/);
+    expect(appCss).not.toMatch(/#[0-9A-Fa-f]{3,8}\b/);
   });
 });

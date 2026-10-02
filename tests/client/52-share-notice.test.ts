@@ -30,11 +30,11 @@ function share(options: { clipboard: 'ok' | 'denied' | 'absent'; externalFails?:
   return { action, reports, opened, writeText };
 }
 
-describe('分享出站', () => {
+describe('AC-23 分享出站（公网主域恒定）', () => {
   beforeEach(() => { document.body.replaceChildren(); vi.useRealTimers(); });
   afterEach(() => { vi.useRealTimers(); });
 
-  it('播放中分享带上当前集数，id 经百分号编码，端点形态符合 /s/:id?ep=集数', async () => {
+  it('AC-23 播放中分享带上当前集数，id 经百分号编码，端点形态符合 /s/:id?ep=集数', async () => {
     const h = share();
     await h.action(CONTENT, EPISODE);
     expect(h.opened).toEqual([]);
@@ -56,7 +56,7 @@ describe('分享出站', () => {
     expect(h.reports).toEqual([]);
   });
 
-  it('主域恒定，绝不退化到运行时 origin（Capacitor 下 window.location.origin 是 localhost）', async () => {
+  it('AC-23 主域恒定，绝不退化到运行时 origin（Capacitor 下 window.location.origin 是 localhost）', async () => {
     // 这是 v2.4 之前分享死链的根因：origin 从运行时读取，在 Android WebView 里变成
     // https://localhost，拼出的链接在别人手机上必然打不开。因此主域必须是模块级常量。
     expect(SHARE_ORIGIN).toBe('https://play.prismos.org');

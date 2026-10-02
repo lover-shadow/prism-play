@@ -287,12 +287,12 @@ describe('样式真相源静态对账（AC-04 / §10 / P0-3）', () => {
     expect(homeCss).not.toMatch(/#[0-9A-Fa-f]{3,8}\b/);
     expect(homeCss).not.toMatch(/\brgba?\(/);
     expect(homeCss).not.toMatch(/grid-template-columns\s*:/);
-    expect(homeCss).toMatch(/\.capsule\s*\{[^}]*min-height:\s*var\(--subnav-height\)/);
     expect(homeCss).toMatch(/aspect-ratio:\s*var\(--poster-ratio\)/);
     // 两层导航合成一个吸顶块贴在 #app-header 之下；44px 触控下限来自 Token。
     expect(homeCss).toMatch(/\.home-sticky\s*\{[^}]*position:\s*sticky/);
     expect(tokensCss).toMatch(/--subnav-height:\s*44px/);
     expect(tokensCss).toMatch(/--header-height:\s*52px/);
   });
+
 });
 

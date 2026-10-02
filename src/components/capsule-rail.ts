@@ -60,13 +60,17 @@ export function createCapsuleRail(deps: CapsuleRailDeps): CapsuleRail {
     const signal = new AbortController();
 
     for (const label of labels) {
-      const pill = element('button', 'capsule touch-target', label);
-      pill.type = 'button';
-      pill.dataset.category = label;
-      pill.title = label;
-      pill.addEventListener('click', () => deps.onSelect(label), { signal: signal.signal });
-      rail.appendChild(pill);
-      pills.push(pill);
+      // 按钮盒 = 命中区（`--capsule-hit` 44px），内层 span = 观感胶囊（`--capsule-height` 28px）。
+      // 两层分开才能同时满足"视觉降维到 28px"与 SPEC §10 的"可点击 ≥44px"；
+      // 只把 28px 写在按钮上、再靠外层 padding 撑行，命中区实测仍是 28px——那是无障碍破口而非双口径。
+      const chip = element('button', 'capsule touch-target');
+      chip.type = 'button';
+      chip.dataset.category = label;
+      chip.title = label;
+      chip.appendChild(element('span', 'capsule-pill', label));
+      chip.addEventListener('click', () => deps.onSelect(label), { signal: signal.signal });
+      rail.appendChild(chip);
+      pills.push(chip);
     }
 
     rail.addEventListener(

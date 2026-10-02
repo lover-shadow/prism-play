@@ -186,14 +186,14 @@ def check_cross_documents():
         assert f in spec_text, f"SPEC-v2.0.md 缺失功能 {f}"
         assert f in prd_text, f"PRD-prism-play.md 缺失功能 {f}"
         
-    expected_ac = [f"AC-{i:02d}" for i in range(1, 19)]
+    expected_ac = [f"AC-{i:02d}" for i in range(1, 31)]
     for ac in expected_ac:
         assert ac in spec_text, f"SPEC-v2.0.md 缺失验收标准 {ac}"
         assert ac in prd_text, f"PRD-prism-play.md 缺失验收标准 {ac}"
         
     # 验证 PRD 标题无重号 (消除 R-11)
     assert "### 13.1" in prd_text and "### 13.2" in prd_text, "PRD 第十三章子标题必须为 13.1 与 13.2，不可与第十二章重号"
-    print("  -> F-01~15 与 AC-01~18 编号无缝对齐，PRD 标题层级无重号。")
+    print("  -> F-01~15 与 AC-01~30 编号无缝对齐，PRD 标题层级无重号。")
 
 def check_design_tokens():
     print("[5/5] 检验 Design Tokens 与 CSS 变量一致性...")
@@ -222,7 +222,7 @@ if __name__ == "__main__":
         check_design_tokens()
         print("\n==================================================")
         print("  【阶段 0：施工前契约复核门禁 (Gate G0)】通过检验！")
-        print("   (覆盖 19 API / 22 业务表 / 13 功能 / 18 AC 验收)")
+        print("   (覆盖 19 API / 22 业务表 / 13 功能 / 30 AC 验收)")
         print("==================================================")
     except Exception as e:
         print(f"\n[FAILED] 契约复核未通过: {e}", file=sys.stderr)

@@ -5,7 +5,8 @@
  */
 import { vi } from 'vitest';
 import { createPlayer } from '../../src/player/prism-player';
-import type { PlayerEngine, PlayerFailure, PrismPlayerOptions } from '../../src/player/prism-player';
+import type { PlayerFailure, PrismPlayerOptions } from '../../src/player/prism-player';
+import type { PlayerEngine } from '../../src/player/engine-seam';
 import type { CallState, PrismNativeBridge } from '../../src/core/native/bridge';
 import type { TitleDetail } from '../../edge/src/types/api';
 import type { Clock } from '../../src/player/sleep-timer';

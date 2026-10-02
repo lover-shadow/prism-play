@@ -13,6 +13,8 @@ import { icon, type IconName, type IconSize } from '../components/icons';
 import { ApiError } from '../core/api/client';
 import type { ContentItem, DeviceTier, RelatedResponse } from '../../edge/src/types/api';
 import { CLEARED_BY_CLEAR_CACHE, POSTER_CACHE_LIMIT_BYTES, PRESERVED_BY_CLEAR_CACHE, isPrivateSubject, type StorageDomain, type WatchHistoryRow } from '../core/storage/storage-domains';
+import { isFinished as finishedByHistoryDomain } from '../core/storage/history-store';
+import type { MergeReport } from '../core/user-sync';
 import './views.css';
 
 /* ==================== 共享视图基元（三视图复用） ==================== */
@@ -115,10 +117,10 @@ export interface HistoryViewDeps {
   api: HistoryApi; history: HistoryReader; cache: CacheUsage; credentials: CredentialWriter;
   onOpenTitle(contentId: string): void; onResume(row: WatchHistoryRow): void; root: HTMLElement;
   /** 注入时钟（Unix 秒），使秒级断点与相对时间文案可测。 */ now?(): number;
+  /** AC-30 拉取口（§1.9.4 接口 B）：进入本 Tab 即静默合并云端断点；缺席时视图纯本地照常工作。 */ pullRemote?(): Promise<MergeReport | null>;
 }
 export interface HistoryView { mount(): Promise<void>; reload(): Promise<void>; destroy(): void; }
 
-const FINISH_TOLERANCE_SECONDS = 5;
 const RELATED_SEED_LIMIT = 2;
 const RELATED_RAIL_LIMIT = 12;
 const NETWORK_COPY = '网络不可用：公开快照与海报仍可浏览，点播需联网后重新解析取流地址。';
@@ -128,6 +130,7 @@ const DOMAIN_LABEL: Readonly<Record<StorageDomain, string>> = {
 };
 const PRESERVED_LABELS = PRESERVED_BY_CLEAR_CACHE.map((domain) => DOMAIN_LABEL[domain]).join('、');
 
+/** 秒级断点的 `mm:ss` / `h:mm:ss` 呈现口径由本视图钉住（`40-history-view` 有逐字断言），不与合作包的组件级格式化器共用。 */
 function formatClock(totalSeconds: number): string {
   const value = Math.max(0, Math.floor(totalSeconds));
   const pad = (n: number): string => String(n).padStart(2, '0');
@@ -136,30 +139,24 @@ function formatClock(totalSeconds: number): string {
 }
 function formatWatchedAt(unixSeconds: number, nowSeconds: number): string {
   const days = Math.floor((nowSeconds - unixSeconds) / 86400);
-  if (days < 1) return '今天';
-  if (days === 1) return '昨天';
-  return days < 30 ? `${days} 天前` : new Date(unixSeconds * 1000).toLocaleDateString('zh-CN');
+  if (days >= 30) return new Date(unixSeconds * 1000).toLocaleDateString('zh-CN');
+  return days < 1 ? '今天' : days === 1 ? '昨天' : `${days} 天前`;
 }
-/** 完播判定：已到末集且断点距片尾 ≤5 秒（契约只有秒级断点，没有服务端完播标记）。 */
+/** 完播判定：已到末集，且断点距片尾的秒窗复用历史域权威实现（同一常量、同一口径，不在此处复制）。 */
 function isFinished(row: WatchHistoryRow): boolean {
   const lastEpisode = row.total_episodes !== null && row.last_episode_number >= row.total_episodes;
-  const nearEnd = row.duration_seconds > 0 && row.position_seconds >= row.duration_seconds - FINISH_TOLERANCE_SECONDS;
-  return lastEpisode && nearEnd;
+  return lastEpisode && finishedByHistoryDomain(row);
 }
 
 export function createHistoryView(deps: HistoryViewDeps): HistoryView {
   const now = deps.now ?? (() => Math.floor(Date.now() / 1000));
   let disposed = false;
   // 骨架在构造期建好：`reload()` 可能先于 `mount()` 被调用，视图在生命周期内独占 root。
-  const resume = band('正在追', 'band-resume', '自动记录秒级进度');
-  const related = band('同类好剧', 'band-related', '依你看过的公开剧目召回');
-  const finished = band('往期完播', 'band-finished');
-  const cache = band('本地公开缓存', 'band-cache');
-  const grantNote = make('p', 'pv-note', '授权状态待读取。');
-  const offlineNote = make('p', 'pv-note', OFFLINE_COPY);
+  const resume = band('正在追', 'band-resume', '自动记录秒级进度'), related = band('同类好剧', 'band-related', '依你看过的公开剧目召回');
+  const finished = band('往期完播', 'band-finished'), cache = band('本地公开缓存', 'band-cache');
+  const grantNote = make('p', 'pv-note', '授权状态待读取。'), offlineNote = make('p', 'pv-note', OFFLINE_COPY);
+  grantNote.dataset.el = 'grant-note'; offlineNote.dataset.el = 'offline-note';
   const heading = make('h2', 'pv-head-title', '正在追与历史');
-  grantNote.dataset.el = 'grant-note';
-  offlineNote.dataset.el = 'offline-note';
   glyphInto(heading, 'history', 20);
   const head = make('div', 'pv-head');
   head.append(heading, button('清空历史', () => void clearHistory(), { icon: 'trash', cls: 'pv-btn-ghost', el: 'clear-history' }));
@@ -191,11 +188,8 @@ export function createHistoryView(deps: HistoryViewDeps): HistoryView {
   }
 
   function resumeCard(row: WatchHistoryRow): HTMLElement {
-    const card = make('div', 'pv-card');
-    const thumb = make('div', 'pv-card-thumb');
-    const body = make('div', 'pv-card-body');
-    const track = make('div', 'pv-progress');
-    const fill = make('div', 'pv-progress-fill');
+    const card = make('div', 'pv-card'), thumb = make('div', 'pv-card-thumb'), body = make('div', 'pv-card-body');
+    const track = make('div', 'pv-progress'), fill = make('div', 'pv-progress-fill');
     const remaining = Math.max(0, Math.round(row.duration_seconds - row.position_seconds));
     const percent = row.duration_seconds > 0 ? Math.min(100, Math.max(0, (row.position_seconds / row.duration_seconds) * 100)) : 0;
     card.dataset.el = 'resume-card'; card.dataset.contentId = row.content_id;
@@ -247,11 +241,20 @@ export function createHistoryView(deps: HistoryViewDeps): HistoryView {
     readyBand(related, [rail]);
   }
 
+  /**
+   * AC-30 静默拉取：本机视图先照常渲染，云端断点回来后才重绘【正在追】，全程不加阻塞式 loading；
+   * 合并口径归 `user-sync`（`updatedAt` 取较新者，本机更新的不覆盖），无授权或失败即静默返回。
+   */
+  async function pullQuietly(): Promise<void> {
+    const result = deps.pullRemote === undefined ? null : await attempt(deps.pullRemote);
+    if (disposed || result === null || !result.ok || result.value === null || result.value.merged === 0) return;
+    readyBand(resume, result.value.rows.filter((row) => !isFinished(row)).map((row) => resumeCard(row)));
+  }
+
   async function reload(): Promise<void> {
     if (disposed) return;
     deps.root.dataset.state = 'loading';
-    stateBand(resume, 'loading', '正在读取本机追剧记录…');
-    stateBand(finished, 'loading', '正在整理往期完播…');
+    stateBand(resume, 'loading', '正在读取本机追剧记录…'); stateBand(finished, 'loading', '正在整理往期完播…');
     if (deps.history.available !== undefined && !(await deps.history.available())) {
       deps.root.dataset.state = 'disabled';
       stateBand(resume, 'disabled', '本机历史库尚未就绪，追剧记录暂时不可用。');
@@ -279,7 +282,7 @@ export function createHistoryView(deps: HistoryViewDeps): HistoryView {
     grantNote.textContent = !grant.ok ? `授权状态暂时无法读取：${errorCopy(grant.error, NETWORK_COPY)}`
       : grant.value === null ? '本机暂无授权凭证记录：公开目录可浏览，点播需联网核销后取流。'
         : '本机授权凭证可离线验证，但断网时点播仍需联网重新取流。';
-    await paintRelated(rows);
+    await paintRelated(rows); void pullQuietly();
   }
 
   async function clearHistory(): Promise<void> {
@@ -290,9 +293,6 @@ export function createHistoryView(deps: HistoryViewDeps): HistoryView {
     await reload();
   }
 
-  return {
-    async mount(): Promise<void> { await reload(); },
-    reload,
-    destroy(): void { disposed = true; deps.root.replaceChildren(); deps.root.classList.remove('pv-view', 'hist-view'); }
-  };
+  /** `mount` 与 `reload` 同径：Shell 只在首次进入调 mount，之后每次进入调 reload，两条路都必须带上静默拉取。 */
+  return { mount: reload, reload, destroy(): void { disposed = true; deps.root.replaceChildren(); deps.root.classList.remove('pv-view', 'hist-view'); } };
 }

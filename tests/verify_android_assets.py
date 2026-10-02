@@ -12,8 +12,9 @@
   3) values/*.xml 内不存在重名资源（同一模块两个 res 目录合并后最容易出的错）；
   4) capacitor.settings.gradle 里每个 projectDir 真实存在（少装一个插件包 = 配置阶段即失败）；
   5) Gradle wrapper 四件套齐全且 distributionUrl 指向预期版本（CI 靠它自举 Gradle）；
-  6) 我们自己的 Capacitor 插件名在 Java 注解与 TypeScript 常量之间逐字一致；
-  7) 清单里声明了 Java 侧会启动的组件（前台服务、来电接收器）。
+  6) 我们自己的 Capacitor 插件名在 Java 注解与 TypeScript 常量之间逐字一致（PrismNative / PrismCast 两个）；
+  7) 清单里声明了 Java 侧会启动的组件与权限（前台服务、来电接收器、AC-24 的组播权限），app 模块插件
+     确实在 MainActivity 里 registerPlugin，且 H1 的前提——明文策略未放宽——在清单与 security config 上都还成立。
 
 它证明的是"配置自洽"，不证明"能编译通过"——后者只有 CI 的 assembleDebug 才是证据。
 """
@@ -103,14 +104,11 @@ def check_wrapper(problems, checked):
         problems.append(f"gradle-wrapper.properties 未指向 gradle-8.11.1-(all|bin).zip")
 
 
-def check_plugin_name(problems, checked):
-    """插件名必须逐字一致，否则 JS 侧 registerPlugin 拿到的是空实现（调用静默失效）。
-
-    注解里既可能是字面量，也可能引用同文件常量（本工程是后者），两种写法都要解析到最终字符串。
-    """
-    ts = (ROOT / "src" / "core" / "native" / "bridge.ts").read_text(encoding="utf-8")
-    ts_name = re.search(r"PRISM_NATIVE_PLUGIN\s*=\s*'([^']+)'", ts)
-    java = (JAVA / "org" / "prismos" / "play" / "PrismNativePlugin.java").read_text(encoding="utf-8")
+def compare_plugin_name(ts_file: str, ts_constant: str, java_file: str, problems, checked):
+    """单个插件的名字对账：注解里既可能是字面量，也可能引用同文件常量（本工程两处都是后者）。"""
+    ts = (ROOT / ts_file).read_text(encoding="utf-8")
+    ts_name = re.search(rf"{ts_constant}\s*=\s*'([^']+)'", ts)
+    java = (JAVA / "org" / "prismos" / "play" / java_file).read_text(encoding="utf-8")
     literal = re.search(r'@CapacitorPlugin\(\s*name\s*=\s*"([^"]+)"', java)
     reference = re.search(r"@CapacitorPlugin\(\s*name\s*=\s*(?:\w+\.)?(\w+)", java)
     java_name = None
@@ -121,7 +119,20 @@ def check_plugin_name(problems, checked):
         java_name = constant.group(1) if constant is not None else None
     checked.append(f"plugin={ts_name and ts_name.group(1)}")
     if ts_name is None or java_name is None or ts_name.group(1) != java_name:
-        problems.append(f"插件名不一致：TS={ts_name and ts_name.group(1)} Java={java_name}")
+        problems.append(
+            f"插件名不一致（{java_file}）：TS={ts_name and ts_name.group(1)} Java={java_name}"
+        )
+    return java_name
+
+
+def check_plugin_name(problems, checked):
+    """插件名必须逐字一致，否则 JS 侧 registerPlugin 拿到的是空实现（调用静默失效）。
+
+    两个插件都在 app 模块内注册，因此都不出现在 capacitor.plugins.json（那文件只承载 npm 侧插件），
+    两侧名字的一致性只能靠这条断言来守：AC-10/AC-11 的 PrismNative 与 AC-24 的 PrismCast。
+    """
+    compare_plugin_name("src/core/native/bridge.ts", "PRISM_NATIVE_PLUGIN", "PrismNativePlugin.java", problems, checked)
+    compare_plugin_name("src/core/native/cast.ts", "PRISM_CAST_PLUGIN", "PrismCastPlugin.java", problems, checked)
 
 
 def check_components_declared(problems, checked):
@@ -130,10 +141,23 @@ def check_components_declared(problems, checked):
         checked.append(component)
         if f'android:name=".{component}"' not in manifest:
             problems.append(f"清单未声明 Java 侧会用到的组件：{component}")
-    for permission in ("FOREGROUND_SERVICE_MEDIA_PLAYBACK", "POST_NOTIFICATIONS", "READ_PHONE_STATE"):
+    for permission in ("FOREGROUND_SERVICE_MEDIA_PLAYBACK", "POST_NOTIFICATIONS", "READ_PHONE_STATE",
+                       "CHANGE_WIFI_MULTICAST_STATE"):
         checked.append(permission)
         if permission not in manifest:
-            problems.append(f"清单缺少 AC-10/AC-11 依赖的权限：{permission}")
+            problems.append(f"清单缺少 AC-10/AC-11/AC-24 依赖的权限：{permission}")
+    # 组播权限只是必要条件的一半：MulticastLock 必须在扫描期持有、结束即释放，且明文策略不得因此被放宽。
+    # 这两条都是清单级静态事实，放在本门禁比放在真机 checklist 上更早、也更难被悄悄改掉。
+    activity = (APP / "java" / "org" / "prismos" / "play" / "MainActivity.java").read_text(encoding="utf-8")
+    for plugin_class in ("PrismNativePlugin.class", "PrismCastPlugin.class"):
+        checked.append(plugin_class)
+        if f"registerPlugin({plugin_class})" not in activity:
+            problems.append(f"MainActivity 未注册 app 模块插件：{plugin_class}（Bridge 拿不到实现，调用静默失效）")
+    if 'android:usesCleartextTraffic="false"' not in manifest:
+        problems.append("清单的 usesCleartextTraffic 必须保持 false：AC-24 的 H1 是裸 socket 方案，不靠放宽明文策略")
+    security = (RES / "xml" / "network_security_config.xml").read_text(encoding="utf-8")
+    if 'cleartextTrafficPermitted="false"' not in security:
+        problems.append("network_security_config 的 base-config 必须保持 cleartextTrafficPermitted=\"false\"")
 
 
 def check_color_tokens(problems, checked):

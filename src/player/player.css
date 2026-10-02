@@ -14,7 +14,6 @@
   position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden;
   background: var(--player-bg); color: var(--fg); border-radius: var(--radius-md);
 }
-.prism-player--fullscreen { position: fixed; inset: 0; z-index: 90; width: 100%; height: 100%; aspect-ratio: auto; }
 .prism-player__stage { position: absolute; inset: 0; }
 
 /* 手势接收面：位于视频之上、控件之下；上下控制带由布局本身排除，因此 classifyTouch 看到的带宽为 0。 */
@@ -157,8 +156,12 @@ video::-webkit-media-controls-overlay-play-button {
 .art-video-player .art-loading { z-index: 40 !important; background: transparent !important; }
 .art-video-player .art-loading svg { width: 40px !important; height: 40px !important; color: var(--accent) !important; filter: drop-shadow(0 0 10px rgba(229, 169, 60, 0.6)); }
 
-/* 等待底片与高斯模糊环境光 (电影级拉幕感) */
-.prism-player__backdrop { position: absolute; inset: 0; z-index: 1; overflow: hidden; pointer-events: none; background: var(--player-bg); opacity: 1; transition: opacity 0.4s ease; }
+/* 等待底片与高斯模糊环境光 (电影级拉幕感)
+ * `z-index: 0` 是刻意的：底片必须落在画面**之下**。它靠 `contain` 的留白显形——全屏竖屏短剧上下各留约
+ * 240px，那块由模糊海报填满而不是纯黑（AC-19）。若留在 z-index: 1，它会盖在 video 上方，
+ * 于是旧实现只能用 `is-playing` 把它整块淡出来"解决"遮挡，全屏留白就变回了黑边。
+ * 全屏态由 `player-host.css` 把这条淡出按住，只在全屏生效。 */
+.prism-player__backdrop { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; background: var(--player-bg); opacity: 1; transition: opacity 0.4s ease; }
 .prism-player__backdrop-img { width: 100%; height: 100%; object-fit: cover; filter: blur(28px) brightness(0.6); transform: scale(1.18); }
 .prism-player__backdrop-glow { position: absolute; inset: 0; background: radial-gradient(circle at center, transparent 30%, rgba(0, 0, 0, 0.8) 100%), linear-gradient(to bottom, rgba(8, 10, 16, 0.75) 0%, transparent 40%, rgba(8, 10, 16, 0.95) 100%); }
 .prism-player.is-playing .prism-player__backdrop { opacity: 0; visibility: hidden; pointer-events: none; }

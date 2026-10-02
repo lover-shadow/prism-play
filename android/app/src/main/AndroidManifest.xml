@@ -15,8 +15,9 @@
      "cache bytes -> displayable address" bridge for cached posters would throw a
      FileUriExposedException instead of returning a URI. `res/xml/file_paths.xml` ships
      with the scaffold and stays as generated.
-  2. Permissions, the media foreground service and the call-state receiver are ours
-     (AC-10 / AC-11); nothing here is inherited from the template.
+  2. Permissions, the media foreground service and the call-state receiver are ours (AC-10 / AC-11); nothing
+     here is inherited from the template. AC-24 added exactly one permission afterwards,
+     CHANGE_WIFI_MULTICAST_STATE, and relaxed nothing: the cleartext policy below is still closed.
 
   NOTHING IN THIS FILE HAS RUN ON A DEVICE. Static review only: no JDK / SDK on the
   authoring machine; evidence comes from the GitHub Actions build, not from this box.
@@ -41,6 +42,17 @@
          Denial degrades AC-11 (no auto-pause) and must not block playback: the phone still
          rings, the video just keeps talking over it, and the TS settings row has to say so. -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+
+    <!-- AC-24 / SPEC §1.5.2.1 H2: SSDP device discovery needs a WifiManager.MulticastLock, and that lock
+         can only be created with this permission. Without it the Wi-Fi stack drops the renderer's reply and
+         the sheet shows "扫描零设备" on a healthy home network - the least diagnosable failure this feature
+         could have. Scope note: this permission unlocks MULTICAST RECEPTION only. It does not, and must not,
+         relax cleartext: usesCleartextTraffic stays "false" and network_security_config stays
+         cleartextTrafficPermitted="false", because the LAN SOAP control path is a raw java.net.Socket by
+         deliberate, Master-signed-off decision (H1) rather than a policy exception. PrismCastPlugin acquires
+         the lock only for the scan window and releases it on every exit path including error and stop -
+         a permanently held multicast lock keeps the radio out of power save and is a battery regression. -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
     <!-- F-05 says 息屏保活: a bounded partial wake lock keeps the CPU awake while audio plays
          with the screen off. PlaybackService acquires it with a hard timeout, never forever. -->

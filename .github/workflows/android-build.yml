@@ -49,6 +49,10 @@ jobs:
         run: |
           python tests/verify_android_assets.py
 
+      - name: 运行 30 项验收标准矩阵覆盖复核 (AC-01~30)
+        run: |
+          python tests/verify_acceptance.py
+
       - name: 运行 P0 工程红线扫描
         run: |
           python tests/scan_p0.py

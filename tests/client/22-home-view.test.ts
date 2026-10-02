@@ -72,7 +72,9 @@ describe('home-view 挂载与默认高亮（AC-01）', () => {
       .toEqual(['短剧精选', '院线电影', '热血动漫', '人文纪录']);
     expect(h.root.querySelectorAll('.channel-tab[aria-current="true"]').length).toBe(1);
     expect(h.root.querySelector<HTMLElement>('.channel-tab[aria-current="true"]')?.dataset.channelId).toBe('drama');
-    expect(h.root.querySelector('.home-section-title')?.textContent).toBe('短剧精选');
+    // AC-25：区块头被物理拔除——频道名与一级频道栏 100% 重复，那一行还白吃 40px 高度。
+    expect(h.root.querySelector('.home-section-header')).toBeNull();
+    expect(h.root.querySelector('.home-section-title')).toBeNull();
   });
 
   it('云端未下发短剧精选时高亮 order 最小项，绝不造假频道', async () => {
@@ -141,7 +143,13 @@ describe('home-view 排版模式（AC-04）', () => {
 
     await h.view.refresh();
     expect(gridClass(h.root)).toContain('grid-posters-bookshelf-4');
-    expect(h.root.querySelector('.home-mode-tag')?.textContent).toBe('【四列书架】');
+    // 模式归属的唯一可见证据是切换器自身的 `aria-pressed`；旧的【四列书架】文字标签随区块头一起拔除，
+    // 重绘后仍要点亮同一颗，否则说明偏好态被重建冲掉了。
+    expect(h.root.querySelector('.home-mode-tag')).toBeNull();
+    const pressed = Array.from(h.root.querySelectorAll<HTMLButtonElement>('.mode-btn'))
+      .filter((button) => button.getAttribute('aria-pressed') === 'true');
+    expect(pressed).toHaveLength(1);
+    expect(pressed[0]?.dataset.mode).toBe('bookshelf-4');
   });
 
   it('点击切换器即回传模式，aria-pressed 乐观点亮', async () => {

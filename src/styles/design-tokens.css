@@ -202,6 +202,7 @@
   --header-height: 52px;            /* 吸顶频道栏高度 */
   --subnav-height: 44px;            /* 二级横滑标签栏高度 */
   --tabbar-height: 56px;            /* 底部导航栏高度 */
+  --tabbar-content-max: 360px;      /* 底部导航内容承载区限宽：收进拇指黄金区，底栏背景仍铺满 */
   --safe-area-bottom: env(safe-area-inset-bottom, 0px); /* 手机全面屏底部避让 */
 
   /* [A2] 工业级标准物理动效 Transitions & Easing */

@@ -29,6 +29,9 @@ public class MainActivity extends BridgeActivity {
         // plugins discovered by the CLI), so the class must be handed to the Bridge.Builder BEFORE
         // super.onCreate() builds the Bridge; after that the builder has already been consumed.
         registerPlugin(PrismNativePlugin.class);
+        // AC-24 DLNA cast, same in-module pattern (SPEC §1.5.2.2): no capacitor.settings.gradle entry and no
+        // plugins.json entry, because neither is consulted for classes that live in this app module.
+        registerPlugin(PrismCastPlugin.class);
         super.onCreate(savedInstanceState);
         applyDisplayCutoutMode();
     }

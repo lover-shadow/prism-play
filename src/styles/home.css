@@ -21,17 +21,26 @@
 /* —— 第一层：云端动态频道栏（纯文字流体导航） —— */
 .channel-bar-list { display: flex; align-items: center; gap: var(--space-4); padding: 0 var(--space-4); overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
 .channel-bar-list::-webkit-scrollbar { display: none; }
-.channel-tab { position: relative; flex: 0 0 auto; height: 40px; padding: 0 var(--space-1); border: 0; background: transparent; color: var(--muted); font-size: 15px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: color var(--duration-fast) var(--ease-standard); }
+/* 一级频道是主导航，字号上梯级到 --text-md（17px）以确立支配力；激活项加粗 + 琥珀短横。 */
+.channel-tab { position: relative; display: inline-flex; align-items: center; flex: 0 0 auto; height: 40px; padding: 0 var(--space-1); border: 0; background: transparent; color: var(--muted); font-size: var(--text-md); font-weight: 500; white-space: nowrap; cursor: pointer; transition: color var(--duration-fast) var(--ease-standard); }
 .channel-tab.is-active { color: var(--fg); font-weight: 700; }
 /* 选中态下划线：精致短横线居中指示 */
 .channel-tab.is-active::after { content: ''; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); width: 18px; height: 3px; border-radius: var(--radius-xs); background: var(--accent); }
 
-/* —— 第二层：吸顶联动横滑次级胶囊（UIUX §5.2）—— */
+/* —— 第二层：吸顶联动横滑次级胶囊（UIUX §5.2）——
+ * 【视觉 28px / 命中 44px 双口径 · 不可顺手压缩】
+ * SPEC §10 明令可点击目标 ≥44px，而胶囊本体就是那颗 `<button>`：命中区由按钮盒承担
+ * （`min-height: var(--capsule-hit)`），观感高度由**内层 `.capsule-pill`** 承担（28px）。
+ * 注意：**外层 wrap 的垂直 padding 不会扩大按钮的命中区**，只会把整行撑高；
+ * 早期草案"外层补 padding 凑 44px"是不成立的，故改为内层 pill 方案——两层都真测得出。
+ */
 .capsule-rail-wrap { border-top: 1px solid var(--border-subtle); }
-.capsule-rail { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.capsule-rail { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-3); overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
 .capsule-rail::-webkit-scrollbar { display: none; }
-.capsule { flex: 0 0 auto; min-height: var(--subnav-height); padding: 0 var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-pill); background: transparent; color: var(--muted); font-size: var(--text-xs); white-space: nowrap; cursor: pointer; transition: all var(--duration-fast) var(--ease-standard); }
-.capsule.is-active { color: var(--accent-on); font-weight: 600; background: var(--accent); border-color: var(--accent); }
+.capsule { flex: 0 0 auto; display: inline-flex; align-items: center; min-height: var(--capsule-hit); padding: 0; border: 0; background: none; color: var(--muted); font-size: var(--text-xs); white-space: nowrap; cursor: pointer; transition: color var(--duration-fast) var(--ease-standard); }
+.capsule-pill { display: inline-flex; align-items: center; height: var(--capsule-height); padding: 0 var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-pill); transition: all var(--duration-fast) var(--ease-standard); }
+.capsule.is-active { color: var(--accent-on); font-weight: 600; }
+.capsule.is-active .capsule-pill { background: var(--accent); border-color: var(--accent); }
 
 /* —— 首页核心搜索栏（原续播位置替换，48px 全宽极简，点击直达搜索） —— */
 .home-search-bar { margin: 6px 12px 4px; height: 48px; border-radius: var(--radius-lg); background: var(--surface); border: 1px solid var(--border-subtle); display: flex; align-items: center; padding: 0 var(--space-4); cursor: pointer; transition: all var(--duration-fast) var(--ease-standard); box-shadow: var(--elev-card); }
@@ -39,13 +48,12 @@
 .home-search-lead { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: var(--text-sm); width: 100%; }
 .home-search-lead svg { color: var(--accent); flex: none; }
 
-/* —— 区块头：纯净频道名 + 纯图标四模切换器同行并轨（零文字干扰） —— */
-.home-section-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin: 0; padding: var(--space-2) 14px 0; }
-.home-section-lead { display: flex; align-items: center; min-width: 0; flex: 1 1 auto; }
-.home-section-title { font-size: 15px; font-weight: 700; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.home-mode-tag { display: none !important; }
-.home-mode-switch { display: inline-flex; align-items: center; background: var(--surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 2px; gap: 2px; flex: 0 0 auto; }
-.mode-btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; transition: all 0.15s ease; }
+/* —— 四模排版切换器（常驻外壳顶栏右侧工具槽，SPEC §1.7.3）——
+ * 原 `.home-section-header / -lead / -title / -mode-tag` 已物理拔除：频道名与一级频道 100% 重复，
+ * 且为容纳排版图标单占一行约 40px，把海报流整体下压。切换器上提顶栏后那一行不再存在。
+ */
+.home-mode-switch { display: inline-flex; align-items: center; background: var(--surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: calc(var(--space-1) / 2); gap: calc(var(--space-1) / 2); flex: 0 0 auto; }
+.mode-btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--muted); cursor: pointer; transition: all var(--duration-fast) var(--ease-standard); }
 .mode-btn[aria-pressed='true'] { color: var(--accent-on); background: var(--accent); }
 .mode-btn-label { display: none !important; }
 
@@ -75,6 +83,15 @@
 .poster-media:not(.is-fallback) .poster-fallback { display: none; }
 .poster-media.is-fallback { border: 1px dashed var(--border); }
 .poster-ep-badge { position: absolute; right: var(--space-1); bottom: var(--space-1); padding: 2px var(--space-2); border-radius: var(--radius-xs); background: var(--surface-overlay); color: var(--fg); font-size: var(--text-2xs); font-variant-numeric: tabular-nums; }
+/* —— 海报左上角微光角标（§1.8.5 / AC-29）——
+ * 与右下角 `.poster-ep-badge` 成黄金对角呼应，故本块只新增、绝不移动那条既有规则。
+ * 高度**不硬编码 18px**：由 `--badge-pad-y`（上下各 2px）+ `--leading-tight` × `--text-2xs` 自然撑出。
+ * 前景必须是 theme-invariant 的 `--badge-*`（深浅双模同值）+ 恒定深底 `--badge-bg`：沿用主题相关的
+ * `--fg` / `--accent` 时，浅色模式会变成「近黑字压深底」或「深琥珀对深底 ≈3.7:1」，双双击穿 4.5:1。 */
+.poster-corner-badge { position: absolute; top: var(--space-1); left: var(--space-1); z-index: 1; display: inline-flex; align-items: center; padding: var(--badge-pad-y) var(--space-2); border-radius: var(--radius-xs); background: var(--badge-bg); color: var(--badge-recommend); font-size: var(--text-2xs); font-weight: 500; line-height: var(--leading-tight); letter-spacing: var(--tracking-caps); white-space: nowrap; }
+.poster-corner-badge--ai { color: var(--badge-ai); }
+.poster-corner-badge--hot { color: var(--badge-hot); }
+.poster-corner-badge--recommend { color: var(--badge-recommend); }
 .poster-body { display: flex; flex: 1 1 auto; flex-direction: column; gap: 2px; min-width: 0; }
 .poster-title { font-size: var(--text-sm); font-weight: 600; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .poster-tag { font-size: var(--text-2xs); color: var(--meta); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

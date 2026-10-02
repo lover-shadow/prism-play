@@ -5,18 +5,20 @@
  * 1. **能力缺席就如实回报**——端侧 SQLite 不可用则【追剧】进入 disabled，未内置验签公钥则离线档位不显示，
  *    绝不返回空集合冒充"没有内容"（AC-15 / AC-18）；
  * 2. **进度落库的路由只写一次**——公开走历史域、个人探索走内存域，判定用 `isPrivateSubject` 唯一咽喉点；
+ *    该路由与端云同步同源，已收进 `core/user-sync.ts`（AC-30），本文件只接线、不复制判定；
  * 3. **FLAG_SECURE 只有一个决策点**——私密频道与私密播放任一成立即挂载，两者皆false即解除（AC-02-4）。
  */
-import type { WatchHistoryRow, WatchProgressInput } from './core/storage';
+import type { WatchHistoryRow } from './core/storage';
 import type { AppShell, ManagedView, ShellTab } from './app-shell';
 import type { PosterMode } from './core/state/theme';
 import type { PrismNativeBridge } from './core/native/bridge';
 import type { FetchLike } from './core/api/client';
-import type { ProgressContext } from './player/episode-drawer';
+import type { UserSyncService } from './core/user-sync';
 import type { RedeemOutcome } from './views/settings-view';
 import { CATALOG_CACHE_LIMIT_BYTES, createStorageDomains, isPrivateSubject, MemoryCacheDisk, POSTER_CACHE_LIMIT_BYTES } from './core/storage';
 import { PrismApiClient } from './core/api/client';
 import { createCatalogCacheService } from './core/catalog-cache';
+import { createUserSync } from './core/user-sync';
 import { createGrantProbe, grantAdaptersFor } from './core/identity/offline-grant';
 import { bindNotificationActions, installBridgeForPlatform } from './core/native/capacitor-bridge';
 import { bridgeSource, getBridge } from './core/native/bridge';
@@ -43,6 +45,8 @@ export interface BootOptions {
 
 export interface PrismApp {
   shell: AppShell;
+  /** 端云同步中枢（AC-30）：推荐引擎经 `sync.preferences()` 继承跨端画像，视图不另开第二条网络路径。 */
+  sync: UserSyncService;
   openTitle(contentId: string, resume?: WatchHistoryRow): Promise<boolean>;
   destroy(): void;
 }
@@ -119,31 +123,26 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
 
   const report = createNotice(app);
 
-  /** 私密内容永不进入历史域：这条分支是 M-8 第四域的落点，闸门在 `assertWritable` 里再兜一层。 */
-  function progressSink(row: WatchHistoryRow, context: ProgressContext): void {
-    if (isPrivateSubject(context)) {
-      storage.privateVault.putBreakpoint(row);
-      return;
-    }
-    const input: WatchProgressInput = {
-      contentId: row.content_id, title: row.title, coverUrl: row.cover_url,
-      lastEpisodeId: row.last_episode_id, lastEpisodeNumber: row.last_episode_number,
-      positionSeconds: row.position_seconds, durationSeconds: row.duration_seconds,
-      totalEpisodes: row.total_episodes, updatedAt: row.updated_at,
-      isPrivate: context.isPrivate === true, channelId: context.channelId
-    };
-    void storage.history.upsertWatch(input).catch(() => report('断点未能写入本机历史：追剧进度需端侧 SQLite 就绪'));
-  }
+  /**
+   * 端云状态同步中枢（SPEC §1.9 / AC-30）：构造即补发待发队列（§3.1 要求补传先于任何拉取），并交出
+   * "断点落库路由"这唯一咽喉点——私密内容永不进历史域、也永不进待发队列（§1.9.4）。分类与私密出处
+   * 都取自公开快照：本文件不另判私密，视图也不自建第二条网络路径。
+   */
+  const sync = createUserSync({
+    token: stored.token, history: storage.history, privateVault: storage.privateVault, prefs,
+    baseUrl: defaultApiBaseUrl, fetchImpl: options.fetchImpl, nowSeconds: now, onNotice: report,
+    categoryOf: (contentId) => storage.cache.getItem(contentId)?.category ?? null,
+    provenanceOf: (contentId) => ({ contentId, isPrivate: storage.cache.getItem(contentId)?.isPrivate, channelId: storage.cache.getItem(contentId)?.channelId })
+  });
 
   const share = createShareAction({ bridge, report });
 
   const player = createPlayerHost({
-    mount: app,
-    bridge,
-    api: client,
-    onProgress: progressSink,
-    allowBackgroundAudio: () => backgroundAudio,
-    onShare: (item, episode) => void share(item, episode),
+    mount: app, bridge, api: client,
+    onProgress: sync.onProgress,
+    // §1.9.3 节点 ①：退出播放/关闭播放器/系统 Back 销毁的那一刻就地断点上报（`keepalive` + 待发队列）。
+    onExit: (breakpoint) => void sync.reportExit(breakpoint),
+    allowBackgroundAudio: () => backgroundAudio, onShare: (item, episode) => void share(item, episode),
     onBlocked: (message) => report(message),
     onPrivacyChange: (isPrivate) => { privatePlayback = isPrivate; syncSecure(); },
     onClose: () => { privatePlayback = false; syncSecure(); }
@@ -151,13 +150,9 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
 
   let homeView: HomeView | null = null;
 
+  /** 端侧 SQLite 未就绪时如实返回 false：【追剧】整视图据此进入 disabled，而不是渲染空历史冒充"你没看过"。 */
   async function historyAvailable(): Promise<boolean> {
-    try {
-      await storage.history.init();
-      return true;
-    } catch {
-      return false;
-    }
+    try { await storage.history.init(); return true; } catch { return false; }
   }
 
   async function listHistory(): Promise<WatchHistoryRow[]> {
@@ -203,6 +198,8 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
         credentials: identity.credentials,
         onOpenTitle: (contentId) => void player.open(contentId),
         onResume: (row) => void player.open(row.content_id, row),
+        // §1.9.4 接口 B 的端侧触发点：进入【追剧】即静默拉取并按 `updatedAt` 取较新者合并。
+        pullRemote: () => sync.pull(),
         now
       });
       return { mount: () => view.mount(), reload: () => view.reload(), destroy: () => view.destroy() };
@@ -246,7 +243,8 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
   async function handOffCredential(outcome: RedeemOutcome): Promise<void> {
     try {
       await storage.credentials.write('token', outcome.token);
-      client.setAuthorization(outcome.token);
+      // 凭证换发即同步中枢的身份换轨：更新 JWT 并按 §1.9.4 的"核销成功"触发点静默拉取一次云端断点。
+      client.setAuthorization(outcome.token); sync.setToken(outcome.token); void sync.pull();
       await grant.recordOnlineCheck(now());
       void homeView?.refresh();
     } catch (error) {
@@ -254,13 +252,8 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
     }
   }
   const shell: AppShell = createAppShell({
-    header,
-    main,
-    tabbar,
-    viewFor,
-    onTabChange: async () => {
-      backgroundAudio = (await prefs.get(SETTINGS_PREF_KEYS.keepScreenOn)) === '1';
-    }
+    header, main, tabbar, viewFor,
+    onTabChange: async () => { backgroundAudio = (await prefs.get(SETTINGS_PREF_KEYS.keepScreenOn)) === '1'; }
   });
 
   // 快照优先（AC-01）：bootstrap 内部会先 hydrate 再后台同步；同步成功即刷新离线校验时点（AC-15）。
@@ -268,18 +261,24 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
   if (started.outcome !== null && started.outcome.offline === false) await grant.recordOnlineCheck(now());
   catalog.onSynced(() => { if (homeView !== null) void homeView.refresh(); });
   const releaseNotifications = bindNotificationActions((action) => player.onNotification(action));
+  // §1.9.3 节点 ②：切到后台（`isActive === false`）即静默上报当前断点。监听口与 `back-button.ts` 同款
+  // 守卫——非原生宿主根本不注册，Web 构建退化为 no-op，绝不因为缺 `@capacitor/app` 而抛错。
+  const releaseAppState = await sync.observeBackground(() => void sync.reportExit(sync.lastBreakpoint()));
   await shell.activate('home');
   if (started.hadSnapshot === false && storage.cache.snapshotRevision() === 0) {
     report('离线或目录拉取失败：本机尚无公开快照，点播需联网。');
   }
 
   return {
-    shell,
+    shell, sync,
     openTitle: (contentId, resume) => player.open(contentId, resume),
     destroy() {
       releaseNotifications();
-      shell.destroy();
+      releaseAppState();
+      // 节点 ① 的上报必须排在同步中枢解散之前，否则"完全退出"这一次永远发不出去。
       player.close();
+      sync.dispose();
+      shell.destroy();
       client.forgetPrivateSessionLocally();
       storage.privateVault.clear();
     }

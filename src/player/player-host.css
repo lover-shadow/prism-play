@@ -1,0 +1,88 @@
+/**
+ * 播放浮层样式（宿主壳层 + 沉浸全屏态 + 非全屏详情生态台）。
+ *
+ * 为什么从 `app.css` 搬出来：`app.css` 自陈"only owns the shell, the safe areas and the shared
+ * accessibility floor"，而播放浮层是另一套状态机；混在一起最直接的后果是 §10 的 300 行红线逼着
+ * 两个真相源互相挤占，全屏那段最终长成了一串 `!important`。
+ *
+ * 取值全部来自 `design-tokens.css`（P0-3）。§10 单文件 300 行上限由"一条规则一行"的聚合写法守住。
+ */
+
+/* ---- 播放浮层：全屏宿主，支持非全屏详情生态台与全屏切换 ---- */
+.prism-player-host { position: fixed; inset: 0; z-index: 200; display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden; background: var(--bg); -webkit-overflow-scrolling: touch; }
+.prism-player-host__bar { flex: none; display: flex; align-items: center; gap: var(--space-3); min-height: var(--header-height); padding: calc(env(safe-area-inset-top, 0px) + var(--space-1)) var(--space-4) var(--space-1); background: var(--surface-overlay); border-bottom: 1px solid var(--border-subtle); position: sticky; top: 0; z-index: 30; }
+.prism-player-host__exit { min-width: 44px; min-height: 44px; background: none; border: 0; color: var(--fg); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-pill); }
+.prism-player-host__title { font-size: var(--text-sm); font-weight: 600; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prism-player-host__stage { flex: none; width: 100%; background: var(--player-bg); }
+
+/* ==========================================================================
+   沉浸全屏态 —— 唯一权威（SPEC §1.2.0，AC-19 / AC-20 / AC-21）
+   ==========================================================================
+   全屏只有 `player-host.ts` 的 `isFullscreen` + 下面这一个类。历史上同时存在三方权威，
+   它们互不感知，这正是"横竖屏都缩在中间小方块"反复复发的根本机制：
+   • `art.fullscreenWeb`（setter）触发浏览器 Fullscreen API，Android WebView 里经 Capacitor 的
+     `WebChromeClient` 走**原生全屏容器**，而 `MainActivity` 不接管 `onShowCustomView/onHideCustomView`，
+     那个容器完全绕开本文件；
+   • `.prism-player--fullscreen` 是同一状态的第二个写法，已随本段一并拔除；
+   • 本段旧版用 7 条 `!important` 强压前两者——**要靠 `!important` 才压得动的方案，说明权威已经分裂**。
+   现在 `.host--fullscreen .x` 天然比 `.x` 高一级，零 `!important` 即可覆盖。
+   */
+.prism-player-host--fullscreen { overflow: hidden; background: var(--player-bg); }
+.prism-player-host--fullscreen .prism-player-host__bar,
+.prism-player-host--fullscreen .prism-player-host__body { display: none; }
+/* 舞台即视口。用 `fixed; inset: 0` 而不是 `100vw/100vh`：后者在 Android 地址栏收放时会计入已被遮挡的高度，
+   表现为"底部留一条能滚出来的黑缝"——§1.2.2 说的"顶天立地"指的是舞台充满，不是像素铺满。 */
+.prism-player-host--fullscreen .prism-player-host__stage { position: fixed; inset: 0; z-index: 100; flex: none; width: 100%; height: 100%; margin: 0; }
+.prism-player-host--fullscreen .prism-player { position: absolute; inset: 0; width: 100%; height: 100%; aspect-ratio: auto; border-radius: 0; }
+.prism-player-host--fullscreen .art-video-player { width: 100%; height: 100%; }
+.prism-player-host--fullscreen video { width: 100%; height: 100%; }
+
+/* 留白填充（AC-19 的"无纯黑死边"）：9:16 短剧放进 20:9 屏必然上下共留约 480px，
+   本项目坚持 `contain` 零裁切（裁 20% 宽度会切掉烧录字幕），所以这块留白必须由模糊底片填上。
+   `player.css` 在起播后会淡出底片（非全屏态画面本就盖满，留着没必要），这里只在全屏态把它按住。 */
+.prism-player-host--fullscreen .prism-player.is-playing .prism-player__backdrop { opacity: 1; visibility: visible; }
+
+/* 非全屏剧集详情生态台 (Portrait Media Stage) */
+.prism-player-host__body { flex: 1 1 auto; padding: 14px 16px calc(24px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 16px; background: var(--bg); }
+.prism-player-info { display: flex; flex-direction: column; gap: 8px; }
+.prism-player-info__header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.prism-player-info__title { margin: 0; font-size: 18px; font-weight: 800; color: var(--fg); letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prism-player-info__meta { display: flex; align-items: center; gap: 6px; flex: none; }
+.prism-player-info__tag { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 4px; font-size: 10.5px; font-weight: 600; background: var(--surface); color: var(--muted); border: 1px solid var(--border-subtle); }
+.prism-player-info__tag.is-accent { background: var(--accent-subtle); color: var(--accent); border-color: rgba(229, 169, 60, 0.3); }
+.prism-player-info__synopsis-wrap { display: flex; flex-direction: column; gap: 4px; }
+.prism-player-info__synopsis { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--muted); }
+.prism-player-info__synopsis.is-collapsed { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.prism-player-info__expand-btn { align-self: flex-start; background: none; border: 0; padding: 0; font-size: 11.5px; font-weight: 600; color: var(--accent); cursor: pointer; }
+
+/* 核心操作工具岛 (Action Island - 4 键网格) */
+.detail-action-island { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; background: var(--surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 10px 8px; box-shadow: var(--elev-card); }
+.action-island-item { display: flex; flex-direction: column; align-items: center; gap: 4px; background: none; border: 0; color: var(--fg-2); font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.15s ease; }
+.action-island-item:hover { color: var(--fg); }
+.action-island-item.active { color: var(--accent); }
+.action-island-item svg { width: 20px; height: 20px; }
+
+/* 常驻选集播放轨 */
+.episodes-section { display: flex; flex-direction: column; gap: 10px; }
+.section-title-bar { display: flex; align-items: center; justify-content: space-between; }
+.section-h3 { font-size: 14.5px; font-weight: 700; color: var(--fg); display: flex; align-items: center; gap: 6px; }
+.section-sub-info { font-size: 11.5px; color: var(--muted); font-weight: 400; }
+.view-all-link { font-size: 11.5px; font-weight: 600; color: var(--accent); display: flex; align-items: center; gap: 2px; cursor: pointer; }
+.episodes-rail { display: flex; align-items: center; gap: 8px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.episodes-rail::-webkit-scrollbar { display: none; }
+.ep-rail-btn { flex: 0 0 52px; height: 48px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border-subtle); color: var(--fg-2); font-size: 13.5px; font-weight: 700; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; transition: all 0.15s ease; }
+.ep-rail-btn:hover { border-color: var(--border-strong); color: var(--fg); }
+.ep-rail-btn.active { background: var(--accent); color: var(--accent-on); border-color: var(--accent); box-shadow: 0 4px 12px rgba(229, 169, 60, 0.35); }
+.ep-rail-btn .ep-wave { width: 14px; height: 3px; background: var(--accent-on); border-radius: 2px; margin-top: 2px; }
+
+/* 类似剧集流转区 (Related Flow) */
+.related-section { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+.related-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.related-card { background: var(--surface); border: 1px solid var(--border-subtle); border-radius: 8px; overflow: hidden; cursor: pointer; display: flex; flex-direction: column; transition: border-color 0.15s ease; }
+.related-card:hover { border-color: var(--accent); }
+.related-cover { width: 100%; aspect-ratio: 3 / 4; background: var(--surface-subtle); position: relative; overflow: hidden; }
+.related-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.related-tag { position: absolute; top: 4px; right: 4px; background: rgba(0, 0, 0, 0.65); color: var(--fg); font-size: 9.5px; font-weight: 600; padding: 1px 4px; border-radius: 3px; backdrop-filter: blur(2px); }
+.related-body { padding: 6px 7px; display: flex; flex-direction: column; gap: 2px; }
+.related-title { font-size: 11.5px; font-weight: 700; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.related-desc { font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

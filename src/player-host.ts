@@ -10,11 +10,16 @@ import type { ContentItem, EpisodeItem, RelatedResponse, TitleDetail } from '../
 import type { PrismNativeBridge } from './core/native/bridge';
 import type { WatchHistoryRow } from './core/storage/storage-domains';
 import { registerBackHandler } from './core/native/back-button';
+import { createOrientationPort, type OrientationPort } from './core/native/orientation';
+import { exitReportOf, type ExitReport } from './core/user-sync';
 import { createPlayer } from './player/prism-player';
 import { buildDetailBody, type PlayerDetailStage } from './player/player-detail';
-import type { EngineFactory, PlayerApi, PlayerFailure, PrismPlayer } from './player/prism-player';
+import type { PlayerApi, PlayerFailure, PrismPlayer } from './player/prism-player';
+import type { EngineFactory } from './player/engine-seam';
+import type { AspectOrientation } from './player/aspect';
 import type { ProgressContext } from './player/episode-drawer';
 import type { NotificationAction } from './core/native/capacitor-bridge';
+import './player/player-host.css';
 
 export interface PlayerHostApi extends PlayerApi {
   related?(titleId: string): Promise<RelatedResponse>;
@@ -34,10 +39,21 @@ export interface PlayerHostDeps {
   onBlocked?(message: string): void;
   /** 每次私密性落定后回调，由组合根合并频道状态再决定 FLAG_SECURE。 */
   onPrivacyChange(isPrivate: boolean): void;
+  /**
+   * §1.9.3 节点 ①（退出播放）的出口：载荷在销毁的那一刻定格，交由组合根注入的同步中枢处置。
+   * 宿主不判定私密性——闸门自会拒绝私密断点落队列，这里再判一次只会长出两套口径。
+   */
+  onExit?(report: ExitReport): void;
   onClose?(): void;
   titleOf?(): string;
   /** 播放内核工厂是公开接缝（默认为 ArtPlayer+hls.js）：真机之外的装配与集成测试由此注入替身。 */
   engine?: EngineFactory;
+  /**
+   * 屏幕方向端口（AC-20）：默认走 `@capacitor/screen-orientation`，Web 端自动降级。
+   * 注入而非直接调用，是因为锁方向在 jsdom 里无从验证——单测钉的是"何时该锁、何时必须解"的时序，
+   * 真机才验证"屏幕真的转了"。
+   */
+  orientation?: OrientationPort;
 }
 
 export interface PlayerHost {
@@ -49,13 +65,18 @@ export interface PlayerHost {
   state(): ReturnType<PrismPlayer['state']> | null;
 }
 
-/** 断点优先回到历史那一集；历史缺失或该集已不在剧目内时，从第一集起播。 */
+/**
+ * 断点优先回到历史那一集；历史缺失或该集已不在剧目内时，从第一集起播。
+ * 端云合并来的行只有云端集数与本机旧集 ID（§1.9.2：云端不回填 `episode_id`），两者不符时按集数再认一次，
+ * 否则会拿第 7 集的 ID 去续第 12 集的秒数——既不是最新断点，也不是本机事实。
+ */
 function episodeFor(detail: TitleDetail, resume?: WatchHistoryRow): { episode: EpisodeItem; seconds: number } {
   const ordered = [...detail.episodes].sort((a, b) => a.episodeNumber - b.episodeNumber);
-  const wanted = resume !== undefined && resume.content_id === detail.item.id ? resume.last_episode_id : null;
-  const episode = ordered.find((item) => item.episodeId === wanted) ?? ordered[0];
-  const seconds = wanted !== null && episode !== undefined && resume?.last_episode_id === episode.episodeId
-    ? resume.position_seconds : 0;
+  const mine = resume !== undefined && resume.content_id === detail.item.id ? resume : null;
+  const byId = ordered.find((item) => item.episodeId === mine?.last_episode_id);
+  const byNumber = ordered.find((item) => item.episodeNumber === mine?.last_episode_number);
+  const episode = byId !== undefined && byId.episodeNumber === mine?.last_episode_number ? byId : byNumber ?? byId ?? ordered[0];
+  const seconds = mine !== null && (episode?.episodeId === mine.last_episode_id || episode?.episodeNumber === mine.last_episode_number) ? mine.position_seconds : 0;
   return { episode, seconds };
 }
 
@@ -66,14 +87,39 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
   let keyup: ((event: KeyboardEvent) => void) | null = null;
   let unregisterBack: (() => void) | null = null;
   let detailBodyRef: PlayerDetailStage | null = null;
-  let isFullscreen = false;
   let resizeHandler: (() => void) | null = null;
+  const orientation = deps.orientation ?? createOrientationPort();
+
+  /**
+   * 全屏唯一权威（SPEC §1.2.0 / 铁律 7）：本布尔 + `.prism-player-host--fullscreen` 这一个类。
+   * 播放器内核不再持有全屏通道，`.prism-player--fullscreen` 也已从样式里删除——
+   * 三方权威互不相知正是旧缺陷"横竖屏都缩在中间小方块"的病理来源。
+   */
+  let isFullscreen = false;
+  /** 元数据就绪后嗅到的真实画幅朝向；null 表示尚未知，未知时一律不做方向联动。 */
+  let videoAspect: AspectOrientation | null = null;
+  let orientationLocked = false;
+
+  /**
+   * 方向联动（AC-19 / AC-20）：只有**横屏影视**进全屏才锁横屏；竖屏短剧保持竖直自然握持，严禁强制旋转。
+   * 退出全屏（或画幅尚未知的会话被拆除）一律解锁，把方向交还给系统传感器。
+   */
+  async function syncOrientation(): Promise<void> {
+    const shouldLock = isFullscreen && videoAspect === 'landscape';
+    if (shouldLock && !orientationLocked) orientationLocked = await orientation.lock('landscape');
+    else if (!shouldLock && orientationLocked) {
+      orientationLocked = false;
+      await orientation.unlock();
+    }
+  }
 
   function toggleFullscreen(on?: boolean): void {
     if (layer === null) return;
     isFullscreen = on !== undefined ? on : !isFullscreen;
     layer.classList.toggle('prism-player-host--fullscreen', isFullscreen);
-    player?.setFullscreen?.(isFullscreen);
+    // 几何变了就让内核重算尺寸（`autoSize`），它不触碰任何原生全屏容器。
+    player?.relayout();
+    void syncOrientation();
   }
 
   /** 播放器是异步构造的（ArtPlayer/hls.js 动态导入），动作必须始终打在"当前那一个"实例上。 */
@@ -143,7 +189,9 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
       // AC-02-6：私密与不可分享剧目一律不渲染分享入口，开关位由数据决定而非界面判断。
       allowShare: loaded.item.isPrivate === false && loaded.item.shareable !== false && deps.onShare !== undefined,
       onShare: deps.onShare === undefined ? undefined : (episode) => void deps.onShare?.(loaded.item, episode),
-      allowBackgroundAudio: deps.allowBackgroundAudio()
+      allowBackgroundAudio: deps.allowBackgroundAudio(),
+      // 画幅由播放器嗅探后**上报**，宿主据此决定是否联动方向；播放器自己不锁屏、不进全屏。
+      onAspect: (aspect) => { videoAspect = aspect; void syncOrientation(); }
     });
     deps.onPrivacyChange(loaded.item.isPrivate === true || loaded.item.channelId === 'private');
     keyup = (event: KeyboardEvent) => {
@@ -198,17 +246,17 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
   function close(): void {
     if (keyup !== null) document.removeEventListener('keydown', keyup);
     keyup = null;
-    if (unregisterBack !== null) {
-      unregisterBack();
-      unregisterBack = null;
-    }
-    if (resizeHandler !== null) {
-      window.removeEventListener('resize', resizeHandler);
-      resizeHandler = null;
-    }
+    if (unregisterBack !== null) unregisterBack();
+    unregisterBack = null;
+    if (resizeHandler !== null) window.removeEventListener('resize', resizeHandler);
+    resizeHandler = null;
     isFullscreen = false;
+    // 会话拆除必须把方向锁一并交还：留着锁横屏，用户退出播放器后手机会一直不肯回转。
+    videoAspect = null;
+    if (orientationLocked) { orientationLocked = false; void orientation.unlock(); }
     detailBodyRef = null;
     const instance = player;
+    const report = instance !== null && detail !== null ? exitReportOf(detail, instance.state()) : null; // §1.9.3 节点 ①：必须在 `detail`/内核归 null 之前定格
     player = null;
     detail = null;
     const host = layer;
@@ -216,6 +264,7 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
     if (instance !== null) {
       instance.destroy();
       deps.onPrivacyChange(false);
+      if (report !== null) deps.onExit?.(report);
       deps.onClose?.();
     }
     host?.remove();

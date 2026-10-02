@@ -829,7 +829,36 @@ Android 在 `appStateChange(isActive=false)` 之后会很快冻结 WebView 渲�
 
 ---
 
-Master，本篇二合一正本已按 `docs/05-audit/PLAN-REVIEW-2026-10-03.md` 的 **6 项 P0 + 8 项 P1 + 5 项 P2** 全部意见修正完毕，升级为 **v2.5**。
+## 第四部分：总包施工终验与实证回填 (2026-10-03 监理核定)
+
+### 4.1 门禁与工程实测核验结果
+
+| 门禁项 | 命令 | 核验结果 | 判定 |
+| :--- | :--- | :--- | :--- |
+| **P0 质量红线** | `python tests/scan_p0.py` | 230 文件全部通过，零 emoji / 零紫粉渐变 / 零裸 Hex / M-5 零 AI / §10 零超长文件 | 🟢 PASS |
+| **G0 契约与表结构** | `python tests/verify_contracts.py` | 19 API / 22 业务表 / 13 功能 / 30 AC 验收全部吻合 | 🟢 PASS |
+| **AC 验收覆盖矩阵** | `python tests/verify_acceptance.py` | 30/30 项验收全部具备署名断言用例，共 174 条测试署名覆盖 | 🟢 PASS |
+| **Android 原生资产一致性** | `python tests/verify_android_assets.py` | 50 项条目全过（含 PrismCast 插件名与组播权限双侧对齐） | 🟢 PASS |
+| **全量自动化测试** | `npm test` (`vitest run`) | 65 个测试文件 / 798 项测试用例全部通过 | 🟢 PASS |
+| **生产打包构建** | `npm run build` | `tsc && vite build` 生产构建成功，动态分包与懒加载正常 | 🟢 PASS |
+| **端云范围隔离核验** | `git status --short edge/` | 输出严格为空，总包零修改 `edge/**` 或 `migrations/**` | 🟢 PASS |
+
+### 4.2 总包施工四项改判之监理核准与正本定案
+
+1. **`.home-section-header` 物理删除**：核准。已在 `src/views/home-view.ts` 中彻底移除非渲染的死代码与 DOM 节点，海报流上提 40px+ 事实成立。
+2. **胶囊无障碍双口径实证落地**：核准。挂载在 `<button>` 本体的 44px 触控区与内层 `.capsule-pill` 28px 视觉胶囊分离，`tests/client/24-capsule-a11y.test.ts` 真实断言通过，无障碍与精致感兼备。
+3. **云端字段已就绪**：核实确认。云端在提交 `bdcdef4` 中已上线 `ContentItem` 的 `isAi`/`isHot` 字段及 `/api/user/sync` 路由。客户端 WP6 与 WP7 均已基于真实契约闭环。
+4. **C 轨算法优化**：核准。针对 `ContentItem` 无客户端可见的 `first_published_at` 与 `hotScore`，且 `poolExplore` 需与 B 轨解耦的问题，端侧实现增加"非热门优先 + 偏好升序 + id 稳定序"作为 C 轨主键，确保每 20 条固定块严格实现 7A/7H/6E 纯数学可达。
+
+### 4.3 遗留事项与持续演进记录
+
+1. **DLNA 自动连播接缝**：`CastPanel.handleEpisodeEnded()` 留空以避免在电视侧无集数光标时与定时器发生双重推进，待后续接入电视状态轮询光标后再行接合；
+2. **操作岛第二键**：原虚假 UI「缓存本集」已被彻底拔除，替换为真实的「投屏」入口；
+3. **CI 验收门禁补齐**：`.github/workflows/android-build.yml` 中已补入 `python tests/verify_acceptance.py` 步骤，确保云端流水线强制复核 30/30 验收标准。
+
+---
+
+Master，本篇二合一正本已按 `docs/05-audit/PLAN-REVIEW-2026-10-03.md` 的 **6 项 P0 + 8 项 P1 + 5 项 P2** 全部意见修正完毕，并经总包施工与监理复核核准，升级为 **v2.5 终验正本**。
 
 ### 一、范围界定（本包 = APP 客户端，且仅此）
 
