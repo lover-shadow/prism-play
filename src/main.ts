@@ -259,7 +259,7 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
   // 快照优先（AC-01）：bootstrap 内部会先 hydrate 再后台同步；同步成功即刷新离线校验时点（AC-15）。
   const started = await catalog.bootstrap();
   if (started.outcome !== null && started.outcome.offline === false) await grant.recordOnlineCheck(now());
-  catalog.onSynced(() => { if (homeView !== null) void homeView.refresh(); });
+  catalog.onSynced((outcome) => { if (homeView !== null && outcome.appliedEntries > 0) void homeView.refresh(); });
   const releaseNotifications = bindNotificationActions((action) => player.onNotification(action));
   // §1.9.3 节点 ②：切到后台（`isActive === false`）即静默上报当前断点。监听口与 `back-button.ts` 同款
   // 守卫——非原生宿主根本不注册，Web 构建退化为 no-op，绝不因为缺 `@capacitor/app` 而抛错。

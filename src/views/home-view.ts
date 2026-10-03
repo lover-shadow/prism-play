@@ -194,8 +194,9 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
         ...(targetPage > 1 && pageRevision !== undefined ? { revision: pageRevision } : {})
       };
 
+      let response: CatalogResponse | undefined;
       try {
-        const response = await deps.api.catalog(query);
+        response = await deps.api.catalog(query);
         if (nextToken !== token) return;
         // 页码是否真的推进过：边缘若把同一页原样回给我们，继续追加只会重复堆同一批剧目。
         const advanced = targetPage === 1 || response.page > page;
@@ -216,11 +217,9 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
         presentState(stateKindForError(error), { detail: detailForError(error), actionLabel: '重试', onAction: () => void loadCatalog(++token, 1) });
       } finally {
         if (nextToken === token) {
-          appending = false;
-          scroll.setPending(false);
-          // 落定之后再复查：60 部铺不满一屏（或断网快照只有几部）时哨兵仍贴在触底带里，而观察器只对
-          // "新的一次 crossing"发声，不会替静止的哨兵重试——续载链条必须在这里接上。
-          scroll.recheck();
+          appending = false; scroll.setPending(false);
+          // 仅当条数不足单页容量（铺不满一屏）时才主动复查续载；满页由用户滚动触发，绝不自动死循环拉取。
+          if (response !== undefined && response.items.length < pageSize && items.length < total) scroll.recheck();
         }
       }
     }
@@ -249,7 +248,7 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
       total = local.length;
       paintGrid();
       gridReady = true;
-      scroll.recheck();
+      if (local.length < pageSize) scroll.recheck();
       return true;
     }
 
