@@ -30,6 +30,7 @@ bucket_name = "prism-play-releases"
 
 [vars]
 JWT_KID = "p2026"
+APK_PUBLIC_BASE_URL = "https://pub-8736c44ed0664684b20530e52f7717ca.r2.dev"
 # 敏感密钥已由 wrangler secret 管道以加密方式注入云端，严禁明文入库：
 # JWT_PRIVATE_KEY_JWK / PRIVATE_SESSION_SECRET / PROXY_SIGNING_SECRET
 
