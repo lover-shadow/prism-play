@@ -64,7 +64,8 @@ function isOptionalString(value: unknown): boolean {
   return value === undefined || typeof value === 'string';
 }
 
-function parseStoredJson(raw: string | null): unknown {
+/** Exported for `library/manifest.ts`: one JSON-dialect for every KV value, corrupt reads as absent. */
+export function parseStoredJson(raw: string | null): unknown {
   if (raw === null || raw.trim() === '') return null;
   try {
     return JSON.parse(raw) as unknown;
@@ -74,7 +75,8 @@ function parseStoredJson(raw: string | null): unknown {
   }
 }
 
-async function readKvText(kv: KVNamespace, key: string): Promise<string | null> {
+/** Exported for `library/manifest.ts`: the KV read is text-or-nothing, never a guessed default. */
+export async function readKvText(kv: KVNamespace, key: string): Promise<string | null> {
   const value = await kv.get(key);
   return typeof value === 'string' ? value : null;
 }

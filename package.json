@@ -27,7 +27,8 @@
     "@capacitor/screen-orientation": "^7.0.0",
     "@capacitor/status-bar": "^7.0.0",
     "artplayer": "^5.2.1",
-    "hls.js": "^1.5.17"
+    "hls.js": "^1.5.17",
+    "pinyin-pro": "^3.29.4"
   },
   "devDependencies": {
     "@capacitor/android": "^7.0.0",

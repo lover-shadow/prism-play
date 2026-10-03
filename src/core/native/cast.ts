@@ -18,9 +18,6 @@ import { isNativeHost } from './platform-adapters';
 /** 必须与 `PrismCastPlugin.PLUGIN_ID` 逐字一致（门禁第 6 条两侧对账）。 */
 export const PRISM_CAST_PLUGIN = 'PrismCast';
 
-/** 与 `LanAddressPolicy` 同源的那一条公网主域口径：投屏推的是代理流，不是上游源。 */
-export const CAST_STREAM_PREFIX = '/proxy/';
-
 export interface CastDevice {
   id: string;
   name: string;
@@ -123,9 +120,13 @@ export function isCastableDevice(value: unknown): value is CastDevice {
 }
 
 /**
- * 推给大屏的地址必须是应用自己在用的公网代理流（`https://play.prismos.org/proxy/media/…`），
- * 即 `api.playback()` 原样返回的那条：明文不得出现在流上，局域网地址不得出现在流上，
- * 上游源站地址更不行——而 `/proxy/` 这一条路径前缀就是"不是上游"的机械证明。
+ * 推给大屏的地址必须是**公网 https 直链**（SPEC-APP-REFACTOR A-7.5 之后的口径）：
+ * 直连上游之后，`api.playback()` 的代理句柄只是回退链，清单里的 `mediaUrl` 才是主路径。
+ * 三条拒绝条件一条都没松——明文（`https:` 之外一律拒）、局域网主机、内嵌凭据。
+ *
+ * 为什么明文可以留：手机根本不取这一条流，它只把地址交给电视；真正的明文只在局域网控制面（SOAP），
+ * 那一侧的裸 socket 方案（H1）与本文件无关，`LanAddressPolicy.requirePublicStreamUrl` 也在原生侧同样把关。
+ * 两侧必须同口径，否则"手机放行、原生拒绝"会变成一个只在真机出现的死角。
  */
 export function requireCastableStreamUrl(value: string): string {
   let parsed: URL;
@@ -135,15 +136,25 @@ export function requireCastableStreamUrl(value: string): string {
     throw new CastUnavailableError('投屏地址不是合法 URL', 'invalid-stream');
   }
   if (parsed.protocol !== 'https:') {
-    throw new CastUnavailableError('投屏地址必须为公网 https 代理流', 'invalid-stream');
-  }
-  if (!parsed.pathname.startsWith(CAST_STREAM_PREFIX)) {
-    throw new CastUnavailableError('投屏只允许推送平台代理流地址', 'invalid-stream');
+    throw new CastUnavailableError('投屏地址必须为公网 https 流', 'invalid-stream');
   }
   if (isRfc1918Host(parsed.hostname) || parsed.username !== '' || parsed.password !== '') {
     throw new CastUnavailableError('投屏地址不得指向局域网或内嵌凭据', 'invalid-stream');
   }
   return parsed.toString();
+}
+
+/**
+ * 不抛错的版本：投屏的取流口要先问"这条直连线路推得出去吗"，推不出去就退回代理句柄，
+ * 而不是让状态机拿着一条注定被拒的地址去报错（源站给了 http 切片是常态，不是异常）。
+ */
+export function isCastableStreamUrl(value: string): boolean {
+  try {
+    requireCastableStreamUrl(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** 非 Android（含 jsdom / 桌面浏览器）返回 `unsupported`：不装样子、不假装扫得到设备。 */

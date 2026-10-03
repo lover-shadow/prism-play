@@ -209,7 +209,7 @@ describe('storage façade (index.ts)', () => {
     expect(descriptors.map((entry) => entry.domain)).toEqual(['credentials', 'history', 'public-cache', 'private-volatile']);
     expect(descriptors.map((entry) => entry.backupPolicy)).toEqual(['exclude', 'include', 'exclude', 'exclude']);
     expect(descriptors.find((entry) => entry.domain === 'history')?.quota).toContain('500');
-    expect(descriptors.find((entry) => entry.domain === 'public-cache')?.quota).toContain('128 MiB');
+    expect(descriptors.find((entry) => entry.domain === 'public-cache')?.quota).toContain('512 MiB');
     expect(descriptors.find((entry) => entry.domain === 'public-cache')?.quota).toContain('20 MiB');
     expect(descriptors.filter((entry) => entry.clearedByClearCache).map((entry) => entry.domain)).toEqual(['public-cache']);
 

@@ -9,10 +9,11 @@
  * 字节换成可显示地址。模块顶层零 I/O、零定时器、零全局注册，jsdom 可安全 import。
  */
 
-import type { CatalogResponse, ChannelsResponse, ContentItem } from '../../edge/src/types/api';
+import type { CatalogChange, CatalogResponse, ChannelsResponse, ContentItem } from '../../edge/src/types/api';
 import { CATALOG_DEFAULT_PAGE_SIZE, CHANGES_DEFAULT_LIMIT, CHANGES_MAX_LIMIT } from '../../edge/src/core/constants';
 import { ApiError, type PrismApiClient } from './api/client';
 import type { CacheReceipt, PublicCache } from './storage/public-cache';
+import type { SnapshotFeed } from './storage/search-index';
 import { PrivateWriteBlockedError } from './storage/storage-domains';
 import type { HomeApi } from '../views/home-view';
 
@@ -20,16 +21,12 @@ export interface SnapshotState { revision: number; items: number; channels: numb
 export interface SyncOutcome { appliedEntries: number; revision: number; full: boolean; offline: boolean; reason?: string }
 
 export interface CatalogCacheService {
-  /** 注入给 home-view 的读面：快照优先（AC-01 / AC-18）。 */
   api: HomeApi;
   hydrate(): Promise<boolean>;
   snapshotState(): SnapshotState | null;
-  /** 全量分页重同步：每页都 stagePage，同一修订全部落地后才 commitSnapshot；410/409 也走这里。 */
   resyncFull(channelId?: string): Promise<SyncOutcome>;
   syncIncremental(): Promise<SyncOutcome>;
-  /** 首屏链路：有快照则先让界面可渲染并后台增量；无快照则全量重同步。 */
   bootstrap(): Promise<{ hadSnapshot: boolean; outcome: SyncOutcome | null }>;
-  /** 海报：只走受控代理形态的地址 → 缓存域；返回可显示地址，绝不外泄上游地址。 */
   posterUrlFor(item: ContentItem): Promise<string | null>;
   onSynced(listener: (outcome: SyncOutcome) => void): () => void;
 }
@@ -42,6 +39,8 @@ export interface CatalogCacheDeps {
   pageSize?: number;
   /** 海报字节抓取；与 JSON 契约客户端分属两条通道，测试各自注入。 */
   fetchImpl?: (url: string, init?: RequestInit) => Promise<Response>;
+  /** §A-6.2 数据流：快照/增量批次落地后交给端侧检索索引；索引自己的失败由索引记账，不改落盘结论。 */
+  onSnapshotEntries?: (feed: SnapshotFeed) => void;
 }
 
 type CatalogQuery = Parameters<HomeApi['catalog']>[0];
@@ -59,15 +58,10 @@ const REJECT_MESSAGE: Readonly<Record<NonNullable<CacheReceipt['reason']>, strin
   'incomplete-pages': '频道分页不完整（缺页或 total 与实际不符），拒绝替换快照', 'not-newer': '增量游标不新于本地快照，重放未改动任何数据',
   'channel-mismatch': '页面条目与声明频道不一致，本次未落盘'
 };
-const describeReject = (reason?: CacheReceipt['reason']): string =>
-  reason === undefined ? '公开缓存域拒绝了本次落盘' : `${REJECT_MESSAGE[reason]}（${reason}）`;
-const isCursorFailure = (error: unknown): boolean => error instanceof ApiError
-  && (error.code === 'CATALOG_CURSOR_EXPIRED' || error.code === 'CATALOG_REVISION_CONFLICT');
+const describeReject = (reason?: CacheReceipt['reason']): string => reason === undefined ? '公开缓存域拒绝了本次落盘' : `${REJECT_MESSAGE[reason]}（${reason}）`;
+const isCursorFailure = (error: unknown): boolean => error instanceof ApiError && (error.code === 'CATALOG_CURSOR_EXPIRED' || error.code === 'CATALOG_REVISION_CONFLICT');
 /** 可续期的离线态只有断网与 503：其余错误必须原样让视图落 error 态，不得被快照掩盖。 */
-const isUnavailable = (error: unknown): boolean => error instanceof ApiError
-  && (error.code === 'NETWORK_ERROR' || error.code === 'SERVICE_UNAVAILABLE');
-/** 频道闭集读自域内快照：`putChannels` 已按 `PUBLIC_CHANNEL_IDS` 剔除【个人探索】节点并按频道复核闸门，
- * 本层因此不再自行判定私密（AC-02-3 / AC-02-5 的咽喉点在 `storage-domains.ts` 与公开缓存域）。 */
+const isUnavailable = (error: unknown): boolean => error instanceof ApiError && (error.code === 'NETWORK_ERROR' || error.code === 'SERVICE_UNAVAILABLE');
 const channelIds = (topology: ChannelsResponse | null): string[] => (topology?.channels ?? []).map((channel) => channel.id);
 
 /** 断网与 503 记为离线态；闸门拒绝是私密零留痕（AC-02-5）；其余按契约错误码逐条如实转述。 */
@@ -75,8 +69,7 @@ function outcomeForError(error: unknown, at: number, full: boolean): SyncOutcome
   const base = { appliedEntries: 0, revision: at, full, offline: false };
   if (error instanceof PrivateWriteBlockedError) return { ...base, reason: `个人探索内容不入公开缓存：${error.message}` };
   if (!(error instanceof ApiError)) return { ...base, reason: `本地缓存写入未成功：${String(error)}` };
-  return isUnavailable(error) ? { ...base, offline: true, reason: `离线沿用本地公开快照（${error.code}）：${error.message}` }
-    : { ...base, reason: `${error.code}：${error.message}` };
+  return isUnavailable(error) ? { ...base, offline: true, reason: `离线沿用本地公开快照（${error.code}）：${error.message}` } : { ...base, reason: `${error.code}：${error.message}` };
 }
 
 /** 边缘只会用请求自己的 origin 拼 `/proxy/img/{handle}`（serialize.ts）：形态即准入判据。 */
@@ -112,6 +105,8 @@ export function createCatalogCacheService(deps: CatalogCacheDeps): CatalogCacheS
   const emit = (outcome: SyncOutcome): void => {
     for (const listener of [...listeners]) { try { listener(outcome); } catch { /* 订阅方的异常归订阅方。 */ } }
   };
+  /** 检索索引只是快照的又一个读者：它抛错同样不许回头污染落盘结论（异常由索引自己记进 status()）。 */
+  const feedIndex = (at: number, changes?: readonly CatalogChange[]): void => { try { deps.onSnapshotEntries?.({ items: changes === undefined ? cache.list() : [], ...(changes === undefined ? {} : { changes }), revision: at }); } catch { /* 索引侧自行记账。 */ } };
   const shape = (response: CatalogResponse, query: CatalogQuery): CatalogResponse =>
     ({ ...response, page: response.page || query.page || 1, pageSize: response.pageSize || query.pageSize || pageSize });
 
@@ -142,9 +137,7 @@ export function createCatalogCacheService(deps: CatalogCacheDeps): CatalogCacheS
 
   async function fullResync(attempt: number, channelId?: string): Promise<SyncOutcome> {
     let targets: string[];
-    try {
-      targets = channelId !== undefined ? [channelId] : await pullPublicTargets();
-    } catch (error) {
+    try { targets = channelId !== undefined ? [channelId] : await pullPublicTargets(); } catch (error) {
       targets = channelIds(cache.getChannels());
       if (targets.length === 0) return outcomeForError(error, revision(), true);
     }
@@ -152,30 +145,29 @@ export function createCatalogCacheService(deps: CatalogCacheDeps): CatalogCacheS
       let pin: number | undefined;
       for (const target of targets) pin = await pullChannel(target, pin);
       const receipt = await cache.commitSnapshot();
+      if (receipt.accepted) feedIndex(receipt.revision);
       return { appliedEntries: receipt.accepted ? receipt.appliedEntries : 0, revision: receipt.revision, full: true, offline: false, ...(receipt.accepted ? {} : { reason: describeReject(receipt.reason) }) };
     } catch (error) {
-      if (attempt === 0 && isCursorFailure(error)) return await fullResync(1, channelId); // 修订漂移：整轮以新修订重来一次。
-      return outcomeForError(error, revision(), true);
+      return (attempt === 0 && isCursorFailure(error)) ? await fullResync(1, channelId) : outcomeForError(error, revision(), true);
     }
   }
 
   async function incrementalResync(): Promise<SyncOutcome> {
     try {
-      if (revision() <= 0) return await fullResync(0); // 无快照谈不上增量：游标起点就是全量。
+      if (revision() <= 0) return await fullResync(0);
       let after = revision(), appliedEntries = 0, drained = 0;
       for (let batch = 0; batch < CHANGE_PAGES_PER_RUN; batch += 1) {
         const response = await client.changes(after, CHANGES_DEFAULT_LIMIT);
-        const receipt = await cache.applyChanges(response); // 条目级幂等与私密闸门都由域裁定（§2.1）。
+        const receipt = await cache.applyChanges(response);
         if (!receipt.accepted && receipt.reason !== 'not-newer') return { appliedEntries: 0, revision: receipt.revision, full: false, offline: false, reason: describeReject(receipt.reason) };
-        if (receipt.accepted) appliedEntries = receipt.appliedEntries; // 域的口径是"落定后的快照条目数"，重放批不改写它。
-        after = response.nextRevision; // 游标只认服务端 nextRevision，绝不本地加一（API-SPEC §八）。
+        if (receipt.accepted) { appliedEntries = receipt.appliedEntries; feedIndex(receipt.revision, response.changes); }
+        after = response.nextRevision;
         drained += response.changes.length;
-        if (!response.hasMore || drained >= CHANGE_PAGES_PER_RUN * CHANGES_MAX_LIMIT) break; // 单轮体积上限，剩余下次续读。
+        if (!response.hasMore || drained >= CHANGE_PAGES_PER_RUN * CHANGES_MAX_LIMIT) break;
       }
       return { appliedEntries, revision: after, full: false, offline: false };
     } catch (error) {
-      if (isCursorFailure(error)) return await fullResync(1); // 410/409 是线协议义务：回退全量，而不是留着死游标反复撞。
-      return outcomeForError(error, revision(), false);
+      return isCursorFailure(error) ? await fullResync(1) : outcomeForError(error, revision(), false);
     }
   }
 
@@ -194,7 +186,7 @@ export function createCatalogCacheService(deps: CatalogCacheDeps): CatalogCacheS
     if (running !== null) return;
     try {
       const receipt = cache.stagePage(query.channel, response);
-      if (receipt.accepted && (revision() === 0 || revision() === receipt.revision)) await cache.commitSnapshot();
+      if (receipt.accepted && (revision() === 0 || revision() === receipt.revision) && (await cache.commitSnapshot()).accepted) feedIndex(revision());
     } catch { /* 数据已到手：落盘被闸门或磁盘拒绝，都不该让已经成功的首屏渲染失败。 */ }
   }
 
@@ -241,24 +233,18 @@ export function createCatalogCacheService(deps: CatalogCacheDeps): CatalogCacheS
 
   async function posterUrlFor(item: ContentItem): Promise<string | null> {
     const url = proxyImageOf(item.coverUrl);
-    if (url === null) return null; // 缺失或非受控代理形态：null，不发任何请求，绝不回退上游地址。
+    if (url === null) return null;
     const version = item.coverVersion ?? ABSENT_COVER_VERSION;
     const cached = await cache.getPoster(item.id, version);
-    if (cached !== null && cached.byteLength > 0) return objectUrlFor(cached) ?? url; // 域内已有字节：不再抓网络。
-    let bytes: Uint8Array | null;
+    if (cached !== null && cached.byteLength > 0) return objectUrlFor(cached) ?? url;
+    let bytes: Uint8Array | null = null;
     try {
       const response = await fetchImpl(url, { headers: { Accept: 'image/*' } });
       bytes = response.ok ? new Uint8Array(await response.arrayBuffer()) : null;
-    } catch {
-      return url; // 抓取失败降级为同源代理地址：海报缺席不阻塞首屏（AC-01）。
-    }
+    } catch { return url; }
     if (bytes === null || bytes.byteLength === 0) return url;
-    try {
-      await cache.putPoster(item.id, version, bytes, { contentId: item.id, channelId: item.channelId, isPrivate: item.isPrivate });
-    } catch {
-      return url; // 配额或闸门拒绝同样降级为代理地址：私密内容到此为止，一字节都不落盘（AC-02-5）。
-    }
-    return objectUrlFor(bytes) ?? url; // 宿主无 Blob 能力或嗅不出类型时交回代理地址，不阻塞渲染。
+    try { await cache.putPoster(item.id, version, bytes, { contentId: item.id, channelId: item.channelId, isPrivate: item.isPrivate }); } catch { return url; }
+    return objectUrlFor(bytes) ?? url;
   }
 
   async function hydrate(): Promise<boolean> {
@@ -278,11 +264,31 @@ export function createCatalogCacheService(deps: CatalogCacheDeps): CatalogCacheS
     return () => void listeners.delete(listener);
   }
 
-  /** 快照先显（AC-01）：有快照时 bootstrap 不等网络就 resolve，增量结果经 onSynced 在后台送达。 */
+  async function loadSeedBundle(): Promise<SyncOutcome | null> {
+    for (const url of ['./seed/catalog-bundle.json', '/seed/catalog-bundle.json']) {
+      try {
+        const res = await fetchImpl(url);
+        if (!res.ok) continue;
+        const b = (await res.json()) as { revision: number; channels: ChannelsResponse; items: ContentItem[] };
+        if (b?.items?.length) {
+          const r = await cache.importBundle(b);
+          if (r.accepted) { feedIndex(r.revision); return { appliedEntries: r.appliedEntries, revision: r.revision, full: true, offline: false }; }
+        }
+      } catch { /* 下一个备用地址 */ }
+    }
+    return null;
+  }
+
+  /** 快照先显（AC-01）：有快照或种子包时 bootstrap 秒级完成，增量结果经 onSynced 在后台送达。 */
   async function bootstrap(): Promise<{ hadSnapshot: boolean; outcome: SyncOutcome | null }> {
     if (await hydrate()) {
       void runExclusive(incrementalResync);
       return { hadSnapshot: true, outcome: null };
+    }
+    const seed = await loadSeedBundle();
+    if (seed !== null) {
+      void runExclusive(incrementalResync);
+      return { hadSnapshot: true, outcome: seed };
     }
     return { hadSnapshot: false, outcome: await runExclusive(() => fullResync(0)) };
   }

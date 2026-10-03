@@ -1,147 +1,178 @@
+/**
+ * 全量 bootstrap 抓取 + 资产生成 (SPEC-CLOUD-REFACTOR v2 §C-1 / §C-2 / §五 施工顺序)
+ *
+ * 频道归属与 tid 全部来自 config-sources.mjs —— 旧版本在这里硬编码 42→anime（把 AI 漫剧从
+ * 【短剧精选】里变没了）并且从不采集 tid 7，本文件不再持有任何映射字面量。
+ *
+ * 两阶段职责：
+ *   1) 抓取：按 `ac=detail` 逐 tid 翻页（先读上游 pagecount 再决定页数），分页快照落
+ *      `edge/cache/harvest/`，已存在的页直接命中跳过，因此中断可续跑；
+ *   2) 建库：把缓存交给 sync-incremental 的同一套引擎，生成 §3.1 目录分片 + §3.2 剧集清单 +
+ *      §3.3 KV 清单；私密分类走 `private/` 前缀独立产物。默认不碰云端，`--publish` 才调 wrangler。
+ *
+ * 用法：
+ *   node edge/scripts/harvest-all.mjs --dry-run     离线：只用现有缓存重建全套资产（零联网零云端）
+ *   node edge/scripts/harvest-all.mjs               联网全量抓取 + 本地重建资产
+ *   node edge/scripts/harvest-all.mjs --publish     抓取 + 重建 + 推 R2/KV（首轮 bootstrap 专用）
+ *   可选：--max-pages=N 每 tid 页数上限 | --concurrency=N 并发 | --public-only | --private-only
+ */
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { pathToFileURL } from 'node:url';
+import { LOCAL, crawlTargets, validateSourceConfig } from './config-sources.mjs';
+import { parseCliArgs, runPipeline } from './sync-incremental.mjs';
+import { verifyPublicPrefix } from './sync-private.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CACHE_DIR = path.join(__dirname, '..', 'cache', 'harvest');
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const PAGE_RETRY_LIMIT = 3;
+const REQUEST_TIMEOUT_MS = 15000;
+const REQUEST_DELAY_BASE_MS = 400;
+const REQUEST_DELAY_JITTER_MS = 400;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-if (!fs.existsSync(CACHE_DIR)) {
-  fs.mkdirSync(CACHE_DIR, { recursive: true });
+function optionValue(argv, name, fallback) {
+  const hit = argv.find((arg) => arg.startsWith(`--${name}=`));
+  return hit === undefined ? fallback : Number(hit.slice(name.length + 3));
 }
 
-const MODU_API = 'https://caiji.moduapi.cc/api.php/provide/vod';
-
-// 抓取任务配置列表：目标 8,500 ~ 9,000 部全品类
-const TASKS = [
-  { name: '短剧精选', channelId: 'drama', tid: 38, maxPages: 200, categoryTag: null },
-  { name: '动作电影', channelId: 'movie', tid: 10, maxPages: 25, categoryTag: '动作' },
-  { name: '喜剧电影', channelId: 'movie', tid: 11, maxPages: 25, categoryTag: '喜剧' },
-  { name: '爱情电影', channelId: 'movie', tid: 12, maxPages: 20, categoryTag: '爱情' },
-  { name: '科幻电影', channelId: 'movie', tid: 13, maxPages: 20, categoryTag: '科幻' },
-  { name: '悬疑电影', channelId: 'movie', tid: 21, maxPages: 20, categoryTag: '悬疑' },
-  { name: '国产动漫', channelId: 'anime', tid: 1, maxPages: 30, categoryTag: null },
-  { name: '日韩动漫', channelId: 'anime', tid: 2, maxPages: 30, categoryTag: null },
-  { name: 'AI漫剧', channelId: 'anime', tid: 42, maxPages: 6, categoryTag: '科幻' },
-  { name: '人文纪录', channelId: 'documentary', tid: 24, maxPages: 60, categoryTag: null },
-];
-
-async function fetchWithRetry(url, retries = 3) {
-  for (let attempt = 1; attempt <= retries; attempt++) {
+async function fetchJson(url) {
+  for (let attempt = 1; attempt <= PAGE_RETRY_LIMIT; attempt += 1) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 10000);
-      const res = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'application/json'
-        },
-        signal: controller.signal
-      });
+      const response = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' }, signal: controller.signal });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.json();
+    } catch (error) {
+      if (attempt === PAGE_RETRY_LIMIT) throw error;
+      await sleep(500 * attempt);
+    } finally {
       clearTimeout(timer);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      return data;
-    } catch (err) {
-      if (attempt === retries) throw err;
-      await new Promise(r => setTimeout(r, 500 * attempt));
     }
   }
+  return null;
 }
 
-// 并发池执行器
-async function runPool(items, concurrency, fn) {
-  const results = [];
-  let index = 0;
-  async function worker() {
-    while (index < items.length) {
-      const current = items[index++];
-      try {
-        const res = await fn(current);
-        results.push(res);
-      } catch (err) {
-        console.error(`Task failed:`, current, err.message);
-      }
-    }
+/** 分页快照文件名即断点：`t_<tid>_p_<page>.json`，与 sync-incremental 离线干跑的读取口径一致。 */
+const cacheFileFor = (typeId, page) => path.join(LOCAL.harvestCache, `t_${typeId}_p_${page}.json`);
+const detailUrl = (target, page) => `${target.provider.baseUrl}?ac=detail&t=${target.typeId}&pg=${page}`;
+
+function cacheInventory() {
+  const dir = path.resolve(LOCAL.harvestCache);
+  if (!fs.existsSync(dir)) return [];
+  const counts = new Map();
+  for (const name of fs.readdirSync(dir)) {
+    const matched = /^t_(\d+)_p_\d+\.json$/.exec(name);
+    if (matched === null) continue;
+    counts.set(matched[1], (counts.get(matched[1]) ?? 0) + 1);
   }
-  const workers = Array.from({ length: concurrency }, () => worker());
-  await Promise.all(workers);
-  return results;
+  return [...counts.entries()].sort((a, b) => Number(a[0]) - Number(b[0]));
 }
 
-async function main() {
-  console.log('=== 《光影Play》海量全品类启动数据多通道抓取引擎 ===');
-  console.log(`本地断点存储目录: ${CACHE_DIR}`);
-
-  const allPageTasks = [];
-  for (const t of TASKS) {
-    for (let p = 1; p <= t.maxPages; p++) {
-      allPageTasks.push({
-        ...t,
-        page: p,
-        cacheFile: path.join(CACHE_DIR, `t_${t.tid}_p_${p}.json`)
-      });
-    }
-  }
-
-  console.log(`总计待调度页数: ${allPageTasks.length} 页 (预计覆盖约 8,500~9,000 部全网作品)`);
-
-  const startTime = Date.now();
-  let doneCount = 0;
-  let cachedCount = 0;
-  let fetchedCount = 0;
-  let totalDramas = 0;
-
-  // 检查已有缓存
-  for (const task of allPageTasks) {
-    if (fs.existsSync(task.cacheFile)) {
-      cachedCount++;
-    }
-  }
-  console.log(`已命中本地快照: ${cachedCount} 页，剩余需抓取: ${allPageTasks.length - cachedCount} 页`);
-
-  // 并发数 6，温和而高效，单页之间 50ms 延迟
-  await runPool(allPageTasks, 6, async (task) => {
-    let list = [];
-    if (fs.existsSync(task.cacheFile)) {
+/** 并发池：温和限流；任一页失败只丢该页，不让整轮 bootstrap 报废。 */
+async function runPool(jobs, concurrency, worker) {
+  let cursor = 0;
+  let failures = 0;
+  const lanes = Array.from({ length: concurrency }, async () => {
+    while (cursor < jobs.length) {
+      const job = jobs[cursor++];
       try {
-        const raw = fs.readFileSync(task.cacheFile, 'utf8');
-        const parsed = JSON.parse(raw);
-        list = parsed.list || [];
-      } catch {
-        // 文件损坏则重抓
+        await worker(job);
+      } catch (error) {
+        failures += 1;
+        console.warn(`  ! tid=${job.typeId} p${job.page} 失败: ${error.message}`);
       }
-    }
-
-    if (list.length === 0) {
-      const url = `${MODU_API}?ac=detail&t=${task.tid}&pg=${task.page}`;
-      const data = await fetchWithRetry(url);
-      list = data.list || [];
-      fs.writeFileSync(task.cacheFile, JSON.stringify({
-        tid: task.tid,
-        page: task.page,
-        channelId: task.channelId,
-        categoryTag: task.categoryTag,
-        list
-      }), 'utf8');
-      fetchedCount++;
-      // 轻微休眠防上游拥塞
-      await new Promise(r => setTimeout(r, 60));
-    }
-
-    doneCount++;
-    totalDramas += list.length;
-    if (doneCount % 20 === 0 || doneCount === allPageTasks.length) {
-      const progress = ((doneCount / allPageTasks.length) * 100).toFixed(1);
-      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      console.log(`[${progress}%] 已完成 ${doneCount}/${allPageTasks.length} 页 | 累计提取作品: ${totalDramas} 部 | 耗时: ${elapsed}s`);
+      await sleep(REQUEST_DELAY_BASE_MS + Math.random() * REQUEST_DELAY_JITTER_MS);
     }
   });
-
-  const totalCost = ((Date.now() - startTime) / 1000).toFixed(1);
-  console.log(`\n=== 抓取完成！===`);
-  console.log(`总耗时: ${totalCost} 秒`);
-  console.log(`本地缓存总页数: ${allPageTasks.length} 页`);
-  console.log(`全品类总作品条目: ${totalDramas} 部`);
+  await Promise.all(lanes);
+  return failures;
 }
 
-main().catch(console.error);
+/** 首页探测决定每个 tid 要翻多少页：上游 pagecount 比旧代码写死的 maxPages 准。 */
+async function planCrawl(targets, maxPages) {
+  const jobs = [];
+  for (const target of targets) {
+    let pagecount = 1;
+    const firstFile = cacheFileFor(target.typeId, 1);
+    if (fs.existsSync(firstFile)) {
+      try {
+        pagecount = Number(JSON.parse(fs.readFileSync(firstFile, 'utf8')).pagecount ?? 1);
+      } catch {
+        pagecount = 1;
+      }
+    } else {
+      const data = await fetchJson(detailUrl(target, 1)).catch(() => null);
+      pagecount = Number(data?.pagecount ?? 1);
+    }
+    const pages = Math.max(1, Math.min(Number.isFinite(pagecount) ? pagecount : 1, maxPages));
+    const suffix = pagecount > pages ? `（上游 ${pagecount} 页，受 --max-pages 截断）` : '';
+    console.log(`  ${target.provider.id} tid=${target.typeId} → ${target.channelId}${target.isPrivate ? ' [私密]' : ''}: ${pages} 页${suffix}`);
+    for (let page = 1; page <= pages; page += 1) {
+      if (fs.existsSync(cacheFileFor(target.typeId, page))) continue;
+      jobs.push({ typeId: target.typeId, page, url: detailUrl(target, page) });
+    }
+  }
+  return jobs;
+}
+
+async function crawl(jobs, concurrency) {
+  fs.mkdirSync(path.resolve(LOCAL.harvestCache), { recursive: true });
+  const started = Date.now();
+  let done = 0;
+  let works = 0;
+  const failures = await runPool(jobs, concurrency, async (job) => {
+    const data = await fetchJson(job.url);
+    const list = data?.list ?? [];
+    const file = cacheFileFor(job.typeId, job.page);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ tid: job.typeId, page: job.page, pagecount: Number(data?.pagecount ?? job.page), list }), 'utf8');
+    works += list.length;
+    done += 1;
+    if (done % 20 === 0 || done === jobs.length) {
+      console.log(`  [${((done / jobs.length) * 100).toFixed(0)}%] ${done}/${jobs.length} 页 | 累计条目 ${works} | 耗时 ${((Date.now() - started) / 1000).toFixed(0)}s`);
+    }
+  });
+  console.log(`抓取结束：新增 ${done} 页 / 失败 ${failures} 页 / 新条目 ${works} 条 / 耗时 ${((Date.now() - started) / 1000).toFixed(1)}s`);
+  return { done, failures, works };
+}
+
+async function main(argv) {
+  const cli = parseCliArgs(argv);
+  const errors = validateSourceConfig();
+  if (errors.length > 0) throw new Error(`源映射配置自检失败:\n  - ${errors.join('\n  - ')}`);
+  const wantPublic = !argv.includes('--private-only');
+  const wantPrivate = !argv.includes('--public-only');
+  const targets = [
+    ...(wantPublic ? crawlTargets({ privacy: 'public' }) : []),
+    ...(wantPrivate ? crawlTargets({ privacy: 'private' }) : [])
+  ];
+
+  console.log('=== 《光影Play》全量 bootstrap：抓取 → 状态快照 → R2 资产 ===');
+  const inventory = cacheInventory();
+  console.log(`采集目标 ${targets.length} 个 tid（归属来自 config-sources）| 本地分页缓存 ${inventory.length} 个 tid / ${inventory.reduce((sum, [, count]) => sum + count, 0)} 页`);
+
+  if (cli.dryRun) {
+    console.log('[dry-run] 跳过联网抓取，直接用本地 harvest 缓存重建资产。');
+  } else {
+    const jobs = await planCrawl(targets, optionValue(argv, 'max-pages', 400));
+    console.log(`待抓取 ${jobs.length} 页（已命中缓存的页自动跳过，可断点续跑）`);
+    if (jobs.length > 0) await crawl(jobs, optionValue(argv, 'concurrency', 4));
+  }
+
+  const shared = { dryRun: cli.dryRun, publish: cli.publish, network: false, pull: false, revision: cli.revision, nowSeconds: cli.nowSeconds };
+  const publicResult = wantPublic ? await runPipeline({ ...shared, isPrivate: false }) : null;
+  const privateResult = wantPrivate ? await runPipeline({ ...shared, isPrivate: true, skipAliasSql: true }) : null;
+  verifyPublicPrefix(path.resolve(LOCAL.assets(cli.dryRun)));
+
+  console.log('=== bootstrap 完成 ===');
+  if (publicResult !== null) console.log(`公开 revision ${publicResult.revision}｜R2 对象 ${publicResult.files} 个`);
+  if (privateResult !== null) console.log(`私密 revision ${privateResult.revision}｜剧集清单 ${privateResult.touched.length} 部`);
+}
+
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  main(process.argv.slice(2)).catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}

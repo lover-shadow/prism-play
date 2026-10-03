@@ -227,6 +227,14 @@
   --badge-bg: rgba(8, 10, 16, 0.75); /* 角标底板：高斯磨砂深底，恒定深色 */
   --badge-pad-y: 2px;             /* 角标垂直内边距（与既有 .poster-ep-badge 同款） */
 
+  /* ---- 紧凑海报与首页吸顶层（SPEC-APP-REFACTOR A-2 / A-4）----
+     `--poster-gap-tight` 是"3 列 = 一屏更多剧目"的物理间距真相源：单页 60 部（正好 3 个混排块、
+     20 整行）要在竖屏平齐铺开，间距必须由单点控制，断点段只允许覆盖列数与外层 padding。
+     `--home-subnav-height` = 频道行 40px + 胶囊行 --capsule-hit(44px) + 两条 1px 分隔线：
+     折叠搜索栏吸顶时必须正好贴在这块吸顶子导航的下沿，否则"下隐"动画会露馅。 */
+  --poster-gap-tight: 6px;
+  --home-subnav-height: calc(40px + var(--capsule-hit) + 2px);
+
   /* ---- 二级分类胶囊：视觉高度与命中高度分离 ----
      视觉收到 28px 是为了降维、不与一级频道争主次；但 SPEC §10 明令可点击目标 ≥44px，
      故命中高度由外层 wrap 的上下 padding 补足至 44px（8 + 28 + 8）。两者必须同时成立。 */
@@ -248,12 +256,13 @@
    4. 四模海报自适应排版网格类 (Poster Mode Grid Classes)
    ========================================================================== */
 
-/* 模式一：中图紧凑 3 列 (默认推荐，单手大拇指极速扫剧) */
+/* 模式一：中图紧凑 3 列（默认锁定，单手大拇指极速扫剧；SPEC-APP-REFACTOR A-4）
+ * gap/padding 收紧到 6px / 8px：双列一屏只有 2-3 部的稀疏感来自这里，不是来自海报本身。 */
 .grid-posters-compact-3 {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-3);
-  padding: 0 var(--space-3);
+  gap: var(--poster-gap-tight);
+  padding: 0 var(--space-2);
 }
 
 /* 模式二：大图舒适 2 列 (精美大图赏析，沉浸视觉) */
@@ -280,11 +289,14 @@
   padding: 0 var(--space-3);
 }
 
-/* 平板/折叠屏横屏断点响应式倍增 (≥ 768px) */
+/* 平板/折叠屏横屏断点响应式倍增 (≥ 768px)
+ * 列数倍增时 gap **不跟着放大**（A-4 必做项）：4/6 列下若仍按 --space-4(16px) 摊开，卡片被切成碎图，
+ * 密度收益全部还给间距。只让外层 padding 随视口走，列间距恒定收在 --poster-gap-tight。 */
 @media (min-width: 768px) {
   .grid-posters-compact-3 {
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: var(--space-4);
+    gap: var(--poster-gap-tight);
+    padding: 0 var(--space-3);
   }
   .grid-posters-comfort-2 {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -292,7 +304,7 @@
   }
   .grid-posters-bookshelf-4 {
     grid-template-columns: repeat(6, minmax(0, 1fr));
-    gap: var(--space-3);
+    gap: var(--space-2);
   }
   .grid-posters-list-1 {
     display: grid;
@@ -305,12 +317,15 @@
 @media (min-width: 1024px) {
   .grid-posters-compact-3 {
     grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: var(--poster-gap-tight);
+    padding: 0 var(--space-4);
   }
   .grid-posters-comfort-2 {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
   .grid-posters-bookshelf-4 {
     grid-template-columns: repeat(8, minmax(0, 1fr));
+    gap: var(--space-2);
   }
   .grid-posters-list-1 {
     display: grid;

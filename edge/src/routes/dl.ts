@@ -1,11 +1,15 @@
 /**
- * `GET /dl` and `GET /dl/latest/{platform}` - the only download funnel in the system.
+ * `GET /dl`, `GET /dl/latest/{platform}` and `GET /` - the only download funnel in the system.
  *
  * The landing page branches on the User-Agent alone (API-SPEC 五.2): WeChat gets the compliant
  * "open in a browser" guidance, Android gets a real download card, Windows and everything else get an
  * honest statement that this release ships Android only. There is no PC package this period, so there
  * is no PC link, and `/dl/latest/pc` answers 404 like any other non-android platform (openapi enum is
  * `[android]`).
+ *
+ * `GET /` (SPEC-STATIC-PAGES v2 S-4) is the official portal and is deliberately UA-blind: one
+ * responsive document for every visitor, whose device matrix states the published version and size
+ * rather than a link per platform. It answers 200 where it used to answer 404.
  *
  * `?ref=` is display-only attribution. It is dropped when the visitor is redirected to the artifact,
  * because a browser download does not carry a URL parameter into the installed app and no reward can
@@ -17,9 +21,12 @@
 
 import type { Clock } from '../core/clock';
 import type { Env } from '../types/env';
+import { readVersionRelease } from '../config/kv-config';
 import { buildErrorResponse, HTTP_STATUS_BY_ERROR_CODE } from '../http/errors';
 import { jsonResponse } from '../http/json';
+import { originOf } from '../http/serialize';
 import { renderDownloadPage, type DownloadAudience } from '../html/dl-page';
+import { renderLandingPage, type LandingRelease } from '../html/landing-page';
 import { sanitizeDisplayToken } from '../html/escape';
 
 /**
@@ -136,5 +143,44 @@ export async function handleApkDownload(
   return new Response(null, {
     status: 302,
     headers: { Location: location, 'Cache-Control': 'no-store' }
+  });
+}
+
+/**
+ * The portal states two facts it can actually verify: the published version (KV bulletin, the same
+ * source `/api/version` answers from) and the byte length of the object in the bucket. Either may be
+ * absent, and the page then says so instead of printing a number nobody configured (SPEC 10).
+ */
+async function publishedRelease(kv: KVNamespace, origin: string): Promise<LandingRelease | null> {
+  const response = await readVersionRelease(kv, origin);
+  if (response === null) return null;
+  return { versionName: response.android.versionName, versionCode: response.android.versionCode };
+}
+
+async function publishedApkSizeBytes(bucket: R2Bucket | undefined): Promise<number | null> {
+  if (bucket === undefined) return null;
+  const object = await bucket.head(ANDROID_APK_KEY);
+  if (object === null || object === undefined) return null;
+  const size = (object as { size?: unknown }).size;
+  return typeof size === 'number' && Number.isFinite(size) && size > 0 ? size : null;
+}
+
+/** One document for every visitor, so unlike `/dl` this response does not Vary on User-Agent. */
+const PORTAL_CACHE_CONTROL = 'public, max-age=300';
+
+export async function handlePortal(request: Request, env: DlEnv, _clock: Clock): Promise<Response> {
+  const origin = originOf(request);
+  const [release, apkSizeBytes] = await Promise.all([
+    publishedRelease(env.KV, origin),
+    publishedApkSizeBytes(env.APK_BUCKET)
+  ]);
+  const html = renderLandingPage({ release, apkSizeBytes });
+  return new Response(html, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': PORTAL_CACHE_CONTROL,
+      'X-Content-Type-Options': 'nosniff'
+    }
   });
 }

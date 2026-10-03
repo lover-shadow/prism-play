@@ -3,23 +3,23 @@ import type { Clock } from '../core/clock';
 import type { Env } from '../types/env';
 import type { ErrorCode } from '../types/api';
 import { CHANGES_DEFAULT_LIMIT, CHANGES_MAX_LIMIT } from '../core/constants';
+import { configUnavailableResponse } from '../config/kv-config';
 import { errorResponseNoStore } from '../http/errors';
-import { readChangePage, readExpiredNeededRevision } from '../db/change-repo';
-import { readPublicRevision } from '../db/content-repo';
+import { isCursorExpired, readChangePage, readRevisionCursor } from '../db/change-repo';
 import { jsonResponse } from '../http/json';
 import { originOf } from '../http/serialize';
 
 /**
  * `GET /api/catalog/changes` — the public incremental directory (API-SPEC §八, SPEC §6).
  *
- * Wire rules this route owns:
+ * The data source moved from the D1 change log to the difference between adjacent R2 revisions
+ * (§C-3-3); every wire rule this route owns is unchanged:
  *  - bad input is a **400**, never a plausible empty page: a fabricated empty page would tell the
  *    client it is caught up, which is how a catalogue silently rots;
  *  - `after` ahead of the current revision is also a **400** (the client holds a cursor from the
  *    future — a clock or a restored-backup defect, not a synchronisation state);
- *  - `after` older than the replay window is **410**: re-pull the snapshot. The window is measured
- *    against the changes this cursor still needs, not against a `MIN(revision)` floor, so neither an
- *    integer hole nor an already-passed expired row can force a fresh client into a 410 loop;
+ *  - a cursor the published assets cannot replay is **410**: re-pull the snapshot;
+ *  - no manifest to diff against is **503**, not a fake empty page;
  *  - revision numbers strictly increase but may contain holes (a failed write). A hole is never a
  *    missing page, so this route never invents one and never compares gaps.
  */
@@ -46,7 +46,7 @@ function parseNonNegativeInteger(raw: string): number | null {
   return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
-export async function handleChanges(request: Request, env: Env, clock: Clock): Promise<Response> {
+export async function handleChanges(request: Request, env: Env, _clock: Clock): Promise<Response> {
   const params = new URL(request.url).searchParams;
 
   const rawAfter = params.get('after');
@@ -66,17 +66,20 @@ export async function handleChanges(request: Request, env: Env, clock: Clock): P
     limit = parsedLimit;
   }
 
-  const current = await readPublicRevision(env.DB);
-  if (after > current) return invalidRequest('游标大于当前公开修订号，请核对本地快照的修订号');
+  const cursor = await readRevisionCursor(env);
+  // No manifest pointer means there is nothing to diff against: refuse instead of answering a page.
+  if (cursor === null) return configUnavailableResponse();
+  if (after > cursor.current) return invalidRequest('游标大于当前公开修订号，请核对本地快照的修订号');
 
-  // Only a change this cursor still needs can expire: rows already behind it, and integer holes, are
-  // irrelevant, which is why a fresh `after=0` client replays a fully retained log without a 410.
-  const expired = await readExpiredNeededRevision(env.DB, after, clock.nowSeconds());
-  if (expired !== null) {
-    return protocolError('CATALOG_CURSOR_EXPIRED', 410);
-  }
+  // Only a change this cursor still needs can be unanswerable: integer holes, and revisions the client
+  // has already passed, are irrelevant — exactly the rule the D1 retention window used to enforce.
+  if (isCursorExpired(after, cursor)) return protocolError('CATALOG_CURSOR_EXPIRED', 410);
 
-  return changesPageResponse(await readChangePage(env.DB, after, limit, originOf(request)));
+  const page = await readChangePage(env, after, limit, originOf(request));
+  // `null` is "the published assets cannot replay this cursor", including a diff too wide to fit one
+  // page: the contract's only honest answer is the snapshot re-pull a 410 asks for.
+  if (page === null) return protocolError('CATALOG_CURSOR_EXPIRED', 410);
+  return changesPageResponse(page);
 }
 
 function changesPageResponse(body: CatalogChangesResponse): Response {

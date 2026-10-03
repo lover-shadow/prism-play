@@ -46,10 +46,16 @@
     <!-- AC-24 / SPEC §1.5.2.1 H2: SSDP device discovery needs a WifiManager.MulticastLock, and that lock
          can only be created with this permission. Without it the Wi-Fi stack drops the renderer's reply and
          the sheet shows "扫描零设备" on a healthy home network - the least diagnosable failure this feature
-         could have. Scope note: this permission unlocks MULTICAST RECEPTION only. It does not, and must not,
-         relax cleartext: usesCleartextTraffic stays "false" and network_security_config stays
-         cleartextTrafficPermitted="false", because the LAN SOAP control path is a raw java.net.Socket by
-         deliberate, Master-signed-off decision (H1) rather than a policy exception. PrismCastPlugin acquires
+         could have. Scope note: this permission unlocks MULTICAST RECEPTION only, and it is not the lever
+         that opened cleartext. Cleartext remains OFF for every host (2026-10-04 integration ruling):
+         a live audit of harvested upstream media found zero http:// slice URLs, so A-7 direct playback
+         needs no relaxation, and network_security_config.xml's base-config stays
+         cleartextTrafficPermitted="false" with this legacy attribute kept in step so the two never
+         disagree. The LAN SOAP control path stays a raw java.net.Socket by the deliberate,
+         Master-signed-off H1 decision; the play.prismos.org domain-config stays
+         cleartextTrafficPermitted="false", so the edge, /api/redeem and the OTA path keep TLS-only
+         enforcement. If a future source serves plain-http slices, grant that host a scoped
+         domain-config with evidence rather than reopening this switch. PrismCastPlugin acquires
          the lock only for the scan window and releases it on every exit path including error and stop -
          a permanently held multicast lock keeps the radio out of power save and is a battery regression. -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />

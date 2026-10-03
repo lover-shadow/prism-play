@@ -15,6 +15,7 @@ import type {
   SourcesResponse,
   SuggestionsResponse,
   TitleDetail,
+  TitleManifest,
   VersionResponse
 } from '../../../edge/src/types/api';
 import { logger } from '../diagnostics';
@@ -145,6 +146,16 @@ export class PrismApiClient {
 
   title(titleId: string): Promise<TitleDetail> {
     return this.get(`/api/titles/${encodeURIComponent(titleId)}`);
+  }
+
+  /**
+   * §2.2 剧集清单：与 `title()` 同一个路径，但期望的是 Track 2 C-3b 的新响应形态（`episodes[].lines[].mediaUrl`）。
+   * 上游真实地址只在这一条响应里出现，既不进目录分片也不进启动库（AGENTS.md 二.1 的机械落点）。
+   * 云端尚未切换时这里回来的仍是旧 `TitleDetail`，故调用方必须过 `parseTitleManifest` 再决定回退链，
+   * 本方法不做形状担保——担保在端侧那一份，网络层只负责带上私密会话凭据。
+   */
+  titleManifest(workId: string): Promise<TitleManifest> {
+    return this.get(`/api/titles/${encodeURIComponent(workId)}`);
   }
 
   related(titleId: string): Promise<RelatedResponse> {

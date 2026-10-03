@@ -7,8 +7,9 @@
  * 两条在本文件里是结构性约束、不是口头约定：
  *   1. 私密内容进不到这里：`isPrivate()` 命中即不发起组播扫描、不发任何控制报文。把"个人探索"推到
  *      客厅大屏，等于把用户的私密观看暴露给同网段的任何设备，这种暴露不能靠一行提示文案来兜。
- *   2. 推给大屏的永远是平台代理流（`api.playback()` 原样返回的 `https://play.prismos.org/proxy/media/…`）；
- *      上游源站地址在本应用里根本不存在（AGENTS.md 二.1 去平台化铁律）。
+ *   2. 推给大屏的永远是**公网 https 流**：A-7.5 之后优先是当前剧集清单里的直连上游地址，清单缺席才退回
+ *      云端代理句柄（`cast-ports.ts` 的两个流源）。两条都不得是局域网地址、明文或内嵌凭据——这一条由
+ *      `requireCastableStreamUrl` 与原生 `LanAddressPolicy` 各校一遍，口径一致。
  *
  * NOTHING HERE HAS EVER RUN AGAINST A REAL RENDERER：jsdom 没有 UDP，也没有电视。
  */

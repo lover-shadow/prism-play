@@ -14,12 +14,16 @@ import { createCredentialStore, type CredentialStore } from './credentials';
 import { createHistoryStore, type HistoryStore, type SqliteLike } from './history-store';
 import { createPublicCache, MemoryCacheDisk, type CacheDisk, type PublicCache } from './public-cache';
 import { createPrivateVault, type PrivateVault } from './private-vault';
+import { normalizeQuery, SEARCH_RESULT_LIMIT, type SearchHit, type SearchIndex } from './search-index';
+import type { ContentItem, SearchResponse, SearchResult, SearchSuggestion, SuggestionsResponse } from '../../../edge/src/types/api';
+import type { SearchApi } from '../../views/search-view';
 import {
   CATALOG_CACHE_LIMIT_BYTES,
   CLEARED_BY_CLEAR_CACHE,
   DOMAIN_BACKUP_POLICY,
   DOMAIN_DESCRIPTION,
   HISTORY_MAX_ROWS,
+  isPrivateSubject,
   POSTER_CACHE_LIMIT_BYTES,
   STORAGE_DOMAINS,
   type StorageDomain
@@ -53,11 +57,11 @@ export function createStorageDomains(deps: StorageDomainDependencies): StorageDo
 const DOMAIN_CARRIER: Readonly<Record<StorageDomain, string>> = {
   credentials: 'Android Keystore 加密存储（Web 构建降级为浏览器存储并如实标记）',
   history: '端侧 SQLite prism_local.db -> local_watch_history',
-  'public-cache': '本地文件系统 cache/posters 与目录快照分块',
+  'public-cache': '本地文件系统 cache/posters、目录快照分块与端侧检索库 prism_search.db',
   'private-volatile': '进程内存 Map，无任何文件与数据库句柄'
 };
 
-/** `128 MiB` / `20 MiB` rendered from the frozen constants, never re-typed by a view. */
+/** `512 MiB` / `20 MiB` rendered from the frozen constants, never re-typed by a view. */
 export function formatQuotaBytes(bytes: number): string {
   const mibibytes = bytes / (1024 * 1024);
   const value = Number.isInteger(mibibytes) ? mibibytes : mibibytes.toFixed(1);
@@ -107,6 +111,7 @@ export * from './credentials';
 export * from './history-store';
 export * from './public-cache';
 export * from './private-vault';
+export * from './search-index';
 export {
   assertWritable,
   CATALOG_CACHE_LIMIT_BYTES,
@@ -122,3 +127,74 @@ export {
   STORAGE_DOMAINS
 } from './storage-domains';
 export type { StorageDomain, VolatileStore, WatchHistoryRow, WriteGuardSubject } from './storage-domains';
+
+export interface LocalSearchApiDeps {
+  index: SearchIndex;
+  /** 公开快照读面（宿主已剔私密）：索引只是候选源，条目内容与"是否还存在"一律以它为准。 */
+  localItems: () => readonly ContentItem[];
+  /** 端侧索引不可用（Web 宿主没有 SQLite）时的云端回落；本地可用时一次请求都不发（§A-6.4）。 */
+  remote?: SearchApi;
+}
+
+/**
+ * A-6 的接线点：把「端侧 FTS5 索引 + 公开快照读面」组装成视图可以直接消费的 `SearchApi`。
+ * 视图的状态机、防抖与分组逻辑一字不改，只换数据源；`localFirst` 是能力声明而不是装饰——视图据此把
+ * "检索需联网"的措辞换成本机口径，并把「联网补充」降级成一颗必须由用户点下去的按钮：默认零请求。
+ */
+export function createLocalSearchApi(deps: LocalSearchApiDeps): SearchApi {
+  const { index, localItems, remote } = deps;
+
+  /** 索引行可能比快照旧：条目已下架就当场丢弃，界面永远不该出现一张点开播不了的结果卡。 */
+  interface LocalMatch { result: SearchResult; hit: SearchHit }
+  async function resolved(query: string, limit: number): Promise<LocalMatch[]> {
+    const items = new Map(localItems().map((item) => [item.id, item]));
+    const found: LocalMatch[] = [];
+    for (const hit of await index.search(query, limit)) {
+      const item = items.get(hit.contentId);
+      if (item === undefined || isPrivateSubject(item)) continue;
+      found.push({ result: { item, matchType: hit.matchType }, hit });
+    }
+    return found;
+  }
+
+  /** 回落只在"这台机器根本没有可用索引"时发生；有索引而没命中就是没命中，不该拿网络去猜第二次。 */
+  function fallBack(): boolean {
+    if (remote === undefined) return false;
+    const status = index.status();
+    return !status.available || status.docs === 0;
+  }
+
+  return {
+    localFirst: true,
+    async search(input): Promise<SearchResponse> {
+      if (fallBack()) return await remote?.search(input) ?? { items: [], page: 1 };
+      const found = await resolved(normalizeQuery(input.q), input.pageSize ?? SEARCH_RESULT_LIMIT);
+      return { items: found.map((entry) => entry.result), page: input.page ?? 1 };
+    },
+    async searchOnline(input): Promise<SearchResponse> {
+      if (remote === undefined) return { items: [], page: input.page ?? 1 };
+      return await remote.search(input);
+    },
+    async suggestions(q): Promise<SuggestionsResponse> {
+      if (fallBack()) return await remote?.suggestions(q) ?? { query: q, suggestions: [] };
+      const query = normalizeQuery(q);
+      const found = await resolved(query, 10);
+      const suggestions: SearchSuggestion[] = [];
+      const seen = new Set<string>();
+      const push = (text: string, type: SearchSuggestion['type'], contentId?: string): void => {
+        const word = text.trim();
+        if (word === '' || word.length > 80 || suggestions.length >= 10 || seen.has(`${type}:${word}`)) return;
+        seen.add(`${type}:${word}`);
+        suggestions.push({ text: word, type, ...(contentId === undefined ? {} : { contentId }) });
+      };
+      // 首字母候选只跟着真正的拼音命中走：拉丁剧名自己就是词，再给一条"首字母"纯属重复噪声。
+      const byInitials = query.replace(/\s+/g, '').length >= 2;
+      for (const entry of found) {
+        push(entry.result.item.title, 'title', entry.result.item.id);
+        if (byInitials && entry.hit.matchType === 'pinyin') push(entry.hit.initials, 'pinyin', entry.result.item.id);
+        push(entry.result.item.category, 'category');
+      }
+      return { query, suggestions };
+    }
+  };
+}

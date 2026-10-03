@@ -14,7 +14,7 @@
 - **错误码枚举 (全量 16 项闭集)**：
   `COUPON_NOT_FOUND`、`COUPON_REVOKED`、`COUPON_DEVICE_LIMIT_EXCEEDED`、`COUPON_INVALID_FORMAT`、`DEVICE_ID_INVALID`、`RATE_LIMITED`、`PRIVATE_SESSION_REQUIRED`、`TIER_INSUFFICIENT`、`NOT_FOUND`、`SERVICE_UNAVAILABLE`、`PLATFORM_UNSUPPORTED`、`CREDENTIAL_EXPIRED`、`VALIDATION_ERROR`、`PROXY_SIGNATURE_INVALID`、`CATALOG_REVISION_CONFLICT`、`CATALOG_CURSOR_EXPIRED`。
 - **限流唯一口径**：`/api/redeem` 单 IP **1 分钟最多 10 次**，超限返回 429。全工程不得出现第二个数值。
-- **上游地址零暴露**：任何响应都不得包含真实上游域名或媒体地址，只返回 `play.prismos.org/proxy/*`。
+- **上游地址零暴露（2026-10-03 v2 修订）**：目录分片、频道/源拓扑、错误体、HTML 页面源码与一切 UI 文案**永不得**包含真实上游域名；海报与需要云端转发的资源仍走 `play.prismos.org/proxy/*`。**唯一例外**：剧集清单 `GET /api/titles/{titleId}` 的 `episodes[].lines[].mediaUrl` 携带真实播放地址，用于 App 与分享页**运行时直连**上游 CDN（实测 CORS `*` 开放；决策依据 SPEC-CLOUD-REFACTOR v2 §3.2、SPEC-APP-REFACTOR v2 A-7、SPEC-STATIC-PAGES v2 S-1）。该地址只存在于运行时网络层与内存，不得渲染进任何可见文案、DOM 静态结构或日志；`/proxy/media/*` 保留为旧客户端兼容通道直至退役。
 - **失效即关闭**：私密相关接口在缺少当次会话凭据时一律按“不存在”处理（404 或空集），不返回“被拒绝”的差异化提示。
 
 ---
@@ -132,7 +132,7 @@
 
 ### 1. 剧目分享
 - **`GET /s/{drama_id}`**｜免认证｜查询：`ep`（默认 1）、`ref`
-- **行为**：无论 UA 来源，直接渲染**当前单集**极简原生 HTML5 播放页（零外部资源依赖，极速秒开）；自动播放只作“尝试”，被浏览器策略拒绝时提供单次点击播放兜底；仅当前集 `ended` 时展示“继续看请下载【光影Play】”卡片。
+- **行为**：无论 UA 来源，直接渲染**当前单集**极简原生 HTML5 播放页（零第三方域名资源；仅允许同源自托管播放器组件 `/assets/hls.min.js` 作 MSE 兜底，见 SPEC-STATIC-PAGES v2 §1.3；极速秒开）；自动播放只作“尝试”，被浏览器策略拒绝时提供单次点击播放兜底；仅当前集 `ended` 时展示“继续看请下载【光影Play】”卡片。
 - **404 铁律**：私密剧目与未知剧目一律 404，响应体不得泄露剧目元信息。
 
 ### 2. 下载引导（微信环境专属指引入口；不承诺防封）

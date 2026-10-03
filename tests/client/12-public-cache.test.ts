@@ -235,7 +235,7 @@ describe('incremental changes, posters and capacity', () => {
 
   it('ships the SPEC quotas and defaults to them', () => {
     expect(CATALOG_CACHE_LIMIT_BYTES).toBe(20 * MIB);
-    expect(POSTER_CACHE_LIMIT_BYTES).toBe(128 * MIB);
+    expect(POSTER_CACHE_LIMIT_BYTES).toBe(512 * MIB);
     const fresh = new PublicCache(new MemoryCacheDisk());
     expect(fresh.bytesUsed()).toEqual({ catalog: 0, posters: 0 });
   });

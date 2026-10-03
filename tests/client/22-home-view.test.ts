@@ -1,66 +1,12 @@
 // @vitest-environment jsdom
-/** 大视界主视图装配测试：AC-01 拓扑驱动默认高亮、AC-02-3 私密缺席、AC-04 排版持久化、AC-15/AC-18 离线诚实边界、SPEC §7 五态。 */
+/** 大视界主视图装配测试：AC-01 拓扑驱动默认高亮、AC-02-3 私密缺席、AC-04 排版持久化、SPEC §7 五态。续播卡与 A-2/A-4 生命周期见 27-home-lifecycle。 */
 
 import { afterEach, describe, expect, it } from 'vitest';
-import type { ChannelId, ChannelItem, CatalogResponse, ContentItem } from '../../edge/src/types/api';
-import type { WatchHistoryRow } from '../../src/core/storage/storage-domains';
-import type { PosterMode } from '../../src/core/state/theme';
-import { PrismApiClient } from '../../src/core/api/client';
-import { createHomeView } from '../../src/views/home-view';
+import {
+  catalog, channel, content, flush, gridClass, harness, reply, seen, TOPOLOGY, resetHomeFixtures
+} from './home-view-harness';
 
-const reply = (body: unknown, status = 200): Response =>
-  ({ ok: status >= 200 && status < 300, status, text: async () => JSON.stringify(body) } as unknown as Response);
-const channel = (id: ChannelId, name: string, order: number, categories: string[] = []): ChannelItem =>
-  ({ id, name, order, requiresTier: [], categories });
-const content = (id: string, overrides: Partial<ContentItem> = {}): ContentItem => ({
-  id, channelId: 'drama', title: `剧目${id}`, category: '都市', isPrivate: false,
-  coverUrl: `https://cdn.example/${id}.jpg`, episodeCount: 40, shareable: true, ...overrides
-});
-const catalog = (items: ContentItem[], page = 1, total = items.length, revision = 99): CatalogResponse =>
-  ({ items, page, pageSize: 24, total, revision });
-const historyRow = (contentId: string, overrides: Partial<WatchHistoryRow> = {}): WatchHistoryRow => ({
-  content_id: contentId, title: '战神之龙王归来', cover_url: 'https://cdn.example/cover-1.jpg', last_episode_id: 180,
-  last_episode_number: 18, position_seconds: 102, duration_seconds: 135, total_episodes: 80,
-  updated_at: 1_700_000_000, ...overrides
-});
-const TOPOLOGY: ChannelItem[] = [
-  channel('drama', '短剧精选', 1, ['都市', '战神', '逆袭']), channel('movie', '院线电影', 2, ['科幻']),
-  channel('anime', '热血动漫', 3), channel('documentary', '人文纪录', 4)
-];
-
-type Responder = (url: string) => Response;
-const seen: string[] = [];
-const defaultResponder: Responder = (url) =>
-  url.startsWith('/api/channels') ? reply({ version: 11, channels: TOPOLOGY }) : reply(catalog(url.includes('channel=movie') ? [] : [content('c-1'), content('c-2')]));
-/** 宏任务冲刷：点击链路含多层 await，微任务冲刷一层不够。 */
-const flush = async (): Promise<void> => {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-};
-const gridClass = (root: HTMLElement): string => (root.querySelector('.home-poster-grid') as HTMLElement | null)?.className ?? '';
-
-function harness(responder: Responder = defaultResponder, rows: WatchHistoryRow[] | 'fail' = []) {
-  let mode: PosterMode = 'compact-3';
-  const root = document.createElement('div');
-  document.body.appendChild(root);
-  const opened: string[] = [];
-  const resumed: WatchHistoryRow[] = [];
-  const modes: PosterMode[] = [];
-  const view = createHomeView({
-    api: new PrismApiClient({ baseUrl: '', fetchImpl: async (input: string) => { seen.push(input); return responder(input); } }),
-    root,
-    posterMode: () => mode,
-    onPosterModeChange: (next) => { modes.push(next); mode = next; },
-    onOpenTitle: (id) => opened.push(id),
-    onResume: (entry) => resumed.push(entry),
-    historyPreview: rows === 'fail' ? async () => { throw new Error('SQLite 未就绪'); } : async () => rows
-  });
-  return { root, view, opened, resumed, modes, currentMode: () => mode };
-}
-
-afterEach(() => {
-  document.body.replaceChildren();
-  seen.length = 0;
-});
+afterEach(resetHomeFixtures);
 
 describe('home-view 挂载与默认高亮（AC-01）', () => {
   it('首屏拉云端拓扑，四公开频道齐备且默认高亮短剧精选', async () => {
@@ -111,11 +57,11 @@ describe('home-view 挂载与默认高亮（AC-01）', () => {
   it('海报请求带上所选频道与分页，切频道后重新拉取且空片单退场网格', async () => {
     const h = harness();
     await h.view.mount();
-    expect(seen).toContain('/api/catalog?channel=drama&page=1&pageSize=24');
+    expect(seen).toContain('/api/catalog?channel=drama&page=1&pageSize=60');
 
     (h.root.querySelector('[data-channel-id="movie"]') as HTMLButtonElement).click();
     await flush();
-    expect(seen).toContain('/api/catalog?channel=movie&page=1&pageSize=24');
+    expect(seen).toContain('/api/catalog?channel=movie&page=1&pageSize=60');
     expect(h.root.querySelector('.state-view--empty')).not.toBeNull();
     expect(h.root.querySelector('.home-poster-grid')).toBeNull();
   });
@@ -126,7 +72,7 @@ describe('home-view 挂载与默认高亮（AC-01）', () => {
     const pill = Array.from(h.root.querySelectorAll<HTMLButtonElement>('.capsule')).find((entry) => entry.textContent === '战神');
     (pill as HTMLButtonElement).click();
     await flush();
-    expect(seen).toContain('/api/catalog?channel=drama&category=%E6%88%98%E7%A5%9E&page=1&pageSize=24');
+    expect(seen).toContain('/api/catalog?channel=drama&category=%E6%88%98%E7%A5%9E&page=1&pageSize=60');
   });
 });
 
@@ -217,79 +163,5 @@ describe('home-view 五态（SPEC §7）', () => {
     const box = h.root.querySelector('.state-view--empty') as HTMLElement;
     expect(box.textContent ?? '').toContain('暂无可播放剧目');
     expect(box.querySelector('.state-view-action')?.textContent).toBe('返回短剧精选');
-  });
-});
-
-describe('home-view 续播卡与生命周期', () => {
-  it('有历史即渲染续播卡，点击回传整行断点（AC-03）', async () => {
-    const h = harness(defaultResponder, [historyRow('c-9', { updated_at: 1 }), historyRow('c-1')]);
-    await h.view.mount();
-    const card = h.root.querySelector('.continue-card') as HTMLButtonElement;
-    expect(card.dataset.contentId).toBe('c-1');
-    expect(card.textContent ?? '').toContain('第 18 集');
-    expect(card.textContent ?? '').toContain('1:42');
-    expect(h.root.querySelector('.continue-progress-fill')?.getAttribute('style')).toBe('width: 76%;');
-
-    card.click();
-    expect(h.resumed.length).toBe(1);
-    expect(h.resumed[0].last_episode_id).toBe(180);
-  });
-
-  it('无历史时整卡不渲染，不占首屏', async () => {
-    const h = harness();
-    await h.view.mount();
-    expect(h.root.querySelector('.continue-card')).toBeNull();
-    expect(h.root.querySelector('.home-continue-host')?.hasAttribute('hidden')).toBe(true);
-  });
-
-  it('历史域失败只让续播卡缺席，片单照常', async () => {
-    const h = harness(defaultResponder, 'fail');
-    await h.view.mount();
-    expect(h.root.querySelector('.continue-card')).toBeNull();
-    expect(h.root.querySelectorAll('.poster-card').length).toBe(2);
-  });
-
-  it('点海报回调 contentId，refresh 保留用户已选频道与「全部」分类', async () => {
-    const h = harness();
-    await h.view.mount();
-    (h.root.querySelector('.poster-open') as HTMLButtonElement).click();
-    expect(h.opened).toEqual(['c-1']);
-
-    (h.root.querySelector('[data-channel-id="movie"]') as HTMLButtonElement).click();
-    await flush();
-    expect(h.root.querySelector<HTMLElement>('.channel-tab[aria-current="true"]')?.dataset.channelId).toBe('movie');
-
-    await h.view.refresh();
-    expect(h.root.querySelector<HTMLElement>('.channel-tab[aria-current="true"]')?.dataset.channelId).toBe('movie');
-    expect(h.root.querySelector('.capsule[aria-current="true"]')?.textContent).toBe('全部');
-  });
-
-  it('destroy 清空宿主，setPosterMode 在未挂载时先装配', async () => {
-    const h = harness();
-    await h.view.mount();
-    h.view.destroy();
-    expect(h.root.childElementCount).toBe(0);
-
-    const idle = harness();
-    idle.view.setPosterMode('list-1');
-    expect(idle.modes).toEqual(['list-1']);
-    expect(idle.root.querySelectorAll('.mode-btn').length).toBe(4);
-  });
-
-  it('总条数大于已载条数时给出加载更多，翻页带上 revision 游标', async () => {
-    const h = harness((url) =>
-      url.startsWith('/api/channels')
-        ? reply({ version: 11, channels: TOPOLOGY })
-        : url.includes('page=2')
-          ? reply(catalog([content('c-9')], 2))
-          : reply(catalog([content('c-1')], 1, 30, 77)));
-    await h.view.mount();
-    const more = h.root.querySelector('.home-more-btn') as HTMLButtonElement;
-    expect(more.textContent ?? '').toContain('已载 1 / 30');
-
-    more.click();
-    await flush();
-    expect(seen).toContain('/api/catalog?channel=drama&page=2&pageSize=24&revision=77');
-    expect(h.root.querySelectorAll('.poster-card').length).toBe(2);
   });
 });

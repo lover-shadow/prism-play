@@ -12,6 +12,12 @@
 export type MediaEvent = 'ended' | 'timeupdate' | 'play' | 'pause' | 'error' | 'loadedmetadata';
 
 /**
+ * 失败码闭集（A-8 / 云端 §C-4）从遥测层取用，不在这里另立一套：线路记账与内核分类必须共用同一份口径，
+ * 否则"超时"会在两个文件里各自漂移成不同的字符串。
+ */
+import type { LineFailureCode } from '../core/native/telemetry';
+
+/**
  * What this module drives inside ArtPlayer; a fake satisfies it under test.
  *
  * 这里**没有** `setFullscreen`：全屏不是内核的能力，它只有一个权威（`player-host.ts` 的宿主类）。
@@ -25,7 +31,16 @@ export interface PlayerEngine {
   volume(): number; setVolume(value: number): void; setSource(url: string, mimeType?: string): void;
   toggleControls(): void; on(event: MediaEvent, handler: () => void): () => void;
   resize?(): void;
+  /**
+   * 直连上游之后（A-7），切线与遥测都需要知道这一跳是怎么死的：超时、HTTP 失败还是解码失败。
+   * 可选是因为不是每个内核都分得出来——假内核与降级路径没有这个信息，缺席即按 `http_error` 记账。
+   */
+  failureCode?(): LineFailureCode | null;
 }
 
-export interface EngineContext { container: HTMLDivElement; theme: string; poster?: string; onError(message: string): void }
+export interface EngineContext {
+  container: HTMLDivElement; theme: string; poster?: string;
+  /** 第二条实参是内核分得出的失败类型（hls fatal 明细 / `MediaError.code`）；分不出来时为 undefined。 */
+  onError(message: string, failureCode?: LineFailureCode): void;
+}
 export type EngineFactory = (context: EngineContext) => PlayerEngine | Promise<PlayerEngine>;

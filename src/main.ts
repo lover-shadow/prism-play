@@ -15,7 +15,7 @@ import type { PrismNativeBridge } from './core/native/bridge';
 import type { FetchLike } from './core/api/client';
 import type { UserSyncService } from './core/user-sync';
 import type { RedeemOutcome } from './views/settings-view';
-import { CATALOG_CACHE_LIMIT_BYTES, createStorageDomains, isPrivateSubject, MemoryCacheDisk, POSTER_CACHE_LIMIT_BYTES } from './core/storage';
+import { CATALOG_CACHE_LIMIT_BYTES, createLocalSearchApi, createSearchIndex, createStorageDomains, isPrivateSubject, MemoryCacheDisk, POSTER_CACHE_LIMIT_BYTES } from './core/storage';
 import { PrismApiClient } from './core/api/client';
 import { createCatalogCacheService } from './core/catalog-cache';
 import { createUserSync } from './core/user-sync';
@@ -30,7 +30,7 @@ import { createPlayerHost } from './player-host';
 import { createShareAction } from './core/share';
 import { createHomeView, type HomeApi, type HomeView } from './views/home-view';
 import { createHistoryView } from './views/history-view';
-import { createSearchView } from './views/search-view';
+import { createSearchOverlay } from './views/search-overlay';
 import { createSettingsView, SETTINGS_PREF_KEYS } from './views/settings-view';
 
 /** 搜索热词的唯一来源：本机公开快照的剧名，绝不内置词表（SPEC §10 私密与公开同条约束）。 */
@@ -52,10 +52,8 @@ export interface PrismApp {
 }
 
 function mountPoints(): [HTMLElement, HTMLElement, HTMLElement, HTMLElement] | null {
-  const app = document.getElementById('app');
-  const header = document.getElementById('app-header');
-  const main = document.getElementById('app-main');
-  const tabbar = document.getElementById('app-tabbar');
+  const app = document.getElementById('app'), header = document.getElementById('app-header');
+  const main = document.getElementById('app-main'), tabbar = document.getElementById('app-tabbar');
   return app !== null && header !== null && main !== null && tabbar !== null ? [app, header, main, tabbar] : null;
 }
 
@@ -68,11 +66,9 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
   installBridgeForPlatform(options.bridge ?? null);
   const bridge = getBridge();
   const prefs = createPreferenceStore();
-  const storage = createStorageDomains({
-    sqlite: await createHistorySqlite(),
-    disk: (await createCacheDisk()) ?? new MemoryCacheDisk(),
-    nowSeconds: now
-  });
+  const sqlite = await createHistorySqlite();
+  const searchIndex = createSearchIndex({ sqlite, nowSeconds: now });
+  const storage = createStorageDomains({ sqlite, disk: (await createCacheDisk()) ?? new MemoryCacheDisk(), nowSeconds: now });
   // 冷启动即焚：上一次进程的私密痕迹不该存在于本进程（AC-02-2 每次进入默认关闭）。
   storage.privateVault.clear();
 
@@ -90,7 +86,8 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
   const stored = await storage.credentials.readAll();
   client.setAuthorization(stored.token);
 
-  const catalog = createCatalogCacheService({ client, cache: storage.cache, nowSeconds: now });
+  // §A-6.2 数据流：快照/增量批次落地即喂端侧 FTS5 索引；索引自己吞异常并记进 status()，不改落盘结论。
+  const catalog = createCatalogCacheService({ client, cache: storage.cache, nowSeconds: now, onSnapshotEntries: (feed) => void searchIndex.sync(feed) });
 
   /**
    * AC-02-3 的端侧兜底：公开频道响应里若混进私密条目（服务端故障或响应被篡改），它既不进界面也不进缓存读取面。
@@ -121,8 +118,8 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
     }
   };
 
-  const report = createNotice(app);
-
+  /** 双击退出 Toast 的停留时长（A-1 定案 6.5s）：比系统提示长一点，用户才来得及读完"再按一次"。 */
+  const report = createNotice(app, 6_500);
   /**
    * 端云状态同步中枢（SPEC §1.9 / AC-30）：构造即补发待发队列（§3.1 要求补传先于任何拉取），并交出
    * "断点落库路由"这唯一咽喉点——私密内容永不进历史域、也永不进待发队列（§1.9.4）。分类与私密出处
@@ -149,15 +146,26 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
   });
 
   let homeView: HomeView | null = null;
+  /**
+   * 本机公开快照的剧目集合：榜单与热词的唯一数据源。私密判定同 `homeApi` 再挡一道（AC-02-3），
+   * 私密内容连标题都不进 DOM。搜索 Overlay（A-3）不是 Tab，由首页搜索条拉起并在返回栈注册为 Layer（A-1）。
+   */
+  const publicLocalItems = () => storage.cache.list().filter((entry) => !isPrivateSubject(entry));
+  // A-6：搜索数据源换成本机 FTS5 索引；本机没有可用索引（Web 宿主无 SQLite）才如实回落云端检索。
+  const searchApi = createLocalSearchApi({ index: searchIndex, localItems: publicLocalItems, remote: client });
+  const overlay = createSearchOverlay({
+    appRoot: app, api: searchApi,
+    localItems: publicLocalItems,
+    hotWords: () => publicLocalItems().slice(0, HOT_WORD_LIMIT).map((entry) => entry.title),
+    onOpenTitle: (contentId) => void player.open(contentId),
+    onBrowse: () => void shell.activate('home')
+  });
 
   /** 端侧 SQLite 未就绪时如实返回 false：【追剧】整视图据此进入 disabled，而不是渲染空历史冒充"你没看过"。 */
   async function historyAvailable(): Promise<boolean> {
     try { await storage.history.init(); return true; } catch { return false; }
   }
-
-  async function listHistory(): Promise<WatchHistoryRow[]> {
-    return (await historyAvailable()) ? await storage.history.listRecent() : [];
-  }
+  const listHistory = async (): Promise<WatchHistoryRow[]> => (await historyAvailable()) ? await storage.history.listRecent() : [];
 
   function viewFor(tab: ShellTab, root: HTMLElement): ManagedView {
     if (tab === 'home') {
@@ -170,7 +178,7 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
         onOpenTitle: (contentId) => void player.open(contentId),
         onResume: (row) => void player.open(row.content_id, row),
         historyPreview: listHistory,
-        onShare: (item) => void share(item),
+        onSearch: () => overlay.open(),
         onChannelChange: (channel) => { privateChannel = channel?.id === 'private'; syncSecure(); }
       });
       homeView = view;
@@ -191,7 +199,7 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
             return { usedBytes: used.catalog + used.posters, limitBytes: CATALOG_CACHE_LIMIT_BYTES + POSTER_CACHE_LIMIT_BYTES };
           },
           clearPublicCache: async () => {
-            const freed = await storage.cache.clearCache();
+            const freed = await storage.cache.clearCache(); await searchIndex.clear(); // 清缓存即清索引：下次快照落地重建。
             return { clearedBytes: freed.freedBytes, domains: ['public-cache'] };
           }
         },
@@ -203,16 +211,6 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
         now
       });
       return { mount: () => view.mount(), reload: () => view.reload(), destroy: () => view.destroy() };
-    }
-    if (tab === 'search') {
-      const view = createSearchView({
-        api: client,
-        root,
-        onOpenTitle: (contentId) => void player.open(contentId),
-        hotWords: storage.cache.list().slice(0, HOT_WORD_LIMIT).map((item) => item.title),
-        onBrowse: () => void shell.activate('home')
-      });
-      return { mount: () => view.mount(), destroy: () => view.destroy() };
     }
     const view = createSettingsView({
       api: client,
@@ -253,6 +251,8 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
   }
   const shell: AppShell = createAppShell({
     header, main, tabbar, viewFor,
+    // A-1 双击退出提示复用全局唯一那条轻提示；退行动交回总线（原生宿主才真退，Web 宿主如实 no-op）。
+    notice: report,
     onTabChange: async () => { backgroundAudio = (await prefs.get(SETTINGS_PREF_KEYS.keepScreenOn)) === '1'; }
   });
 
@@ -275,6 +275,8 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
     destroy() {
       releaseNotifications();
       releaseAppState();
+      // Overlay 排在播放器之前拆：它的 Layer handler 必须先于播放器离场摘掉，返回栈才不会串层。
+      overlay.destroy();
       // 节点 ① 的上报必须排在同步中枢解散之前，否则"完全退出"这一次永远发不出去。
       player.close();
       sync.dispose();

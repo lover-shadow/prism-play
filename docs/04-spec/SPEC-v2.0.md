@@ -212,7 +212,7 @@ CREATE INDEX IF NOT EXISTS idx_watch_history_time ON local_watch_history(updated
 - 本期公开搜索端点仅检索四公开频道；个人探索当次会话只支持其受保护目录浏览，不接入公开补全、语义索引、热词和推荐。如需私密搜索另立不落盘、不共享索引/缓存/日志的准入契约。
 - **排版取舍（已定，不再悬置）**：正文基准字号 `15px`、字体栈使用**系统字体**（不内置中文字体包），以保护 6~8MB 安装包目标；如需品牌字体须单独评估体积与授权，不在本期。
 - **公开海报缓存策略（已定）**：公开缩略海报统一使用 `Cache-Control: public, max-age=300`，配合 ETag/coverVersion 实现 5 分钟端侧安全复用。
-- **分享页资源策略（已定）**：`/s` 页面使用边缘直出的极简内联样式，不引入站点级 CSS/JS 资产，保证弱网首屏可用。
+- **分享页资源策略（2026-10-03 v2 修订）**：`/s` 页面使用边缘直出的极简内联样式，不引入站点级 CSS/JS 资产，保证弱网首屏可用。**唯一例外（SPEC-STATIC-PAGES v2 §S-1/S-3 批准）**：允许加载一个**同源自托管**的播放器组件 `/assets/hls.min.js`（CI 上传 R2、immutable 长缓存、白名单文件名），用于非原生 HLS 环境的 MSE 软解；**禁止任何第三方 CDN 与第三方域名资源**，该例外不扩展到 CSS 与其它脚本。
 - **可访问性下限**：可点击目标 ≥44px、相邻目标间距 ≥8px、`:focus-visible` 焦点环可见；交互态至少覆盖 `default/hover/focus/active/disabled/loading/error`。
 
 ## 11. 内嵌已知坑（防重蹈覆辙）
@@ -285,4 +285,5 @@ npm test
 | 2026-10-01 | F-13～15 / AC-16～18：已配置来源 AI 自动加工、混合搜索、公开列表海报本地缓存；Windows 与离线视频后移；私密无权表现统一；单 URL 边缘择源；在线续期返回新 JWT。Workers AI/Vectorize 本期有限引入，套餐/用量未核，免费降级且不自动付费 | 按 Master 一次性选择同步补齐客户端、云端、传输与数据全链 | PRD、UIUX、ARCHITECTURE、ADR-003、OpenAPI、API-SPEC、D1 Schema、SPEC、项目索引、README、wrangler 注释 |
 | 2026-10-01（施工前复核） | 修正卡密示例/频道 B/Y/S、会话撤销、公开目录原子变更、默认未发布、设备 ID 边界、HLS 子资源与私密凭据传递、跨安装归因及过期工作包；补缓存容量、可信跨源映射、来源重试上限和 G0～G4 门禁 | 消除编码直接撞上的矛盾，将静态/合成验证与真实资源门禁分开 | PRD、UIUX、ARCHITECTURE、ADR-001/002/003、OpenAPI、API-SPEC、D1 Schema、SPEC、wrangler、README、索引 |
 | 2026-10-03 | §9 增补 **AC-19～AC-30** 十二条（全屏唯一权威与画幅零裁切、签名恒定、公网分享、DLNA 投屏、外壳视觉收敛、端侧混排、微光角标、端云同步），并确立"本节为 AC 编号唯一权威"纪律；同步 PRD §12.6 与 `tests/verify_acceptance.py`（18→30）、`tests/verify_contracts.py` AC 闭集 | 客户端波次 `PLAYER-FULLSCREEN-SIGNING-UPDATE-SPEC-AND-PLAN.md` v2.5 交付新验收；旧 v2.4 草案曾撞用 AC-01～12，会让门禁把新用例记到语义无关条目上形成假绿，故占用未使用区段并回写唯一权威 | SPEC §9/§13、PRD §9/§12.6、验收与契约门禁 |
+| 2026-10-03（重构 v2 三轨） | 采纳 `SPEC-STATIC-PAGES/SPEC-CLOUD-REFACTOR/SPEC-APP-REFACTOR` v2：§10 分享页资源策略开**同源自托管 hls.min.js** 唯一例外（禁第三方 CDN）；API-SPEC §〇「上游地址零暴露」收窄为"目录/文案/页面源码零暴露"，剧集清单 `lines[].mediaUrl` 成为受控运行时例外（App/分享页直连上游 CDN，实测 CORS 开放），`/proxy/media` 保留为旧客户端兼容通道；目录读路径改 R2 分片（60 条/片）+ KV 清单，D1 内容大表标记 DEPRECATED（0003，不物理 DROP），新增 `line_health_signals` 遥测表与 `POST /api/telemetry/lines`；ContentItem 增补 `firstPublishedAt/hitsTotal`；私密定级双条款（五源全量私密 + 魔都 tid 6/39 归私密）；AGENTS.md 二·3 同步澄清 `/s` 手动蒙层不属自动跳出 | 免费配额三条熔断线（Workers 请求 10 万/天、D1 行读 500 万/天、上游封 Cloudflare IP）证明"云端代理一切"不可持续；第一性原理回摆为重客户端 + 最小云端 | SPEC §10/§13、API-SPEC §〇/§五、AGENTS.md 二·3、OpenAPI（22 路径）、D1 Schema（23 表）、三份 v2 SPEC、CI 管线 |
 

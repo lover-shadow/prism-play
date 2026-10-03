@@ -1,20 +1,21 @@
 /**
- * `GET /s/{drama_id}` - the share landing page (SPEC 5, AC-02-6, AC-12, AC-13, SPEC 10 分享页资源策略).
+ * `GET /s/{drama_id}` - the share landing page (SPEC-STATIC-PAGES v2 S-1/S-2, SPEC 5, AC-12, AC-13).
  *
- * The suite is organised around the four properties that make this route safe to expose anonymously:
- *   1. undifferentiated denial - unknown / unpublished / unshareable / private are byte-identical;
- *   2. no upstream exposure - the only media URL is a same-origin sealed `/proxy/media` handle;
+ * The suite is organised around the properties that make this page safe and useful to expose:
+ *   1. undifferentiated denial - unknown / unpublished / unshareable / private / illegal ep are
+ *      byte-identical 404s, and an illegal `?ep=` never degrades into episode 1 (AC-S1-3);
+ *   2. no upstream exposure - v2 §1.2 moved the media address out of the document entirely: the page
+ *      names only same-origin paths and the player resolves the stream at run time;
  *   3. escaping - titles and `ref` come from outside the process and must never reach the DOM raw;
- *   4. P0 visual rules - zero pictographs, no external assets, colour only from `theme.ts`.
+ *   4. P0 visual rules - zero pictographs, one same-origin script and nothing else external.
  */
 
 import { describe, expect, it } from 'vitest';
 import { dramaIdFromPath, handleShare, parseRequestedEpisode } from '../../edge/src/routes/share';
-import { createMediaHandleCodec } from '../../edge/src/core/media-handle';
-import { verifyProxySignature } from '../../edge/src/core/proxy-signature';
-import { PLAYBACK_HANDLE_TTL_SECONDS, SHARE_DEFAULT_EPISODE } from '../../edge/src/core/constants';
+import { SHARE_DEFAULT_EPISODE } from '../../edge/src/core/constants';
 import { notFoundResponse } from '../../edge/src/http/errors';
 import { SHARE_ENDED_HEADLINE } from '../../edge/src/html/share-page';
+import { HLS_SCRIPT_PATH } from '../../edge/src/html/share-page';
 import { NIGHT_BACKGROUND, inlineThemeStyles } from '../../edge/src/html/theme';
 import { seedContent, seedEpisode, seedEpisodeSource, seedProvider, seedStandardChannels } from '../support/seed';
 import { seedPublishedWork } from '../support/seed-catalog';
@@ -54,7 +55,7 @@ function pictographs(text: string): string[] {
 /**
  * One fixture, five states: shareable+published, published-but-unshareable, private, an unpublished
  * draft and a hostile title. Each has episodes and a healthy source, so a denial can never be blamed
- * on emptiness - that is what makes the four 404 bodies comparable.
+ * on emptiness - that is what makes the 404 bodies comparable.
  */
 async function shareFixture(): Promise<PrismTestEnv> {
   const env = await createTestEnv();
@@ -76,7 +77,6 @@ async function shareFixture(): Promise<PrismTestEnv> {
       });
     }
   }
-  // The publish gate is separate from the share gate: an enabled=0 row with real content behind it.
   seedContent(env.db, { id: 'work-draft', channelId: 'drama', title: '未上架剧目', enabled: 0, shareable: 1 });
   seedEpisodeSource(env.db, { episodeId: seedEpisode(env.db, 'work-draft', 1, 120), providerId: 'provider_s1' });
   return env;
@@ -91,11 +91,10 @@ async function fingerprint(response: Response): Promise<string> {
   ].join('|');
 }
 
-function extractMediaUrl(html: string): URL {
-  const captured = /"url":"([^"]*)"/.exec(html);
-  expect(captured, 'the inline config must carry the media url').not.toBeNull();
-  // embedJson turns `&` into a six-character escape, so decode it back before parsing.
-  return new URL((captured?.[1] as string).replace(/\\u0026/g, '&'));
+async function render(path = '/s/work-share?ep=2&ref=GY-1024ABCD'): Promise<{ html: string; response: Response }> {
+  const env = await shareFixture();
+  const response = await handleShare(shareRequest(path), env, env.clock);
+  return { html: await response.text(), response };
 }
 
 describe('/s denial is undifferentiated (AC-02-6 / 五.1 404 铁律)', () => {
@@ -106,7 +105,6 @@ describe('/s denial is undifferentiated (AC-02-6 / 五.1 404 铁律)', () => {
     for (const path of paths) prints.push(await fingerprint(await handleShare(shareRequest(path), env, env.clock)));
     for (const print of prints) expect(print).toBe(prints[0]);
     expect(prints[0]).toContain('404|application/json; charset=utf-8|no-store|');
-    // The body is the shared NOT_FOUND payload; this route has no error dialect of its own.
     expect(prints[0]).toContain(await notFoundResponse().text());
   });
 
@@ -131,8 +129,9 @@ describe('/s denial is undifferentiated (AC-02-6 / 五.1 404 铁律)', () => {
   it('keys on the requested episode: missing or malformed ep is 404, never a silent fallback', async () => {
     const env = await shareFixture();
     const baseline = await fingerprint(await handleShare(shareRequest('/s/work-unknown'), env, env.clock));
-    for (const path of ['/s/work-share?ep=99', '/s/work-share?ep=0', '/s/work-share?ep=abc', '/s/work-share?ep=-1']) {
-      expect(await fingerprint(await handleShare(shareRequest(path), env, env.clock))).toBe(baseline);
+    const paths = ['/s/work-share?ep=99', '/s/work-share?ep=999999', '/s/work-share?ep=0', '/s/work-share?ep=abc', '/s/work-share?ep=-1'];
+    for (const path of paths) {
+      expect(await fingerprint(await handleShare(shareRequest(path), env, env.clock)), path).toBe(baseline);
     }
     expect(parseRequestedEpisode(null)).toBe(SHARE_DEFAULT_EPISODE);
     expect(parseRequestedEpisode('2')).toBe(2);
@@ -140,13 +139,7 @@ describe('/s denial is undifferentiated (AC-02-6 / 五.1 404 铁律)', () => {
   });
 });
 
-describe('/s 200 document (AC-12 / AC-13 / SPEC 10)', () => {
-  async function render(path = '/s/work-share?ep=2&ref=GY-1024ABCD'): Promise<{ html: string; response: Response }> {
-    const env = await shareFixture();
-    const response = await handleShare(shareRequest(path), env, env.clock);
-    return { html: await response.text(), response };
-  }
-
+describe('/s 200 document (AC-S1 / AC-S2 / AC-12 / AC-13)', () => {
   it('serves HTML for the requested single episode only', async () => {
     const { html, response } = await render('/s/work-share?ep=3');
     expect(response.status).toBe(200);
@@ -162,71 +155,100 @@ describe('/s 200 document (AC-12 / AC-13 / SPEC 10)', () => {
     expect(html).toContain('查看下载说明');
   });
 
+  it('removes the canPlayType dead end: the probe routes to one of two channels (S-1.1, S-1.2)', async () => {
+    const { html } = await render();
+    // The old block returned before assigning any source; the probe may now only route between the
+    // two channels, so both channel bodies must be present in the same script.
+    expect(html).toContain('application/vnd.apple.mpegurl');
+    expect(html).toContain('video.src = url;');
+    expect(html).toContain('engine.attachMedia(video);');
+    expect(html).toContain(HLS_SCRIPT_PATH);
+    expect(HLS_SCRIPT_PATH).toBe('/assets/hls.min.js');
+    // The engine is created by DOM API, so the document never carries a markup-level script source.
+    expect(html).toContain('createElement("script")');
+    expect(html).toMatch(/isSupported/);
+    expect(html).toMatch(/attachMedia/);
+  });
+
+  it('carries the WeChat X5 inline-playback attributes and never a fullscreen takeover (S-1.3)', async () => {
+    const { html } = await render();
+    const video = /<video[^>]*><\/video>/.exec(html)?.[0] ?? '';
+    expect(video).toContain('playsinline');
+    expect(video).toContain('webkit-playsinline');
+    expect(video).toContain('x5-video-player-type="h5-page"');
+    expect(video).toContain('x5-video-player-fullscreen="true"');
+  });
+
   it('attempts autoplay but always ships the one-tap fallback control (五.1, SPEC 11 trap 5)', async () => {
     const { html } = await render();
     expect(html).toContain('id="prism-play"');
     expect(html).toContain('立即播放');
     expect(html).toContain('video.play()');
-    // AC-12 is an attempt, never a promise: no forced autoplay attribute, and the copy says so.
     expect(html).not.toMatch(/<video[^>]+\bautoplay\b/i);
     expect(html).toContain('只作尝试');
   });
 
-  it('reveals the 截流 card on the ended event only', async () => {
+  it('reveals the 截流 card on the ended event only (AC-13, AC-S1-5)', async () => {
     const { html } = await render();
     expect(html).toContain("addEventListener('ended'");
     expect(html).toMatch(/id="prism-card"[^>]*hidden/);
     expect(html).not.toContain("addEventListener('timeupdate'");
   });
 
-  it('never performs WeChat exit guidance, whatever the UA (五.5: the funnel is /dl only)', async () => {
-    const env = await shareFixture();
-    for (const ua of ['MicroMessenger/8.0 Android', 'Mozilla/5.0 (Windows NT 10.0)']) {
-      const response = await handleShare(new Request(`${ORIGIN}/s/work-share?ep=1`, { headers: { 'User-Agent': ua } }), env, env.clock);
-      const html = await response.text();
-      expect(response.status).toBe(200);
-      expect(html).not.toContain('点击右上角');
-      expect(html).not.toContain('MicroMessenger');
-      expect(html).not.toContain('在浏览器中打开');
-    }
-  });
-
-  it('carries exactly one same-origin sealed proxy media url with exp and sig', async () => {
-    const env = await shareFixture();
-    const html = await handleShare(shareRequest('/s/work-share?ep=2'), env, env.clock).then((r) => r.text());
-    expect(countOccurrences(html, '/proxy/media/')).toBe(1);
-    const url = extractMediaUrl(html);
-    expect(url.origin).toBe(ORIGIN);
-    expect(url.pathname.startsWith('/proxy/media/')).toBe(true);
-    const handle = url.pathname.slice('/proxy/media/'.length);
-    const exp = Number(url.searchParams.get('exp'));
-    expect(exp).toBe(env.clock.nowSeconds() + PLAYBACK_HANDLE_TTL_SECONDS);
-    const sig = url.searchParams.get('sig');
-    const kind = 'media' as const;
-    expect(await verifyProxySignature(env.PROXY_SIGNING_SECRET, { kind, handle, exp: String(exp), sig }, env.clock.nowSeconds())).toBe('valid');
-    // Sealed, not encoded: only the server can turn the handle back into the upstream target.
-    const parsed = await (await createMediaHandleCodec(env.PROXY_SIGNING_SECRET)).parse(handle);
-    expect(parsed?.episodeId).toBeGreaterThan(0);
-    expect(parsed?.targetUrl).toContain(UPSTREAM_HOST);
-  });
-
-  it('exposes no upstream host and no cross-origin asset', async () => {
-    const { html } = await render();
+  it('names no media address at all: the player resolves it from the same-origin manifest', async () => {
+    const { html } = await render('/s/work-share?ep=2');
+    // v2 §1.2-2: no sealed proxy handle, no D1 source row, no upstream host in the document.
+    expect(html).not.toContain('/proxy/');
     expect(html).not.toContain(UPSTREAM_HOST);
+    expect(html).toContain('/api/titles/work-share');
+    expect(html).toMatch(/"manifest":"\/api\/titles\/work-share"/);
+    expect(html).toMatch(/"episode":2/);
+    expect(html).toMatch(/"maxSwitches":2/);
+  });
+
+  it('ships the whole download funnel and keeps the guidance inert (S-2.1, S-2.2, S-2.4)', async () => {
+    const { html } = await render();
+    expect(html).toContain('position: sticky;');
+    expect(html).toContain('id="prism-bar-download"');
+    expect(html).toContain('id="prism-dock"');
+    expect(html).toContain('下载 APP 免费看全集');
+    expect(html).toContain('id="prism-rail"');
+    expect(html).toMatch(/id="prism-mask"[^>]*hidden/);
+    expect(html).toContain('不承诺绕过任何平台限制');
+  });
+
+  it('renders one byte-identical document for every UA: the branching is client-side only (五.5)', async () => {
+    const env = await shareFixture();
+    const prints: string[] = [];
+    for (const ua of ['Mozilla/5.0 (Linux; Android 13) MicroMessenger/8.0.40', 'Mozilla/5.0 (Windows NT 10.0)']) {
+      const response = await handleShare(new Request(`${ORIGIN}/s/work-share?ep=1`, { headers: { 'User-Agent': ua } }), env, env.clock);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('Vary')).toBeNull();
+      prints.push(await response.text());
+    }
+    expect(prints[1]).toBe(prints[0]);
+    // The container is matched in script by a lower-cased fingerprint, never named in the document.
+    expect(prints[0]).not.toContain('MicroMessenger');
+  });
+
+  it('exposes no cross-origin asset and no third-party host', async () => {
+    const { html } = await render();
     expect(html).not.toMatch(/<script[^>]+\bsrc=/i);
     expect(html).not.toMatch(/<link\b/i);
     expect(html).not.toMatch(/@font-face|@import/i);
-    expect(html).not.toMatch(/hls\.js|artplayer/i);
     for (const value of html.match(/https?:\/\/[^"'()\s]+/g) ?? []) expect(value.startsWith(ORIGIN)).toBe(true);
+    // The only script the page may pull is the self-hosted engine, on the same origin, under /assets/.
+    expect(countOccurrences(html, '/assets/')).toBe(1);
+    expect(html).not.toMatch(/cdn|unpkg|jsdelivr/i);
   });
 
   it('keeps the P0 rules: zero pictographs, colour only from the token block', async () => {
     const { html } = await render();
     expect(pictographs(html)).toEqual([]);
     expect(html).toContain('var(--accent)');
-    // The document inlines `theme.ts`, so its hex multiset must be exactly the token block plus the
-    // one exported night background used by the `theme-color` meta. A page-level colour fails this.
+    // The share page is the night surface: exactly the token block plus the theme-color meta.
     expect(html.match(HEX_LITERAL)?.sort()).toEqual([...inlineThemeStyles().match(HEX_LITERAL) as string[], NIGHT_BACKGROUND].sort());
+    expect(html).not.toMatch(/prefers-color-scheme: light/);
   });
 });
 
@@ -241,7 +263,6 @@ describe('/s escaping is the only thing between D1 and the DOM', () => {
     expect(html).not.toContain('<img src=x onerror=alert(1)>');
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
     expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
-    // An escaped payload must never be able to open a second script block.
     expect(countOccurrences(html, '<script>')).toBe(1);
     expect(countOccurrences(html, '</script>')).toBe(1);
   });
@@ -253,24 +274,24 @@ describe('/s escaping is the only thing between D1 and the DOM', () => {
     const script = html.slice(html.indexOf('<script>'), html.indexOf('</script>'));
     expect(script).not.toContain(String.fromCharCode(0x2028));
     expect(script).not.toContain(String.fromCharCode(0x2029));
-    expect(script).toContain('"url":"http://localhost:8787/proxy/media/');
-    // The ref is display-only attribution: it reaches the footer text, never the script payload.
+    expect(script).toContain('"manifest":"/api/titles/work-share"');
     expect(script).not.toContain('a' + String.fromCharCode(0x2028) + 'b');
     expect(html.match(/<script>[\s\S]*?<\/script>/g)).toHaveLength(1);
   });
 });
 
-describe('/s unavailable source', () => {
-  it('answers 503 with an honest HTML state instead of a silent episode-1 fallback', async () => {
+describe('/s no longer reads the retired source table (v2 §1.2-2)', () => {
+  it('renders the same document whether or not an enabled source row exists', async () => {
+    const withSources = await render('/s/work-share?ep=1');
+    expect(withSources.response.status).toBe(200);
     const env = await shareFixture();
     env.db.execute('UPDATE episode_sources SET enabled = 0');
-    const response = await handleShare(shareRequest('/s/work-share?ep=1'), env, env.clock);
-    const html = await response.text();
-    expect(response.status).toBe(503);
-    expect(response.headers.get('Cache-Control')).toBe('no-store');
-    expect(html).toContain('本集暂时找不到可用播放源');
-    expect(html).not.toContain('/proxy/media/');
-    expect(html).not.toContain('id="prism-video"');
-    expect(html).toContain('/dl/latest/android');
+    const stripped = await handleShare(shareRequest('/s/work-share?ep=1'), env, env.clock);
+    expect(stripped.status).toBe(200);
+    expect(stripped.headers.get('Cache-Control')).toBe('public, max-age=60');
+    expect(await stripped.text()).toBe(withSources.html);
+    // An unavailable line is now a client-side state card, present but inert until the player fails.
+    expect(withSources.html).toMatch(/id="prism-state"[^>]*hidden/);
+    expect(withSources.html).toContain('当前线路暂不可用');
   });
 });

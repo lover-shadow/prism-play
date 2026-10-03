@@ -10,9 +10,10 @@
  *     不各算各的（同一状态两个权威，正是本项目全屏缺陷复发过的根因）。
  */
 import type { EpisodeItem } from '../../edge/src/types/api';
-import type { CastClient, CastDevice } from '../core/native/cast';
+import { isCastableStreamUrl, type CastClient, type CastDevice } from '../core/native/cast';
 import { PrismApiClient } from '../core/api/client';
 import { SHARE_ORIGIN } from '../core/share';
+import { activeTitleManifestStore, mimeTypeOfMediaUrl, type TitleManifestStore } from './title-manifest';
 
 /**
  * 投屏状态机的全部合法态。放在端口层而不是状态机文件里，是因为视图层与文案层都要按它分支，
@@ -21,7 +22,10 @@ import { SHARE_ORIGIN } from '../core/share';
 export type CastPhase =
   | 'idle' | 'unsupported' | 'scanning' | 'ready' | 'empty' | 'error' | 'connecting' | 'casting' | 'paused';
 
-/** 分集流地址的唯一来源：`api.playback()` 的原样返回。本包不拼地址、不改协议、不猜主机。 */
+/**
+ * 分集流地址的端口：本包不拼地址、不改协议、不猜主机。
+ * 生产实现有两个（A-7.5 的清单直连与回退用的代理句柄），测试实现是一只查表闭包。
+ */
 export type CastStreamSource = (episodeId: number) => Promise<{
   url: string;
   mimeType?: string;
@@ -46,7 +50,8 @@ export function wallClock(): TimerPort {
 }
 
 /**
- * 生产缺省流源：与主应用同一个 edge、同一个播放句柄接口。
+ * 生产缺省流源：云端代理句柄那条老路（`/proxy/media/…`）。A-7 之后它只是**回退**——
+ * 剧集清单缺席（旧云端、私密 404、断网）时投屏仍要能用，不能跟着主链路一起变瞎。
  * 为什么另起一个客户端、而不是复用 `main.ts` 那只：投屏要的是**大屏能直连的新签名句柄**，不是手机上
  * 那只已经跑到一半的（句柄两小时过期，连播时旧的可能正在半路上）。它不读任何私密凭据——私密内容在
  * 投屏面板第一行就被挡掉了，所以这条路上没有私密会话可泄露。
@@ -56,6 +61,32 @@ export function defaultCastStreamSource(): CastStreamSource {
   return async (episodeId: number) => {
     const info = await api.playback(episodeId);
     return { url: info.url, mimeType: info.mimeType, durationSeconds: info.durationSeconds };
+  };
+}
+
+/**
+ * A-7.5：电视拿到的应该是**当前那一集的直连上游地址**，与手机上播的是同一条线路。
+ * 大屏自己取流，既没有 WebView 的 CORS 问题，也不占 Workers 的转发配额；原生侧
+ * `LanAddressPolicy.requirePublicStreamUrl` 与本文件的 `requireCastableStreamUrl` 都只放过公网 https，
+ * 于是清单里只给 http 切片的线路在此退回代理句柄——**退回是能力缺席，不是失败**，状态机会照常投出去。
+ *
+ * 分集地址的唯一来源是播放器创建时装好的那份清单缓存（`title-manifest.ts` 的进程内单例）：
+ * 投屏面板够不到 `PrismApiClient`，也不该够——重复拉一次清单就会多出一个私密性判定的现场。
+ */
+export function createLineAwareCastStreamSource(deps: {
+  workId: () => string;
+  episodes: EpisodeItem[];
+  store?: () => TitleManifestStore | null;
+  fallback?: CastStreamSource;
+}): CastStreamSource {
+  const fallback = deps.fallback ?? defaultCastStreamSource();
+  const store = deps.store ?? activeTitleManifestStore;
+  return async (episodeId: number) => {
+    const episode = deps.episodes.find((item) => item.episodeId === episodeId);
+    const lines = episode === undefined ? [] : await (store()?.linesFor(deps.workId(), episode.episodeNumber) ?? Promise.resolve([]));
+    const direct = lines.find((line) => isCastableStreamUrl(line.mediaUrl));
+    if (direct === undefined) return await fallback(episodeId);
+    return { url: direct.mediaUrl, mimeType: mimeTypeOfMediaUrl(direct.mediaUrl) };
   };
 }
 

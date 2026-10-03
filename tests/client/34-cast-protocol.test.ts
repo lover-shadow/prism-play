@@ -17,6 +17,7 @@ import {
   createCastClient,
   hostOf,
   isCastableDevice,
+  isCastableStreamUrl,
   isRfc1918Host,
   requireCastableStreamUrl,
   PRISM_CAST_PLUGIN
@@ -176,15 +177,20 @@ describe('AC-24 目标地址闸门（RFC1918 复校 + 代理流约束）', () =>
     expect(hostOf('not a url')).toBeNull();
   });
 
-  it('AC-24 推给大屏的只能是公网 https 代理流，不得是局域网地址或上游源站', () => {
+  it('AC-24 / A-7.5：推给大屏的只能是公网 https 流，明文、局域网与内嵌凭据依旧一律拒绝', () => {
     const proxy = 'https://play.prismos.org/proxy/media/h1?exp=1&sig=abc';
     expect(requireCastableStreamUrl(proxy)).toBe(proxy);
     expect(() => requireCastableStreamUrl('http://play.prismos.org/proxy/media/h1')).toThrow();
     expect(() => requireCastableStreamUrl('https://192.168.31.5/proxy/media/h1')).toThrow();
-    expect(() => requireCastableStreamUrl('https://upstream-source.example.com/vod/x.m3u8')).toThrow();
-    expect(() => requireCastableStreamUrl('https://play.prismos.org/api/episodes/1/playback')).toThrow();
     expect(() => requireCastableStreamUrl('/proxy/media/h1')).toThrow();
-    // Java 侧同样只放过 https 公网代理流。
+    expect(() => requireCastableStreamUrl('https://user:pw@play.prismos.org/proxy/media/h1')).toThrow();
+    // A-7.5：直连上游之后清单里的地址就是要推给电视的，"必须是 /proxy/ 路径"那条机械证明随代理转发一起退休。
+    // 拒绝条件一条没少：协议仍是 https，主机仍不得是 RFC1918，仍不得内嵌凭据——原生侧同一口径再校一遍。
+    expect(requireCastableStreamUrl('https://cdn.example-invalid.test/vod/x.m3u8')).toContain('x.m3u8');
+    expect(isCastableStreamUrl('http://cdn.example-invalid.test/vod/x.m3u8')).toBe(false);
+    expect(isCastableStreamUrl('https://192.168.31.9/x.m3u8')).toBe(false);
+    expect(isCastableStreamUrl('not a url')).toBe(false);
+    // Java 侧同样只放过 https 公网流（投屏不经过手机取流，明文只可能出现在这条手机不碰的地址上）。
     expect(policy).toContain('投屏地址必须为公网 https 代理流');
   });
 });
@@ -201,14 +207,17 @@ describe('AC-24 组播锁的获取与释放必须成对（H2）', () => {
   });
 });
 
-describe('AC-24 明文策略未放宽（H1 签核的代价边界）', () => {
-  it('AC-24 清单与网络安全配置依旧全链路禁明文，没有为局域网开任何白名单', () => {
+describe('AC-24 / A-7 明文策略的代价边界（2026-10-04 集成裁定：全链路 TLS-only）', () => {
+  it('A-7.1 媒体直连不换取明文放宽：清单与 base-config 双侧 false，边缘域名钉扎依旧', () => {
+    // 集成审计实测入库上游媒体零 http:// 切片（m3u8 与 TS 均 https），A-7 直连不需要放宽明文。
+    // targetSdk 28+ 真正生效的是 network_security_config，所以两侧必须同口径，否则清单那一句就是假开关。
     expect(manifest).toContain('android:usesCleartextTraffic="false"');
+    expect(securityConfig).toMatch(/<base-config cleartextTrafficPermitted="false"/);
+    // 凭据面单独钉扎：JWT / X-Private-Session / /dl OTA 走不了明文，降级与门户改写都被 domain-config 挡住。
     expect(securityConfig).toContain('cleartextTrafficPermitted="false"');
-    expect(manifest).not.toContain('usesCleartextTraffic="true"');
-    // H3：Android 的 <domain> 不支持 CIDR，所以白名单路线必须真的没被采用。
-    expect(securityConfig).not.toMatch(/192\.168\.|10\.0\.0|cidr/i);
     expect(securityConfig).toContain('play.prismos.org');
+    // H3 依旧成立：Android 的 <domain> 不支持 CIDR，局域网白名单路线从未被采用（SOAP 走 H1 裸 socket）。
+    expect(securityConfig).not.toMatch(/192\.168\.|10\.0\.0|cidr/i);
   });
 
   it('AC-24 插件名字面量在 TS 与 Java 两侧逐字一致', () => {

@@ -1,127 +1,158 @@
 import { describe, expect, it } from 'vitest';
-import { buildClaims, getEdgeKeyMaterial, signJwt } from '../../edge/src/auth/jwt';
-import { hashPrivateSessionToken, issuePrivateSession, revokeSession } from '../../edge/src/auth/private-session';
-import { PRIVATE_SESSION_HEADER } from '../../edge/src/core/admission';
-import { CATALOG_DEFAULT_PAGE_SIZE, CATALOG_MAX_PAGE_SIZE, PRIVATE_SESSION_TTL_SECONDS } from '../../edge/src/core/constants';
 import { handleCatalog } from '../../edge/src/routes/catalog';
-import { seedContent, seedDevice, seedStandardChannels } from '../support/seed';
-import { seedCatalogChange, seedPublishedWork } from '../support/seed-catalog';
-import { createTestEnv, TEST_BASE_TIME_SECONDS, type PrismTestEnv } from '../support/test-env';
-import type { CatalogResponse, DeviceTier } from '../../edge/src/types/api';
+import { PRIVATE_SESSION_HEADER } from '../../edge/src/core/admission';
+import { CATALOG_PAGE_SIZE } from '../../edge/src/library/manifest';
+import { chunkKey } from '../../edge/src/library/paths';
+import { cardFixture, cardRun, clearCatalogManifest, forbidD1Reads, libraryEnv, putRawManifest, putRawShard, seedLibraryAssets, type LibraryEnv } from './library-fixtures';
+import type { CatalogResponse } from '../../edge/src/types/api';
 
-const LIVE_UNTIL = TEST_BASE_TIME_SECONDS + 86_400;
-const DEVICE_B = 'GY-BBBB0001';
-const DEVICE_Q = 'GY-QQQQ0001';
-const PRIVATE_WORK = 'd_priv_0001';
-const PRIVATE_GONE = 'd_priv_0002';
-const PRIVATE_TITLE = '夜间档案';
-const UPSTREAM_MARK = 'upstream.invalid';
+const REVISION = 12;
 const NOT_FOUND_BYTES = JSON.stringify({ success: false, code: 'NOT_FOUND', message: '内容不存在或已下架' });
+const UNAVAILABLE_BYTES = JSON.stringify({ success: false, code: 'SERVICE_UNAVAILABLE', message: '服务暂不可用，请稍后重试' });
+const UPSTREAM_MARK = 'upstream.invalid';
 
 function catalog(query: string, headers: Record<string, string> = {}): Request {
   return new Request(`http://localhost:8787/api/catalog${query}`, { headers });
-}
-
-async function bearer(env: PrismTestEnv, deviceId: string, tier: DeviceTier): Promise<string> {
-  const { signing } = await getEdgeKeyMaterial(env.JWT_PRIVATE_KEY_JWK);
-  const claims = buildClaims({ deviceId, tier, expiresAt: LIVE_UNTIL, issuedAt: TEST_BASE_TIME_SECONDS, jti: `j-${deviceId}` });
-  return `Bearer ${await signJwt(claims, signing, 'p2026')}`;
-}
-
-async function sessionFor(env: PrismTestEnv, deviceId: string): Promise<{ token: string; exp: number }> {
-  const issued = await issuePrivateSession(env.PRIVATE_SESSION_SECRET, deviceId, env.clock.nowSeconds(), PRIVATE_SESSION_TTL_SECONDS);
-  return { token: issued.token, exp: issued.payload.exp };
-}
-
-async function revokedSessionFor(env: PrismTestEnv, deviceId: string): Promise<string> {
-  const { token } = await sessionFor(env, deviceId);
-  await revokeSession(env.DB, await hashPrivateSessionToken(token), LIVE_UNTIL, env.clock.nowSeconds());
-  return token;
 }
 
 async function bodyOf(response: Response): Promise<CatalogResponse> {
   return JSON.parse(await response.clone().text()) as CatalogResponse;
 }
 
-async function grantedHeaders(env: PrismTestEnv): Promise<Record<string, string>> {
-  return { Authorization: await bearer(env, DEVICE_B, 'B'), [PRIVATE_SESSION_HEADER]: (await sessionFor(env, DEVICE_B)).token };
-}
-
-/** Three published drama cards, one movie, one delisted drama and two private works (one delisted). */
-async function fixture(): Promise<PrismTestEnv> {
-  const env = await createTestEnv();
-  seedStandardChannels(env.db);
-  seedDevice(env.db, { deviceId: DEVICE_B, tier: 'B', tierName: '高级全源卡', expiresAt: LIVE_UNTIL });
-  seedDevice(env.db, { deviceId: DEVICE_Q, tier: 'Q', tierName: '季度畅享卡', expiresAt: LIVE_UNTIL });
-  seedPublishedWork(env.db, { id: 'd_a', title: '逆风剧集', category: '逆袭', episodes: 2 });
-  seedPublishedWork(env.db, { id: 'd_b', title: '海岸线以西', category: '都市' });
-  seedPublishedWork(env.db, { id: 'd_c', title: '深夜便利店', category: '逆袭' });
-  seedPublishedWork(env.db, { id: 'm_a', title: '长夜将尽', channelId: 'movie', category: '悬疑' });
-  seedContent(env.db, { id: 'd_off', channelId: 'drama', title: '已下架剧集', enabled: 0 });
-  seedPublishedWork(env.db, { id: PRIVATE_WORK, title: PRIVATE_TITLE, channelId: 'private', isPrivate: 1, shareable: 0 });
-  seedContent(env.db, { id: PRIVATE_GONE, channelId: 'private', title: '熄灯的私档', isPrivate: 1, shareable: 0, enabled: 0 });
-  // Posters are stored as upstream URLs, which is exactly why they may never reach the wire.
-  env.db.execute('UPDATE content_items SET cover_url = ? WHERE id IN (?, ?)', `https://${UPSTREAM_MARK}/cover.jpg`, 'd_a', PRIVATE_WORK);
+/** Two drama cards and one movie, published as one §3.1 revision of shards plus the KV pointer. */
+async function fixture(): Promise<LibraryEnv> {
+  const env = await libraryEnv();
+  await seedLibraryAssets(env, {
+    revision: REVISION,
+    channels: {
+      drama: [
+        cardFixture('d_a', { title: '逆风剧集', category: '逆袭', coverVersion: 'v1', isAi: true, isHot: false }),
+        cardFixture('d_b', { title: '海岸线以西', category: '都市', firstPublishedAt: 1_790_000_001, hitsTotal: 12 })
+      ],
+      movie: [cardFixture('m_a', { channelId: 'movie', title: '长夜将尽', category: '悬疑', firstPublishedAt: 1_790_000_002, hitsTotal: 7 })]
+    }
+  });
   return env;
 }
 
-describe('GET /api/catalog — public paging, defaults and revision', () => {
-  it('page 1 reports the public revision, the defaults and the id-ordered cards', async () => {
+describe('GET /api/catalog — R2 shard passthrough', () => {
+  it('serves chunk-(page-1) byte-for-byte with the §3.1 paging fields (§C-3-2)', async () => {
     const env = await fixture();
     const response = await handleCatalog(catalog('?channel=drama'), env, env.clock);
     expect(response.status).toBe(200);
-    expect(response.headers.get('Cache-Control')).toBe('public, max-age=60');
-    expect(response.headers.get('Vary')).toBe(`Authorization, ${PRIVATE_SESSION_HEADER}`);
-    const body = await bodyOf(response);
-    expect([body.page, body.pageSize, body.total]).toEqual([1, CATALOG_DEFAULT_PAGE_SIZE, 3]);
-    expect(body.items.map((item) => item.id)).toEqual(['d_a', 'd_b', 'd_c']);
-    expect(body.revision).toBe(Number(env.db.selectOne('SELECT MAX(revision) AS r FROM public_catalog_changes')?.r));
-    expect(body.items.map((item) => item.channelId)).toEqual(['drama', 'drama', 'drama']);
-    expect(body.items.every((item) => item.isPrivate === false && item.enabled === true)).toBe(true);
+    const text = await response.text();
+    expect(text).toBe(env.r2.storedBytes(chunkKey(REVISION, 'drama', 0)));
+    const body = JSON.parse(text) as CatalogResponse;
+    expect([body.page, body.pageSize, body.total, body.revision]).toEqual([1, CATALOG_PAGE_SIZE, 2, REVISION]);
+    expect(body.items.map((item) => item.id)).toEqual(['d_a', 'd_b']);
+    expect(body.items.map((item) => item.channelId)).toEqual(['drama', 'drama']);
+    expect(body.items.every((item) => item.isPrivate === false)).toBe(true);
   });
 
-  it('derives coverUrl from the request origin and never ships the stored upstream poster', async () => {
+  it('ships the two §3.1 ranking fields so the device boards can sort without a query', async () => {
+    const env = await fixture();
+    const body = await bodyOf(await handleCatalog(catalog('?channel=drama'), env, env.clock));
+    expect(body.items[0]).toMatchObject({ firstPublishedAt: 1_790_000_000, hitsTotal: 9_867, isAi: true });
+    expect(body.items[1]).toMatchObject({ firstPublishedAt: 1_790_000_001, hitsTotal: 12 });
+  });
+
+  it('reads zero D1 rows on the browse path (AC-C3-1)', async () => {
+    const env = await fixture();
+    env.DB = forbidD1Reads();
+    const response = await handleCatalog(catalog('?channel=movie'), env, env.clock);
+    expect(response.status).toBe(200);
+    expect((await bodyOf(response)).items.map((item) => item.id)).toEqual(['m_a']);
+  });
+
+  it('writes the first screen to the Cache API at 300s and replays from it (§C-3-1, AC-C3-2)', async () => {
+    const env = await fixture();
+    const store = new Map<string, Response>();
+    let writes = 0;
+    (globalThis as Record<string, unknown>).caches = {
+      default: {
+        match: async (request: Request) => store.get(request.url),
+        put: async (request: Request, response: Response) => {
+          store.set(request.url, response.clone());
+          writes += 1;
+        }
+      }
+    };
+    try {
+      const first = await handleCatalog(catalog('?channel=drama'), env, env.clock);
+      expect(first.headers.get('Cache-Control')).toBe('public, max-age=300');
+      expect(writes).toBe(1);
+
+      // The replay must come from the cache namespace, so the bucket it was read from is taken away.
+      env.r2.objects.clear();
+      const replay = await handleCatalog(catalog('?channel=drama'), env, env.clock);
+      expect(replay.status).toBe(200);
+      expect((await bodyOf(replay)).items.map((item) => item.id)).toEqual(['d_a', 'd_b']);
+      expect(writes).toBe(1);
+
+      const later = await handleCatalog(catalog('?channel=drama&page=2'), env, env.clock);
+      expect(later.headers.get('Cache-Control')).toBe('public, max-age=60');
+      expect(writes).toBe(1);
+    } finally {
+      delete (globalThis as Record<string, unknown>).caches;
+    }
+  });
+
+  it('advertises the credential Vary so a shared cache can never merge a private answer', async () => {
+    const env = await fixture();
+    const response = await handleCatalog(catalog('?channel=drama'), env, env.clock);
+    expect(response.headers.get('Vary')).toBe(`Authorization, ${PRIVATE_SESSION_HEADER}`);
+  });
+
+  it('maps page N to chunk-(N-1) across the 60-card boundary without overlap', async () => {
+    const env = await fixture();
+    await seedLibraryAssets(env, { revision: 13, channels: { drama: cardRun('drama', 121) } });
+    const pages = await Promise.all(
+      [1, 2, 3].map(async (page) => bodyOf(await handleCatalog(catalog(`?channel=drama&page=${page}&revision=13`), env, env.clock)))
+    );
+    expect(pages.map((body) => body.items.length)).toEqual([60, 60, 1]);
+    expect(pages.map((body) => body.page)).toEqual([1, 2, 3]);
+    expect(pages.every((body) => body.total === 121 && body.revision === 13)).toBe(true);
+    const ids = pages.flatMap((body) => body.items.map((item) => item.id));
+    expect(new Set(ids).size).toBe(121);
+  });
+
+  it('serves an honest empty page past the declared inventory instead of a 404', async () => {
+    const env = await fixture();
+    const response = await handleCatalog(catalog('?channel=drama&page=9'), env, env.clock);
+    expect(response.status).toBe(200);
+    expect(await bodyOf(response)).toEqual({ items: [], page: 9, pageSize: CATALOG_PAGE_SIZE, total: 2, revision: REVISION });
+  });
+
+  it('narrows a page by category while leaving the shard\'s paging fields to the client', async () => {
+    const env = await fixture();
+    const hit = await bodyOf(await handleCatalog(catalog('?channel=drama&category=%E9%80%86%E8%A2%AD'), env, env.clock));
+    expect(hit.items.map((item) => item.id)).toEqual(['d_a']);
+    expect([hit.page, hit.pageSize, hit.total, hit.revision]).toEqual([1, CATALOG_PAGE_SIZE, 2, REVISION]);
+    const miss = await bodyOf(await handleCatalog(catalog('?channel=drama&category=nope'), env, env.clock));
+    expect([miss.items, miss.total]).toEqual([[], 2]);
+  });
+
+  it('honours the shard page size: a requested pageSize never re-splits a page (§3.1 pins 60)', async () => {
+    const env = await fixture();
+    for (const query of ['?channel=drama&pageSize=500', '?channel=drama&pageSize=abc', '?channel=drama&pageSize=0', '?channel=drama&pageSize=20']) {
+      expect((await bodyOf(await handleCatalog(catalog(query), env, env.clock))).pageSize).toBe(CATALOG_PAGE_SIZE);
+    }
+    expect((await bodyOf(await handleCatalog(catalog('?channel=drama&page=0'), env, env.clock))).page).toBe(1);
+    expect((await bodyOf(await handleCatalog(catalog('?channel=drama&page=-3'), env, env.clock))).page).toBe(1);
+  });
+
+  it('derives the page from the shard and never ships a stored upstream cover address', async () => {
     const env = await fixture();
     const text = await (await handleCatalog(catalog('?channel=drama'), env, env.clock)).text();
-    expect(text).toContain('http://localhost:8787/proxy/img/d_a');
+    expect(text).toContain('/proxy/img/d_a');
     expect(text).not.toContain(UPSTREAM_MARK);
   });
+});
 
-  it('clamps an oversized pageSize and falls back to the defaults on garbage', async () => {
-    const env = await fixture();
-    expect((await bodyOf(await handleCatalog(catalog('?channel=drama&pageSize=500'), env, env.clock))).pageSize).toBe(CATALOG_MAX_PAGE_SIZE);
-    expect(await bodyOf(await handleCatalog(catalog('?channel=drama&pageSize=abc&page=0'), env, env.clock))).toMatchObject({ page: 1, pageSize: CATALOG_DEFAULT_PAGE_SIZE });
-    expect(await bodyOf(await handleCatalog(catalog('?channel=drama&page=-3&pageSize=0'), env, env.clock))).toMatchObject({ page: 1, pageSize: CATALOG_DEFAULT_PAGE_SIZE });
-  });
-
-  it('walks pages without overlap and repeats the same total and revision', async () => {
-    const env = await fixture();
-    const first = await bodyOf(await handleCatalog(catalog('?channel=drama&pageSize=2'), env, env.clock));
-    const second = await bodyOf(await handleCatalog(catalog(`?channel=drama&pageSize=2&page=2&revision=${first.revision}`), env, env.clock));
-    expect(first.items.map((item) => item.id)).toEqual(['d_a', 'd_b']);
-    expect(second.items.map((item) => item.id)).toEqual(['d_c']);
-    expect([first.page, second.page, second.pageSize, second.total, second.revision]).toEqual([1, 2, 2, 3, first.revision]);
-  });
-
-  it('filters by category and honours the filter in total', async () => {
-    const env = await fixture();
-    const body = await bodyOf(await handleCatalog(catalog('?channel=drama&category=%E9%80%86%E8%A2%AD'), env, env.clock));
-    expect(body.items.map((item) => item.id)).toEqual(['d_a', 'd_c']);
-    expect(body.total).toBe(2);
-    expect(env.db.selectOne("SELECT COUNT(*) AS n FROM content_items WHERE channel_id = 'drama' AND category = '逆袭' AND enabled = 1")?.n).toBe(2);
-  });
-
-  it('never lists a delisted work and proves the row is still disabled in D1', async () => {
-    const env = await fixture();
-    const body = await bodyOf(await handleCatalog(catalog('?channel=drama&pageSize=50'), env, env.clock));
-    expect(body.items.some((item) => item.id === 'd_off')).toBe(false);
-    expect(body.total).toBe(3);
-    expect(env.db.selectOne('SELECT enabled FROM content_items WHERE id = ?', 'd_off')?.enabled).toBe(0);
-  });
-
+describe('GET /api/catalog — refusals that must never look like a page', () => {
   it('answers 404 without enumerating channels for a missing, empty, unknown or miscased channel', async () => {
     const env = await fixture();
-    for (const query of ['', '?channel=', '?channel=nonexistent', '?channel=PRIVATE', '?channel=private2']) {
+    for (const query of ['', '?channel=', '?channel=nonexistent', '?channel=DRAMA', '?channel=drama2']) {
       const response = await handleCatalog(catalog(query), env, env.clock);
       expect(response.status, query).toBe(404);
       expect(response.headers.get('Cache-Control')).toBe('no-store');
@@ -129,128 +160,86 @@ describe('GET /api/catalog — public paging, defaults and revision', () => {
     }
   });
 
-  it('409s a later page whose revision cursor no longer matches, carrying no catalogue data', async () => {
+  it('409s a page whose revision cursor no longer matches and carries no catalogue data', async () => {
     const env = await fixture();
-    const first = await bodyOf(await handleCatalog(catalog('?channel=drama&pageSize=2'), env, env.clock));
-    seedCatalogChange(env.db, 'd_b', 'delete', env.clock.nowSeconds());
-    const response = await handleCatalog(catalog(`?channel=drama&pageSize=2&page=2&revision=${first.revision}`), env, env.clock);
+    const response = await handleCatalog(catalog('?channel=drama&page=2&revision=11'), env, env.clock);
     expect(response.status).toBe(409);
     expect(response.headers.get('Cache-Control')).toBe('no-store');
     const text = await response.text();
-    expect(JSON.parse(text)).toMatchObject({ success: false, code: 'CATALOG_REVISION_CONFLICT' });
-    for (const leak of ['items', 'total', 'd_a', 'revision']) expect(text).not.toContain(leak);
+    for (const leak of ['items', 'total', 'd_a', 'revision']) expect(text, text).not.toContain(leak);
   });
 
   it('ignores an unparseable revision instead of 409ing, and accepts an exact one', async () => {
     const env = await fixture();
     expect((await handleCatalog(catalog('?channel=drama&revision=abc'), env, env.clock)).status).toBe(200);
-    expect((await handleCatalog(catalog('?channel=drama&revision=4'), env, env.clock)).status).toBe(200);
-    expect((await handleCatalog(catalog('?channel=drama&revision=3'), env, env.clock)).status).toBe(409);
+    expect((await handleCatalog(catalog('?channel=drama&revision=12'), env, env.clock)).status).toBe(200);
+    expect((await handleCatalog(catalog('?channel=drama&revision=11'), env, env.clock)).status).toBe(409);
   });
 
-  it('keeps private rows out of every public page and proves the D1 CHECK makes it structural', async () => {
+  it('503s a missing, unusable or contradictory manifest instead of inventing an empty catalogue', async () => {
     const env = await fixture();
-    for (const channel of ['drama', 'movie', 'anime', 'documentary']) {
-      const text = await (await handleCatalog(catalog(`?channel=${channel}&pageSize=50`), env, env.clock)).text();
-      expect(text, channel).not.toContain(PRIVATE_WORK);
-      expect(text, channel).not.toContain(PRIVATE_TITLE);
+    await clearCatalogManifest(env);
+    expect(await (await handleCatalog(catalog('?channel=drama'), env, env.clock)).text()).toBe(UNAVAILABLE_BYTES);
+
+    for (const bad of ['not json', '{"revision":12}', '{"revision":12,"pageSize":20,"channels":{"drama":{"chunks":1,"total":1}}}', '{"revision":12,"channels":"drama"}']) {
+      await putRawManifest(env, bad);
+      const response = await handleCatalog(catalog('?channel=drama'), env, env.clock);
+      expect(response.status, bad).toBe(503);
+      expect(response.headers.get('Cache-Control'), bad).toBe('no-store');
     }
-    // A private card inside a public channel is refused by the schema, not merely by the query.
-    expect(() =>
-      env.db.execute(
-        'INSERT INTO content_items (id, channel_id, title, category, is_private, enabled, shareable, created_at, updated_at) VALUES (?, ?, ?, ?, 1, 1, 0, ?, ?)',
-        'd_evil', 'drama', '伪装剧集', '逆袭', TEST_BASE_TIME_SECONDS, TEST_BASE_TIME_SECONDS
-      )
-    ).toThrow();
   });
-});
 
-interface Cell {
-  label: string;
-  granted: boolean;
-  headers(env: PrismTestEnv): Promise<Record<string, string>>;
-}
+  it('503s without the R2 binding, and when the manifest points at a shard that is not on the bucket', async () => {
+    const env = await fixture();
+    const unbound = { ...env, APK_BUCKET: undefined };
+    expect((await handleCatalog(catalog('?channel=drama'), unbound, env.clock)).status).toBe(503);
 
-const PRIVATE_MATRIX: Cell[] = [
-  { label: 'anonymous', granted: false, headers: async () => ({}) },
-  { label: 'live Q tier', granted: false, headers: (env) => bearer(env, DEVICE_Q, 'Q').then((Authorization) => ({ Authorization })) },
-  { label: 'live B tier without a session', granted: false, headers: (env) => bearer(env, DEVICE_B, 'B').then((Authorization) => ({ Authorization })) },
-  { label: 'live B tier with a live session', granted: true, headers: async (env) => ({ Authorization: await bearer(env, DEVICE_B, 'B'), [PRIVATE_SESSION_HEADER]: (await sessionFor(env, DEVICE_B)).token }) },
-  { label: 'live B tier with a revoked session', granted: false, headers: async (env) => ({ Authorization: await bearer(env, DEVICE_B, 'B'), [PRIVATE_SESSION_HEADER]: await revokedSessionFor(env, DEVICE_B) }) }
-];
+    env.r2.objects.delete(chunkKey(REVISION, 'drama', 0));
+    const response = await handleCatalog(catalog('?channel=drama'), env, env.clock);
+    expect(response.status).toBe(503);
+    expect(await response.text()).toBe(UNAVAILABLE_BYTES);
+  });
 
-describe('GET /api/catalog — channel=private double admission', () => {
-  for (const cell of PRIVATE_MATRIX) {
-    it(`${cell.label} → ${cell.granted ? 'cards with session-bound posters' : 'byte-identical 404'}`, async () => {
-      const env = await fixture();
-      const response = await handleCatalog(catalog('?channel=private&pageSize=50', await cell.headers(env)), env, env.clock);
-      expect(response.headers.get('Cache-Control')).toBe('no-store');
-      const text = await response.text();
-      if (!cell.granted) {
-        expect(response.status).toBe(404);
-        expect(text).toBe(NOT_FOUND_BYTES);
-        for (const secret of ['private', '个人探索', PRIVATE_TITLE, PRIVATE_WORK, PRIVATE_GONE, UPSTREAM_MARK]) {
-          expect(text.toLowerCase(), secret).not.toContain(secret.toLowerCase());
-        }
-        return;
-      }
-      expect(response.status).toBe(200);
-      const body = JSON.parse(text) as CatalogResponse;
-      expect(body.items.map((item) => item.id)).toEqual([PRIVATE_WORK]);
-      expect(body.total).toBe(1);
-      expect(body.items[0].coverUrl).toContain('/proxy/img/');
-      expect(body.items[0].coverUrl).toContain('sig=');
-      expect(text).not.toContain(UPSTREAM_MARK);
-      expect(env.db.selectOne('SELECT COUNT(*) AS n FROM public_catalog_changes WHERE content_id = ?', PRIVATE_WORK)?.n).toBe(0);
+  it('refuses a shard that carries a private card, so §2.2 isolation is enforced at the edge as well', async () => {
+    const env = await fixture();
+    putRawShard(env, REVISION, 'drama', 1, {
+      items: [{ id: 'd_secret', channelId: 'private', title: '私密剧', category: '探索', isPrivate: true }],
+      page: 1,
+      pageSize: CATALOG_PAGE_SIZE,
+      total: 1,
+      revision: REVISION
     });
-  }
-
-  it('a private card without a stored poster carries no coverUrl at all, signed or otherwise', async () => {
-    const env = await fixture();
-    seedContent(env.db, { id: 'd_priv_0003', channelId: 'private', title: '无海报私档', isPrivate: 1, shareable: 0, enabled: 1 });
-    const response = await handleCatalog(
-      catalog('?channel=private&pageSize=50', await grantedHeaders(env)),
-      env,
-      env.clock
-    );
-    const text = await response.text();
-    const body = JSON.parse(text) as CatalogResponse;
-    expect(body.items.map((item) => item.id)).toEqual([PRIVATE_WORK, 'd_priv_0003']);
-    expect(body.items[1].coverUrl).toBeUndefined();
-    expect(text).not.toContain('/proxy/img/d_priv_0003');
-    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    const text = await (await handleCatalog(catalog('?channel=drama'), env, env.clock)).text();
+    expect(text).toBe(UNAVAILABLE_BYTES);
+    expect(text).not.toContain('d_secret');
+    expect(text).not.toContain('私密剧');
   });
 
-  it('denied private and an unknown channel are indistinguishable down to the bytes', async () => {
+  it('refuses a shard whose cover is an upstream address instead of a same-origin handle', async () => {
     const env = await fixture();
-    const denied = await handleCatalog(catalog('?channel=private'), env, env.clock);
-    const unknown = await handleCatalog(catalog('?channel=no_such_channel'), env, env.clock);
-    expect(await denied.text()).toBe(await unknown.text());
-    expect(denied.headers.get('Content-Type')).toBe(unknown.headers.get('Content-Type'));
+    putRawShard(env, REVISION, 'drama', 1, {
+      items: [cardFixture('d_a', { coverUrl: `https://${UPSTREAM_MARK}/c.jpg` })],
+      page: 1,
+      pageSize: CATALOG_PAGE_SIZE,
+      total: 1,
+      revision: REVISION
+    });
+    const response = await handleCatalog(catalog('?channel=drama'), env, env.clock);
+    expect(response.status).toBe(503);
+    expect(await response.text()).not.toContain(UPSTREAM_MARK);
   });
 
-  it('a disabled private channel answers 404 even to a granted session', async () => {
+  it('refuses a shard whose revision disagrees with the manifest that pointed at it', async () => {
     const env = await fixture();
-    env.db.execute("UPDATE channels SET enabled = 0 WHERE id = 'private'");
-    const response = await handleCatalog(
-      catalog('?channel=private', { Authorization: await bearer(env, DEVICE_B, 'B'), [PRIVATE_SESSION_HEADER]: (await sessionFor(env, DEVICE_B)).token }),
-      env,
-      env.clock
-    );
-    expect(response.status).toBe(404);
-    expect(await response.text()).toBe(NOT_FOUND_BYTES);
+    putRawShard(env, REVISION, 'drama', 1, { items: [], page: 1, pageSize: CATALOG_PAGE_SIZE, total: 0, revision: 11 });
+    expect((await handleCatalog(catalog('?channel=drama'), env, env.clock)).status).toBe(503);
   });
 
-  it('the signed poster expires with the session, never beyond it', async () => {
+  it('refuses a shard whose card is missing the contract identity fields', async () => {
     const env = await fixture();
-    const session = await sessionFor(env, DEVICE_B);
-    const response = await handleCatalog(
-      catalog('?channel=private', { Authorization: await bearer(env, DEVICE_B, 'B'), [PRIVATE_SESSION_HEADER]: session.token }),
-      env,
-      env.clock
-    );
-    const cover = (await bodyOf(response)).items[0].coverUrl ?? '';
-    expect(Number(new URL(cover).searchParams.get('exp'))).toBeLessThanOrEqual(session.exp);
-    expect(Number(new URL(cover).searchParams.get('exp'))).toBeGreaterThan(env.clock.nowSeconds());
+    for (const card of [{ id: 'ok', channelId: 'drama', title: '', category: '都市' }, { id: 'bad/../id', channelId: 'drama', title: 'x', category: '都市' }, { id: 'ok2', channelId: 'drama', title: 'x', category: 1 }]) {
+      putRawShard(env, REVISION, 'drama', 1, { items: [card], page: 1, pageSize: CATALOG_PAGE_SIZE, total: 1, revision: REVISION });
+      expect((await handleCatalog(catalog('?channel=drama'), env, env.clock)).status, JSON.stringify(card)).toBe(503);
+    }
   });
 });

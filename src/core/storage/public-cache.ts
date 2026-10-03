@@ -202,6 +202,13 @@ export class PublicCache {
     return await this.persist(response.nextRevision, [...next.values()]);
   }
 
+  /** 整包导入（用于冷启动预置种子或单次大包快照同步）：避免数百次分页请求。 */
+  async importBundle(bundle: { revision: number; channels: ChannelsResponse; items: ContentItem[] }): Promise<CacheReceipt> {
+    if (bundle.revision < this.meta.revision) return { accepted: false, revision: this.meta.revision, reason: 'stale-revision', appliedEntries: 0 };
+    await this.putChannels(bundle.channels);
+    return await this.persist(bundle.revision, bundle.items.filter((item) => item.isPrivate !== true && item.channelId !== 'private'));
+  }
+
   private async persist(revision: number, items: ContentItem[]): Promise<CacheReceipt> {
     await this.writeSnapshot(revision, items);
     if (this.catalogLedger.overCapacity) await this.shrinkToCapacity();

@@ -14,6 +14,7 @@
  */
 import { App } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
+import { flushLineTelemetry } from './native/telemetry';
 import type { SyncHistoryRow, TitleDetail, UserSyncHistoryInput, UserSyncPreferences, UserSyncRequest, UserSyncStateResponse } from '../../edge/src/types/api';
 import type { FetchLike } from './api/client';
 import type { PreferenceStore } from './state/theme';
@@ -203,7 +204,7 @@ export function createUserSync(deps: UserSyncDeps): UserSyncService {
   }
 
   async function reportExit(report: ExitReport | null): Promise<boolean> {
-    if (disposed || token === null) return false;
+    void flushLineTelemetry(); if (disposed || token === null) return false; // A-8 搭车点：两个离场节点都汇聚到这里，队列空时它是纯 no-op
     const subject: WriteGuardSubject = { contentId: report?.contentId, isPrivate: report?.isPrivate, channelId: report?.channelId };
     try { assertWritable('user-sync.pending', subject); } catch (error) {
       // 闸门拒了就不落盘、更不发请求：私密断点的"零上报"到这一步才是可证的。
@@ -256,7 +257,7 @@ export function createUserSync(deps: UserSyncDeps): UserSyncService {
     return { merged, unresolved, rows: await listHistory() };
   }
 
-  /** 节点 ②：与 `back-button.ts` 同款守卫——非原生宿主根本不注册，Web 构建零请求、零异常。 */
+  /** 节点 ②：与 `back-button.ts` 同款守卫——非原生宿主根本不注册，Web 构建零请求、零异常。A-8 的 flush 不在这里重复挂点（两个节点都汇聚到 `reportExit`）。 */
   async function observeBackground(onBackground: () => void): Promise<() => void> {
     if ((deps.isNativePlatform ?? ((): boolean => Capacitor.isNativePlatform()))() !== true) return () => undefined;
     try {

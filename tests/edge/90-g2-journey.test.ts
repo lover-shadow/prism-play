@@ -3,9 +3,10 @@ import worker from '../../edge/src/index';
 import type { RequestContext } from '../../edge/src/types/env';
 import { handleProxy } from '../../edge/src/routes/proxy';
 import { publish, unpublish } from '../../edge/src/ingest/publish';
-import { insert, seedEpisodeSource, seedProvider, seedStandardChannels } from '../support/seed';
+import { seedEpisodeSource, seedProvider, seedStandardChannels } from '../support/seed';
 import { seedPublishedWork } from '../support/seed-catalog';
-import { createTestEnv, type PrismTestEnv } from '../support/test-env';
+import type { PrismTestEnv } from '../support/test-env';
+import { cardFixture, libraryEnv, seedLibraryAssets, type LibraryEnv } from './library-fixtures';
 
 const ORIGIN = 'http://localhost:8787';
 const UPSTREAM_HOST = 'cdn.invalid';
@@ -66,8 +67,8 @@ const fakeUpstream = {
   }
 };
 
-async function journeyFixture(): Promise<{ env: PrismTestEnv; contentId: string; episodeId: number }> {
-  const env = await createTestEnv();
+async function journeyFixture(): Promise<{ env: LibraryEnv; contentId: string; episodeId: number }> {
+  const env = await libraryEnv();
   seedStandardChannels(env.db);
   const { episodeIds } = seedPublishedWork(
     env.db,
@@ -78,6 +79,12 @@ async function journeyFixture(): Promise<{ env: PrismTestEnv; contentId: string;
   // lexical index and the change log are written by the code path Stage 2 actually runs.
   const revision = await publish(env.DB, 'd_journey', NOW);
   expect(revision).toBeGreaterThan(0);
+  // The browse path is CI-published R2 shards (§C-3), so the journey mirrors one publish: revision 1
+  // carries the work with no cover — the same shape the old D1 reader produced for this row.
+  await seedLibraryAssets({ kv: env.kv, r2: env.r2 }, {
+    revision: 1,
+    channels: { drama: [cardFixture('d_journey', { title: '战神之龙王归来', category: '逆袭', coverUrl: undefined, synopsis: undefined, episodeCount: 1 })] }
+  });
 
   seedProvider(env.db, { id: 'provider_s1', channelId: 'drama', upstreamUrl: `https://${UPSTREAM_HOST}/catalog` });
   const episodeId = episodeIds[0] as number;
@@ -181,27 +188,21 @@ describe('G2 journey: publish → catalogue → changes → search → playback 
 
   it('a takedown kills the share page, the search result and the stream in the same request', async () => {
     const { env, contentId, episodeId } = await journeyFixture();
-    insert(env.db, 'content_items', {
-      id: 'd_other',
-      channel_id: 'drama',
-      title: '另一部剧',
-      category: '都市',
-      is_private: 0,
-      shareable: 1,
-      enabled: 1,
-      created_at: NOW,
-      updated_at: NOW
-    });
 
     const shareUrl = `/s/${contentId}?ep=1`;
     expect((await get(env, shareUrl)).status).toBe(200);
 
     const revision = await unpublish(env.DB, contentId, NOW);
     expect(revision).toBeGreaterThan(0);
+    // The CI mirror of a takedown: revision 2 publishes the surviving card only.
+    await seedLibraryAssets({ kv: env.kv, r2: env.r2 }, {
+      revision: 2,
+      channels: { drama: [cardFixture('d_other', { title: '另一部剧', category: '都市', coverUrl: undefined, synopsis: undefined })] }
+    });
 
     // The change feed must now carry a delete tombstone with no metadata, and search must drop the row.
     const changes = await jsonOf<{ changes: { contentId: string; operation: string; item?: unknown }[] }>(
-      await get(env, '/api/catalog/changes?after=0'),
+      await get(env, '/api/catalog/changes?after=1'),
       'changes-after-takedown'
     );
     const tombstone = changes.changes.filter((entry) => entry.contentId === contentId).at(-1);
@@ -222,9 +223,11 @@ describe('G2 journey: publish → catalogue → changes → search → playback 
   });
 
   it('personal exploration never enters the public feed, index or share surface', async () => {
-    const env = await createTestEnv();
+    const env = await libraryEnv();
     seedStandardChannels(env.db);
     seedPublishedWork(env.db, { id: 'p_secret', channelId: 'private', title: '私密探索剧', isPrivate: 1, shareable: 0 });
+    // A publish that carries no public card at all: the private work has no shard to leak from.
+    await seedLibraryAssets({ kv: env.kv, r2: env.r2 }, { revision: 1, channels: {} });
 
     const changes = await jsonOf<{ changes: unknown[] }>(await get(env, '/api/catalog/changes?after=0'), 'changes-private');
     expect(changes.changes).toEqual([]);

@@ -12,13 +12,16 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+  DAY_BACKGROUND,
   ICON_SIZES,
   NIGHT_BACKGROUND,
   NIGHT_COLOR_TOKENS,
+  inlineDayPaletteStyles,
   inlineThemeStyles,
   lucideIcon,
   type NightColorToken
 } from '../../edge/src/html/theme';
+import { renderLandingPage } from '../../edge/src/html/landing-page';
 import { renderSharePage } from '../../edge/src/html/share-page';
 import { renderAndroidDownloadPage, renderUnsupportedNoticePage, renderWeChatGuidePage } from '../../edge/src/html/dl-page';
 
@@ -60,6 +63,13 @@ function darkColor(name: string): string {
   return (entry as TokenEntry).value;
 }
 
+/** The day palette is keyed by the same token list, so it can be reconciled the same way. */
+function lightColor(name: string): string {
+  const entry = TOKENS.themes.light.color[name];
+  expect(entry, `design-tokens.json declares no light colour "${name}"`).toBeDefined();
+  return (entry as TokenEntry).value;
+}
+
 function expectDeclaration(css: string, name: string, value: string): void {
   // Asserted against the real emitted CSS, so a rename or a reformatted value fails loudly.
   expect(css, `--${name} must equal ${value}`).toContain(`--${name}: ${value};`);
@@ -86,6 +96,18 @@ describe('night palette parity with design-tokens.json', () => {
     const names: readonly NightColorToken[] = NIGHT_COLOR_TOKENS;
     expect(names.length).toBeGreaterThan(0);
     for (const name of names) expectDeclaration(THEME_CSS, name, darkColor(name));
+  });
+
+  it('layers the ivory day palette behind prefers-color-scheme, token for token', () => {
+    const day = inlineDayPaletteStyles();
+    // The portal is the only dual-mode document, so the light block must stay a separate call...
+    expect(inlineThemeStyles()).not.toMatch(/prefers-color-scheme: light/);
+    // ...keyed by exactly the night list, and valued by exactly what the JSON declares.
+    const names: readonly NightColorToken[] = NIGHT_COLOR_TOKENS;
+    for (const name of names) expect(day, `--${name} must equal the light token`).toContain(`--${name}: ${lightColor(name)};`);
+    expect(DAY_BACKGROUND).toBe(lightColor('bg'));
+    expect(day).toContain('@media (prefers-color-scheme: light) {');
+    expect(day).not.toMatch(/linear-gradient|radial-gradient|conic-gradient/i);
   });
 
   it('carries the four identity tokens SPEC 8 pins and keeps the night theme the default', () => {
@@ -126,11 +148,39 @@ describe('night palette parity with design-tokens.json', () => {
     expectDeclaration(THEME_CSS, 'easing-standard', TOKENS.motion.easing.standard.value);
     expectDeclaration(THEME_CSS, 'touch-target', TOKENS.interaction.touchTargetMin.value);
     expectDeclaration(THEME_CSS, 'container-mobile', TOKENS.layout.containerMax.mobile.value);
+    // The portal's typography and grid tokens come from the same JSON: no free-styled dimension.
+    expectDeclaration(THEME_CSS, 'font-display', TOKENS.typography.fontFamily.display.value);
+    expectDeclaration(THEME_CSS, 'text-md', TOKENS.typography.fontSize.md.value);
+    expectDeclaration(THEME_CSS, 'text-xl', TOKENS.typography.fontSize.xl.value);
+    expectDeclaration(THEME_CSS, 'text-display', TOKENS.typography.fontSize.display.value);
+    expectDeclaration(THEME_CSS, 'leading-tight', TOKENS.typography.leading.tight.value);
+    expectDeclaration(THEME_CSS, 'space-1', TOKENS.spacing['1'].value);
+    expectDeclaration(THEME_CSS, 'space-5', TOKENS.spacing['5'].value);
+    expectDeclaration(THEME_CSS, 'space-8', TOKENS.spacing['8'].value);
+    expectDeclaration(THEME_CSS, 'space-10', TOKENS.spacing['10'].value);
+    expectDeclaration(THEME_CSS, 'space-12', TOKENS.spacing['12'].value);
+    expectDeclaration(THEME_CSS, 'radius-xs', TOKENS.radius.xs.value);
+    expectDeclaration(THEME_CSS, 'container-tablet', TOKENS.layout.containerMax.tablet.value);
+    expectDeclaration(THEME_CSS, 'container-desktop', TOKENS.layout.containerMax.desktop.value);
     // SPEC 10 accessibility floor: 44px targets and a visible focus ring, tokenised not magic-numbered.
     expect(TOKENS.interaction.touchTargetMin.value).toBe('44px');
     expect(THEME_CSS).toContain(':focus-visible');
     expect(THEME_CSS).toContain('@media (prefers-reduced-motion: reduce)');
     expectDeclaration(THEME_CSS, 'container-mobile', TOKENS.layout.containerMax.mobile.value);
+    // The portal's typography and grid tokens come from the same JSON: no free-styled dimension.
+    expectDeclaration(THEME_CSS, 'font-display', TOKENS.typography.fontFamily.display.value);
+    expectDeclaration(THEME_CSS, 'text-md', TOKENS.typography.fontSize.md.value);
+    expectDeclaration(THEME_CSS, 'text-xl', TOKENS.typography.fontSize.xl.value);
+    expectDeclaration(THEME_CSS, 'text-display', TOKENS.typography.fontSize.display.value);
+    expectDeclaration(THEME_CSS, 'leading-tight', TOKENS.typography.leading.tight.value);
+    expectDeclaration(THEME_CSS, 'space-1', TOKENS.spacing['1'].value);
+    expectDeclaration(THEME_CSS, 'space-5', TOKENS.spacing['5'].value);
+    expectDeclaration(THEME_CSS, 'space-8', TOKENS.spacing['8'].value);
+    expectDeclaration(THEME_CSS, 'space-10', TOKENS.spacing['10'].value);
+    expectDeclaration(THEME_CSS, 'space-12', TOKENS.spacing['12'].value);
+    expectDeclaration(THEME_CSS, 'radius-xs', TOKENS.radius.xs.value);
+    expectDeclaration(THEME_CSS, 'container-tablet', TOKENS.layout.containerMax.tablet.value);
+    expectDeclaration(THEME_CSS, 'container-desktop', TOKENS.layout.containerMax.desktop.value);
     expect(TOKENS.motion.reducedMotion.duration.value).toBe('0ms');
     expect(THEME_CSS).toContain('0ms');
   });
@@ -160,12 +210,20 @@ describe('P0 red lines, enforced from the test side', () => {
 
   it('P0-3: rendered documents add no colour of their own', () => {
     const pages = [
-      renderSharePage({ dramaId: 'work-1', title: '测试剧目', episodeNumber: 4, mediaUrl: '/proxy/media/e_4.a.b?exp=1&sig=2' }),
+      renderSharePage({ dramaId: 'work-1', title: '测试剧目', episodeNumber: 4 }),
       renderWeChatGuidePage({ ref: 'GY-1024ABCD' }),
       renderAndroidDownloadPage({}),
-      renderUnsupportedNoticePage({ audience: 'windows', origin: 'http://localhost:8787' })
+      renderUnsupportedNoticePage({ audience: 'windows', origin: 'http://localhost:8787' }),
+      renderLandingPage({ release: { versionName: '2.5.0', versionCode: 20500 }, apkSizeBytes: 40_000_000 }),
+      renderLandingPage({ release: null, apkSizeBytes: null })
     ];
-    const allowed = [...(THEME_CSS.match(HEX_LITERAL) ?? []), NIGHT_BACKGROUND];
+    // Anything outside the two declared palettes is a page inventing a colour of its own (P0-3).
+    const allowed = [
+      ...(THEME_CSS.match(HEX_LITERAL) ?? []),
+      ...(inlineDayPaletteStyles().match(HEX_LITERAL) ?? []),
+      NIGHT_BACKGROUND,
+      DAY_BACKGROUND
+    ];
     for (const page of pages) {
       const extra = (page.match(HEX_LITERAL) ?? []).filter((literal) => !allowed.includes(literal));
       expect(extra, 'a page introduced a colour outside the token block').toEqual([]);
@@ -186,10 +244,11 @@ describe('P0 red lines, enforced from the test side', () => {
     expect(TOKENS.meta.iconSystem.emojiForbidden).toBe(true);
     expect(TOKENS.meta.iconSystem.strokeWidth).toBe('2');
     const documents = [
-      renderSharePage({ dramaId: 'work-1', title: '测试剧目', episodeNumber: 1, mediaUrl: '/proxy/media/e_1.a.b?exp=1&sig=2' }),
+      renderSharePage({ dramaId: 'work-1', title: '测试剧目', episodeNumber: 1 }),
       renderWeChatGuidePage({}),
       renderAndroidDownloadPage({ ref: 'GY-1' }),
-      renderUnsupportedNoticePage({})
+      renderUnsupportedNoticePage({}),
+      renderLandingPage({ release: null, apkSizeBytes: null })
     ];
     for (const size of ICON_SIZES) {
       const svg = lucideIcon('play', size);

@@ -1,4 +1,5 @@
-/** Contract DTO layer projected from docs/03-contracts/openapi.yaml. */
+/** Contract DTO layer projected from docs/03-contracts/openapi.yaml. 剧集清单 DTO 因 §10 的 300 行红线拆入 manifest.ts，此处重导出保持公共导入面不变。 */
+export type { PlaybackLine, TitleManifest } from './manifest';
 export const CHANNEL_IDS = ['drama', 'movie', 'anime', 'documentary', 'private'] as const;
 export type ChannelId = (typeof CHANNEL_IDS)[number];
 
@@ -41,6 +42,9 @@ export interface ContentItem {
   isAi?: boolean;
   /** 全网热门标记：HotScore 排名前 15%（SPEC §3.2）；缺省即 0。 */
   isHot?: boolean;
+  /** 榜单本地排序键（SPEC-CLOUD-REFACTOR v2 §3.1）：仅目录分片携带，供端侧新剧榜/热播榜排序。 */
+  firstPublishedAt?: number;
+  hitsTotal?: number;
 }
 
 export interface EpisodeItem {

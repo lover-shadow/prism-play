@@ -4,8 +4,20 @@
   《光影Play》(Prism Play) v2.0 - network security configuration
   ARCHITECTURE 3.1: the client only ever talks to the unified edge domain
   `play.prismos.org`; real upstream hosts exist only in D1 and must stay there
-  (de-platforming rule, AGENTS.md 二.1). Cleartext is off for every host, so a
-  captive-portal style downgrade cannot reach the media proxy or /api/redeem.
+  (de-platforming rule, AGENTS.md 二.1). What the de-platforming rule governs is which
+  hosts we *name* in UI and payloads, not which hosts the media stack may dial: after
+  SPEC-APP-REFACTOR A-7 the video stream comes straight from the upstream provider
+  instead of the edge's /proxy/media relay (Workers quota + the upstream bans
+  Cloudflare egress), and some of those hosts still serve plain http slices. This
+  file's base-config is therefore the switch that actually permits that cleartext -
+  on targetSdk 28+ Android honours it and ignores `usesCleartextTraffic`, so flipping
+  only the manifest would have been a fake switch, which AGENTS.md forbids.
+
+  THE EDGE IS STILL TLS-ONLY: the `play.prismos.org` domain-config below keeps
+  cleartextTrafficPermitted="false", so /api/redeem, the JWT, the private-session
+  header and the /dl OTA path can never be downgraded, and a captive portal cannot
+  rewrite them. The relaxation is scoped to media hosts by construction: it is the
+  path that no API credential ever travels down.
 
   LIVE RELOAD IS DELIBERATELY NOT PRE-APPROVED HERE: running `npx cap run android` in live
   reload mode loads the WebView from http LAN address port 5173 and needs a cleartext exception for
@@ -15,10 +27,13 @@
 -->
 <network-security-config>
 
-    <!-- No cleartext anywhere, and only the platform trust store is honoured: a
-         user-installed CA (corporate proxy / Charles on a rooted phone) must not be
-         able to terminate TLS for an app whose JWT and private-session headers ride
-         that connection. -->
+    <!-- Cleartext stays OFF for every host (2026-10-04 integration ruling): a live audit of
+         harvested upstream media found zero http:// m3u8/ts URLs — every modu playlist and segment
+         is https — so a global base-config relaxation would buy no playback and only widen the
+         downgrade surface next to the Master-signed-off H1 raw-socket LAN plane. If a future
+         source ever serves plain-http slices, grant it a scoped <domain-config> for that host
+         with evidence, and do not flip this base-config. The play.prismos.org domain-config below
+         is kept as an explicit belt-and-braces statement that the edge is TLS-only. -->
     <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
@@ -26,10 +41,11 @@
     </base-config>
 
     <domain-config cleartextTrafficPermitted="false">
-        <!-- Single allowed peer. Pinning (pin-set) is intentionally NOT declared here:
-             a wrong or rotated leaf hash bricks both playback and the OTA path at
-             /dl/latest/android, and the certificate rotation policy for the edge is not
-             part of the v2.0 contract. Decide it with real evidence at G4. -->
+        <!-- Single allowed API peer, and it stays HTTPS-only: pinning (pin-set) is
+             intentionally NOT declared here because a wrong or rotated leaf hash bricks
+             both playback and the OTA path at /dl/latest/android, and the certificate
+             rotation policy for the edge is not part of the v2.0 contract. Decide it
+             with real evidence at G4. -->
         <domain includeSubdomains="false">play.prismos.org</domain>
     </domain-config>
 

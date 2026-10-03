@@ -9,8 +9,9 @@ describe('Stage 1 foundation: in-memory D1 stand-in', () => {
       .selectAll("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%'")
       .map((row) => String(row.name));
     const ftsShadow = tables.filter((name) => /_(config|content|data|docsize|idx)$/.test(name));
-    // 0001 的 20 张业务表 + 0002 增量迁移新增的 cloud_watch_history 与 cloud_user_profile。
-    expect(tables.length - ftsShadow.length).toBe(22);
+    // 0001 的 20 张业务表 + 0002 增量迁移新增的 cloud_watch_history 与 cloud_user_profile
+    // + 0003 瘦身的账本补充表 line_health_signals。
+    expect(tables.length - ftsShadow.length).toBe(23);
     expect(ftsShadow.length).toBe(5);
   });
 

@@ -227,7 +227,7 @@ describe('搜索视图：结果分组与合规边界（AC-16 / AC-02 / M-5）', 
     await submit(root);
     expect(stateOf(root, 'search-results')).toBe('empty');
     expect(root.dataset.state).toBe('empty');
-    expect(root.textContent).toContain('大视界');
+    expect(root.textContent).toContain('精选');
     (pick(root, 'browse-fallback') as HTMLElement).click();
     expect(calls.browse).toEqual([{}]);
     (root.querySelector('[data-el="zero-word"]') as HTMLElement).click();

@@ -19,6 +19,16 @@ import { APP_NAME } from './share-page';
 
 export const ANDROID_PACKAGE_PATH = '/dl/latest/android';
 export const DOWNLOAD_ENTRY_PATH = '/dl';
+/**
+ * The portal's hero render lives in the same `assets/` bucket prefix as the player engine and is
+ * served by `routes/assets.ts`. The names are declared here rather than there because `html/**` must
+ * not import from `routes/**`, and two documents (`/` and `/dl`) reference them.
+ */
+export const HERO_SHOT_DESKTOP_PATH = '/assets/hero-showcase-1280.webp';
+export const HERO_SHOT_PHONE_PATH = '/assets/hero-showcase-768.webp';
+/** Intrinsic box of both crops: the same picture scaled, so one pair of attributes serves both. */
+export const HERO_SHOT_WIDTH = 1280;
+export const HERO_SHOT_HEIGHT = 755;
 
 /** Which copy the visitor gets; decided by `routes/dl.ts` from the User-Agent only. */
 export type DownloadAudience = 'wechat' | 'android' | 'windows' | 'other';
@@ -38,7 +48,8 @@ const DL_STYLES = [
   '.steps li:last-child { border-bottom: 0; }',
   '.steps .icon { color: var(--accent); margin-top: 2px; }',
   '.address { display: block; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--fg-2); font-size: var(--text-sm); }',
-  '.cta-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }'
+  '.cta-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }',
+  '.shot { display: block; width: 100%; height: auto; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--player-bg); }'
 ].join('\n');
 
 function shell(rawTitle: string, body: string): string {
@@ -63,6 +74,19 @@ function attributionLine(ref: string | null): string {
   return ref === null
     ? '  <p class="meta">分享来源：直接访问</p>'
     : `  <p class="meta">分享来源标识 ${escapeText(ref)}（仅展示；跨安装无法凭链接归因，不结算邀请奖励）</p>`;
+}
+
+/**
+ * The single UI render used by `/` and `/dl`. Both crops are the same picture at two widths, so the
+ * browser picks by `srcset` and a phone on a metered connection never downloads the desktop copy.
+ */
+export function heroShotMarkup(className: string): string {
+  return [
+    `<img class="${className}" src="${HERO_SHOT_DESKTOP_PATH}"`,
+    `srcset="${HERO_SHOT_PHONE_PATH} 768w, ${HERO_SHOT_DESKTOP_PATH} 1280w"`,
+    `sizes="(min-width: 960px) 620px, 100vw" width="${HERO_SHOT_WIDTH}" height="${HERO_SHOT_HEIGHT}"`,
+    `decoding="async" alt="${escapeText(`${APP_NAME} 首页真实界面：三列海报流与 AI 精选推荐`)}">`
+  ].join(' ');
 }
 
 function steps(items: readonly { icon: LucideIconName; text: string }[]): string {
@@ -104,6 +128,7 @@ export function renderAndroidDownloadPage(input: DlPageInput = {}): string {
     '<section class="panel">',
     `  <h2>${escapeText(APP_NAME)} Android 安装包</h2>`,
     '  <p class="lede">点击下方按钮获取当前已发布并通过校验的安装包；下载入口由本站固定路径提供，不存在其他镜像地址。</p>',
+    `  ${heroShotMarkup('shot')}`,
     `  <p class="cta-row"><a id="prism-apk" class="cta" href="${ANDROID_PACKAGE_PATH}">${lucideIcon('download', 20)}下载 Android 安装包</a></p>`,
     '  <p class="meta">若系统提示禁止安装未知来源应用，请在设置中允许当前浏览器安装后重试。</p>',
     `  <p class="notice">${lucideIcon('info', 16)}本期仅提供 Android 版本；Windows、macOS 与桌面客户端尚未发布，本站不提供对应安装包。</p>`,

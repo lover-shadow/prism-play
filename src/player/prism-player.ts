@@ -1,25 +1,28 @@
 /**
- * 《光影Play》全手势播放器宿主（SPEC §4 / §7 / AC-06…AC-11 / AC-15）。
+ * 《光影Play》全手势播放器宿主（SPEC §4 / §7 / AC-06…AC-11 / AC-15 / A-7）。
  * ArtPlayer + hls.js carry the media plumbing; this file owns what ADR-002 says they do not provide: the
  * gesture HUDs (system volume and window brightness reach the OS through `PrismNativeBridge`, so only a
  * device can prove them), double-tap seek, sleep timer, touch lock, episode drawer, call interruption and
  * the honest error states. `PlayerEngine` is injectable — the default factory lazy-imports ArtPlayer and
  * hls.js, tests hand in a fake. SPEC §10 caps a file at 300 lines: overlays live in `hud.ts`, yield
- * policies in `sleep-timer.ts`, episode/断点 bookkeeping in `episode-drawer.ts`.
+ * policies in `sleep-timer.ts`, episode/断点 bookkeeping in `episode-drawer.ts`, 起播地址与切线编排（A-7）in `line-runner.ts`。
  */
 /// <reference types="vite/client" />
 import './player.css';
 import { createArtEngine } from './art-engine';
 import type { EngineFactory, MediaEvent, PlayerEngine } from './engine-seam';
 import { probeStageOrientation, type AspectOrientation } from './aspect';
-import type { EpisodeItem, PlaybackInfo, TitleDetail } from '../../edge/src/types/api';
+import type { EpisodeItem, PlaybackInfo, TitleDetail, TitleManifest } from '../../edge/src/types/api';
 import { ApiError } from '../core/api/client';
 import { icon } from '../components/icons';
 import type { PrismNativeBridge } from '../core/native/bridge';
 import { isPrivateSubject, type WatchHistoryRow } from '../core/storage/storage-domains';
 import { createEpisodeDrawer, createProgressReporter } from './episode-drawer';
 import type { ProgressContext } from './episode-drawer';
-import { attachGestureLayer, clamp, createGestureController } from './gestures';
+import { createLineFallback } from './line-fallback';
+import { createLineRunner, type Surface } from './line-runner';
+import { createTitleManifestStore, installTitleManifestStore } from './title-manifest';
+import { attachGestureLayer, createGestureController } from './gestures';
 import type { GestureBounds, GestureController, ValueChannel } from './gestures';
 import { createGestureHud, createPlayerChrome, createStateOverlay } from './hud';
 import type { PlayerErrorKind } from './hud';
@@ -27,7 +30,11 @@ import { createCallInterruptPolicy, createSleepTimer, SLEEP_CHOICES, SLEEP_LABEL
 import type { Clock, SleepMode } from './sleep-timer';
 
 export type PlayerPhase = 'idle' | 'loading' | 'ready' | 'ended' | 'error' | 'destroyed';
-export interface PlayerApi { playback(episodeId: number): Promise<PlaybackInfo>; title(titleId: string): Promise<TitleDetail> }
+/**
+ * `titleManifest` 缺席（旧云端、或调用方只给了代理链依赖）时整体退回 `playback` 那条路：
+ * 清单拿不到不是失败，绝不因为缺一张清单而白屏。
+ */
+export interface PlayerApi { playback(episodeId: number): Promise<PlaybackInfo>; title(titleId: string): Promise<TitleDetail>; titleManifest?(workId: string): Promise<TitleManifest> }
 export interface PlayerFailure { kind: PlayerErrorKind | 'media' | 'progress-blocked'; message: string }
 
 export interface PrismPlayerOptions {
@@ -51,6 +58,8 @@ export interface PlayerState {
   playing: boolean; locked: boolean; sleepMode: SleepMode; isPrivate: boolean;
   positionSeconds: number; durationSeconds: number; volume: number;
   systemVolumeSupported: boolean; brightnessSupported: boolean;
+  /** 直连时正在用的线路序号（0 起）；走代理回退链时为 null——界面与遥测都据此说真话。 */
+  lineIndex: number | null;
 }
 export interface PrismPlayer {
   load(episodeId: number, resumeSeconds?: number): Promise<void>;
@@ -75,6 +84,8 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
   let phase: PlayerPhase = 'idle', errorKind: PlayerErrorKind | null = null;
   let locked = false, destroyed = false, token = 0, backgroundAudioOn = false;
   let systemVolumeSupported = false, brightnessSupported = false;
+  /** 正在播的直连线路序号；null 即本轮走的是代理回退链（旧云端未切完时就是它）。 */
+  let direct: number | null = null;
   const listen = (target: EventTarget, type: string, handler: EventListener): void => { target.addEventListener(type, handler); bound.push([target, type, handler]); };
   const report = (failure: PlayerFailure): void => void options.onError?.(failure);
   const msg = (error: unknown): string => String(error instanceof Error ? error.message : error);
@@ -118,6 +129,10 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
     }
   });
   const sleep = createSleepTimer(clock, { getVolume: () => engine?.volume() ?? 1, setVolume: (v) => engine?.setVolume(v), stop: () => releaseHandle('sleep') });
+  /** 剧集清单（§2.2）的进程内唯一缓存：装成"当前生效的那只"，投屏侧因此不必再造一份 api 客户端重拉清单。 */
+  const manifests = installTitleManifestStore(createTitleManifestStore({ api }));
+  const lines = createLineFallback({ workId: () => options.titleId, privacy: () => ({ isPrivate: detail?.item.isPrivate, channelId: detail?.item.channelId }) });
+  const runner = createLineRunner({ api, manifests, lines, engine: () => engine, clock, workId: () => options.titleId, episodeNumber });
   const gesture: GestureController = createGestureController({
     clock, measure: options.measure ?? readSurface, isLocked: () => locked || destroyed,
     currentTime: () => engine?.currentTime() ?? 0, duration: () => engine?.duration() ?? 0,
@@ -176,7 +191,7 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
     if (event === 'play') { root.classList.add('is-playing'); interruption.noteUserAction(); void bridge.setKeepScreenOn(true); ensureBackgroundAudio(); }
     else if (event === 'pause') { root.classList.remove('is-playing'); if (!interruption.pausingForCall()) interruption.noteUserAction(); progress.emit(true); }
     else if (event === 'timeupdate') { if (progress.due()) progress.emit(); }
-    else if (event === 'error') { root.classList.remove('is-playing'); phase = 'error'; errorKind = 'retryable'; overlay.show('retryable'); report({ kind: 'media', message: '播放失败' }); }
+    else if (event === 'error') { if (direct !== null) { noteLineFailure(); return; } root.classList.remove('is-playing'); phase = 'error'; errorKind = 'retryable'; overlay.show('retryable'); report({ kind: 'media', message: '播放失败' }); }
     // 必须显式一条分支：`loadedmetadata` 落到末尾的 `else` 会被当成 `ended`，于是每集刚出画面就自动跳下一集。
     else if (event === 'loadedmetadata') options.onAspect?.(probeStageOrientation(chrome.stage));
     else void onEnded();
@@ -186,7 +201,10 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
     if (engine !== null) return engine;
     const theme = getComputedStyle(document.documentElement).getPropertyValue('--player-accent').trim();
     engine = await (options.engine ?? createArtEngine)({
-      container: chrome.stage, theme, poster: detail?.item.coverUrl, onError: (message) => report({ kind: 'media', message })
+      container: chrome.stage, theme, poster: detail?.item.coverUrl,
+      // 直连时内核的 fatal 回调就是切线触发器（hls 的错误未必同时落到 `video:error` 上）；
+      // 代理回退链维持原语义：只如实报一次"播放失败"，不去切一条并不存在的备用线路。
+      onError: (message) => { if (direct !== null) noteLineFailure(); else report({ kind: 'media', message }); }
     });
     const live = engine;
     mediaOff = (['ended', 'timeupdate', 'play', 'pause', 'error', 'loadedmetadata'] as const).map((event) => live.on(event, () => handleMediaEvent(event)));
@@ -201,6 +219,7 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
   function releaseHandle(reason: 'sleep' | 'destroy'): void {
     const live = engine;
     engine = null;
+    direct = null;
     for (const off of mediaOff.splice(0)) off();
     if (live !== null) { live.pause(); live.setSource(''); live.destroy(); }
     void bridge.setKeepScreenOn(false);
@@ -212,29 +231,45 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
     if (destroyed) return;
     token += 1;
     const mine = token;
-    episodeId = id; phase = 'loading'; errorKind = null;
+    episodeId = id; phase = 'loading'; errorKind = null; runner.reset();
     overlay.show('loading');
-    if (detail === null) {
-      detail = await api.title(options.titleId).catch((error: unknown) => (report({ kind: 'retryable', message: `选集清单加载失败：${msg(error)}` }), null));
-    }
+    // 预加载过的详情不打第二次网络；缺席时这一句也是私密 404 的落点（AC-02-6 同构渲染）。
+    if (detail === null) detail = await api.title(options.titleId).catch((error: unknown) => (report({ kind: 'retryable', message: `选集清单加载失败：${msg(error)}` }), null));
     const live = await ensureEngine();
-    try {
-      const info: PlaybackInfo = await api.playback(id);
-      if (mine !== token || destroyed) return;
-      overlay.hide();
-      live.setSource(info.url, info.mimeType);
-      const duration = info.durationSeconds ?? 0;
-      if (resumeSeconds > 0) live.setCurrentTime(duration > 0 ? clamp(resumeSeconds, 0, duration) : resumeSeconds);
-      phase = 'ready';
-      render();
-      if (drawer.isOpen()) drawer.refresh(id);
-      progress.emit(true);
-    } catch (error) {
-      // 私密与未知剧目共用同一份文案与同一套 UI，不泄露任何元信息（AC-02-6 / AC-15）。
-      if (mine !== token || destroyed) return;
-      phase = 'error'; errorKind = errorKindOf(error); overlay.show(errorKind);
-      report({ kind: errorKind, message: msg(error) });
+    const outcome = await runner.start(id, resumeSeconds);
+    if (mine !== token || destroyed) return;
+    if (outcome.kind === 'surface') applySurface(live, outcome.surface, outcome.resumeSeconds);
+    else if (outcome.kind === 'unavailable') refuseWith(outcome.error);
+  }
+
+  /** 界面只认一种起播形状：直连与代理回退的差别已在 `line-runner` 收敛，这里不再复制第二套口径。 */
+  function applySurface(live: PlayerEngine, surface: Surface, resumeSeconds: number): void {
+    direct = surface.lineIndex; errorKind = null; phase = 'ready';
+    live.setSource(surface.url, surface.mimeType);
+    if (resumeSeconds > 0) live.setCurrentTime(resumeSeconds);
+    overlay.hide(); render(); progress.emit(true);
+    if (drawer.isOpen() && episodeId !== null) drawer.refresh(episodeId);
+  }
+
+  // 私密与未知剧目共用同一份文案与同一套 UI，不泄露任何元信息（AC-02-6 / AC-15）。
+  function refuseWith(error: unknown): void {
+    phase = 'error'; errorKind = errorKindOf(error); overlay.show(errorKind);
+    report({ kind: errorKind, message: msg(error) });
+  }
+
+  /** A-7.4：直连失败即顺序切下一条（最多两条），全灭才落错误卡；每条失败都就地记进线路遥测（A-8）。 */
+  function noteLineFailure(): void {
+    if (engine === null) return;
+    const live = engine, outcome = runner.fail(live.currentTime());
+    if (outcome.kind === 'silent') return;
+    if (outcome.kind === 'surface') {
+      applySurface(live, outcome.surface, outcome.resumeSeconds);
+      report({ kind: 'media', message: `本条线路不可用，已切到第 ${(outcome.surface.lineIndex ?? 0) + 1} 条备用线路` });
+      return;
     }
+    direct = null; phase = 'error'; errorKind = 'retryable';
+    root.classList.remove('is-playing'); overlay.show('retryable');
+    report({ kind: 'media', message: '所有备用线路均不可用' });
   }
 
   const setLocked = (v: boolean): void => { locked = v; render(); }; const scheduleSleep = (m: SleepMode): void => { sleep.schedule(m); render(); };
@@ -249,7 +284,8 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
       phase, errorKind, episodeId, contentId: detail?.item.id ?? null, playing: engine?.playing() ?? false,
       locked, sleepMode: sleep.mode(), isPrivate: isPrivateSubject(detail?.item ?? {}),
       positionSeconds: engine?.currentTime() ?? 0, durationSeconds: engine?.duration() ?? 0,
-      volume: engine?.volume() ?? 1, systemVolumeSupported, brightnessSupported
+      volume: engine?.volume() ?? 1, systemVolumeSupported, brightnessSupported,
+      lineIndex: direct
     }),
     destroy: () => {
       if (destroyed) return;

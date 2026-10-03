@@ -126,6 +126,14 @@ components:
           type: boolean
           description: 全网热门标记：HotScore 排名前 15% 置 1（SPEC §3.2）。缺省即 false
           example: true
+        firstPublishedAt:
+          type: integer
+          description: 首次发布秒级时间戳；目录分片携带，供端侧【实时新剧榜】本地排序（SPEC-CLOUD-REFACTOR v2 §3.1）。不进 UI 文案
+          example: 1790000000
+        hitsTotal:
+          type: integer
+          description: 上游累计热度值；目录分片携带，供端侧【总热播榜】本地排序（SPEC-CLOUD-REFACTOR v2 §3.1）。不进 UI 文案
+          example: 9867
 
     EpisodeItem:
       type: object
@@ -154,6 +162,58 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/EpisodeItem"
+
+    EpisodeLine:
+      type: object
+      description: 一条可切换播放线路（SPEC-CLOUD-REFACTOR v2 §3.2）。真实上游播放地址只存在于剧集清单，不进目录分片；providerId 为抽象代号，严禁品牌名（AGENTS.md §二.1）。
+      required: [providerId, mediaUrl]
+      properties:
+        providerId:
+          type: string
+          example: provider_m1
+        mediaUrl:
+          type: string
+          description: 上游直连播放地址（实测 CORS `*` 开放，App 与分享页直连，不经云端转发）
+
+    TitleEpisodeEntry:
+      type: object
+      required: [episodeNumber, lines]
+      properties:
+        episodeNumber:
+          type: integer
+          example: 1
+        title:
+          type: string
+        durationSeconds:
+          type: integer
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/EpisodeLine"
+
+    TitleAssetResponse:
+      type: object
+      description: 剧集清单（R2 `titles/{workId}.json` 资产经路由返回）。向后兼容超集：旧端读 item+episodes，新端读 episodes[].lines 直连播放。
+      required: [workId, title, channelId, isPrivate, episodes, generatedAt, item]
+      properties:
+        workId:
+          type: string
+          example: d_8f31c2
+        title:
+          type: string
+        channelId:
+          type: string
+          example: drama
+        isPrivate:
+          type: boolean
+        episodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/TitleEpisodeEntry"
+        generatedAt:
+          type: integer
+        item:
+          $ref: "#/components/schemas/ContentItem"
 
     PlaybackInfo:
       type: object
@@ -872,7 +932,8 @@ paths:
       summary: 剧目详情与分集清单
       description: |
         未同时满足「有效 B/Y/S 授权」与「有效 X-Private-Session」的私密剧目，以及不存在或未上架的剧目，一律返回 404，不区分差异以防探测；
-        公开剧目或已获双重准入的私密剧目正常返回 200 及完整 TitleDetail。
+        公开剧目或已获双重准入的私密剧目正常返回 200 及完整剧集清单（TitleAssetResponse，含向后兼容的 item 投影）。
+        数据源为 CI 发布的 R2 剧集清单资产（SPEC-CLOUD-REFACTOR v2 §3.2），公开清单可 CDN 缓存，私密清单恒 no-store。
       security:
         - BearerAuth: []
         - BearerAuth: []
@@ -886,11 +947,11 @@ paths:
             type: string
       responses:
         "200":
-          description: 成功返回剧目详情
+          description: 成功返回剧目详情与剧集清单
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/TitleDetail"
+                $ref: "#/components/schemas/TitleAssetResponse"
         "404":
           description: 剧目不存在、已下架，或属于未获当次授权的私密内容
 
@@ -1113,6 +1174,63 @@ paths:
               schema:
                 $ref: "#/components/schemas/VersionResponse"
 
+  /api/telemetry/lines:
+    post:
+      tags: [系统]
+      summary: 线路健康信号批量上报（分布式感知，集中式决策）
+      description: |
+        免鉴权；客户端在离场节点批量静默上报播放失败信号（SPEC-CLOUD-REFACTOR v2 §C-4）。
+        单请求最多 20 条，超出静默截断；信号只含抽象 provider 代号与集号，严禁上游域名或剧目元信息。
+        失败即弃：客户端不重试、不入盘。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              maxItems: 20
+              items:
+                type: object
+                required: [providerId, workId, lineIndex, failureCode, deviceHash]
+                properties:
+                  providerId:
+                    type: string
+                    example: provider_m1
+                  workId:
+                    type: string
+                    example: d_8f31c2
+                  lineIndex:
+                    type: integer
+                    minimum: 0
+                  failureCode:
+                    type: string
+                    enum: [timeout, http_error, decode_error]
+                  deviceHash:
+                    type: string
+                    description: 设备指纹单向哈希，仅用于去重，不可反推设备
+                  reportedAt:
+                    type: integer
+      responses:
+        "200":
+          description: 已接收（accepted 为实际落库条数）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, accepted]
+                properties:
+                  success:
+                    type: boolean
+                  accepted:
+                    type: integer
+        "400":
+          description: 请求体不符合契约（VALIDATION_ERROR）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /s/{drama_id}:
     get:
       tags: [分享与下载]
@@ -1189,6 +1307,43 @@ paths:
           description: 仅 android，302 重定向至 Cloudflare R2 已发布的最新 APK；pc 等值返回 404
         "404":
           description: 未支持的平台或尚无可用安装包
+
+  /:
+    get:
+      tags: [分享与下载]
+      summary: 官方门户（产品介绍与 APK 下载）
+      description: 服务端渲染的极简静态 HTML（SPEC-STATIC-PAGES v2 §S-4），零站点脚本、零上游域名；吸收设备矩阵信息密度，日夜双模。
+      responses:
+        "200":
+          description: 官方门户页
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /assets/{file}:
+    get:
+      tags: [分享与下载]
+      summary: 自托管播放器组件（分享页唯一站点级 JS 资产）
+      description: |
+        当前唯一合法成员为 hls.min.js（含内容哈希变体），源自 npm hls.js 构建产物、由 CI 上传 R2；
+        immutable 长缓存。禁止第三方 CDN（微信内可达性），禁止任意文件枚举——非白名单名一律 404。
+      parameters:
+        - name: file
+          in: path
+          required: true
+          schema:
+            type: string
+            example: hls.min.js
+      responses:
+        "200":
+          description: JavaScript 资产
+          content:
+            application/javascript:
+              schema:
+                type: string
+        "404":
+          description: 非白名单资产名
 
   /proxy/{kind}/{handle}:
     get:

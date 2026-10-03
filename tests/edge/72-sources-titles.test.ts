@@ -4,18 +4,20 @@ import { hashPrivateSessionToken, issuePrivateSession, revokeSession } from '../
 import { PRIVATE_SESSION_HEADER } from '../../edge/src/core/admission';
 import { PRIVATE_SESSION_TTL_SECONDS } from '../../edge/src/core/constants';
 import { handleSources } from '../../edge/src/routes/sources';
-import { handleTitles } from '../../edge/src/routes/titles';
-import { seedDevice, seedEpisode, seedProvider, seedStandardChannels } from '../support/seed';
-import { seedPublishedWork } from '../support/seed-catalog';
+import { seedDevice, seedProvider, seedStandardChannels } from '../support/seed';
 import { createTestEnv, TEST_BASE_TIME_SECONDS, type PrismTestEnv } from '../support/test-env';
-import type { DeviceTier, SourcesResponse, TitleDetail } from '../../edge/src/types/api';
+import type { DeviceTier, SourcesResponse } from '../../edge/src/types/api';
+
+/**
+ * The detail route moved to R2 episode manifests with the cloud refactor, and its coverage now lives in
+ * `76-titles-assets.test.ts`; this file keeps the `/api/sources` contract, which still reads the provider
+ * probe table (its own switch is a later stage, see SPEC-CLOUD-REFACTOR C-5 open items).
+ */
 
 const NOW = TEST_BASE_TIME_SECONDS;
 const LIVE_UNTIL = NOW + 86_400;
 const DEVICE_B = 'GY-BBBB0001';
 const DEVICE_Q = 'GY-QQQQ0001';
-const PRIVATE_WORK = 'd_priv_0001';
-const PRIVATE_TITLE = '夜间档案';
 const UPSTREAM_MARK = 'upstream.invalid';
 const NOT_FOUND_BYTES = JSON.stringify({ success: false, code: 'NOT_FOUND', message: '内容不存在或已下架' });
 
@@ -54,11 +56,7 @@ function sourcesRequest(query: string, headers: Record<string, string> = {}): Re
   return new Request(`http://localhost:8787/api/sources${query}`, { headers });
 }
 
-function titlesRequest(id: string, headers: Record<string, string> = {}): Request {
-  return new Request(`http://localhost:8787/api/titles/${id}`, { headers });
-}
-
-/** Four probe states plus one private provider; three published works, one delisted, one private. */
+/** Four probe states plus one private provider; every stored upstream address must stay off the wire. */
 async function fixture(): Promise<PrismTestEnv> {
   const env = await createTestEnv();
   seedStandardChannels(env.db);
@@ -69,17 +67,6 @@ async function fixture(): Promise<PrismTestEnv> {
   seedProvider(env.db, { id: 'provider_s3', channelId: 'drama', name: '光影备用专线C', latencyMs: 30, healthy: 0 }, NOW + 200);
   seedProvider(env.db, { id: 'provider_m1', channelId: 'movie', name: '院线专线D', latencyMs: 68 }, NOW + 400);
   seedProvider(env.db, { id: 'provider_p1', channelId: 'private', name: '私域专线E', latencyMs: 15 }, NOW + 500);
-  seedPublishedWork(env.db, { id: 'd_a', title: '逆风剧集', episodes: 3 });
-  seedPublishedWork(env.db, { id: 'm_a', title: '长夜将尽', channelId: 'movie' });
-  seedPublishedWork(env.db, { id: 'd_off', title: '已下架剧集' });
-  env.db.execute('UPDATE content_items SET enabled = 0 WHERE id = ?', 'd_off');
-  seedPublishedWork(env.db, { id: 'd_eps', title: '乱序剧集', episodes: 0 });
-  seedEpisode(env.db, 'd_eps', 3, 100, NOW);
-  seedEpisode(env.db, 'd_eps', 1, 100, NOW);
-  seedEpisode(env.db, 'd_eps', 10, 100, NOW);
-  seedEpisode(env.db, 'd_eps', 2, 100, NOW);
-  seedPublishedWork(env.db, { id: PRIVATE_WORK, title: PRIVATE_TITLE, channelId: 'private', isPrivate: 1, shareable: 0 });
-  env.db.execute('UPDATE content_items SET cover_url = ? WHERE id IN (?, ?)', `https://${UPSTREAM_MARK}/c.jpg`, 'd_a', PRIVATE_WORK);
   return env;
 }
 
@@ -176,84 +163,5 @@ describe('GET /api/sources — probe ordering and de-platforming', () => {
     const response = await handleSources(sourcesRequest('?channel=private', await grantedHeaders(env)), env, env.clock);
     expect(response.status).toBe(404);
     expect(await response.text()).toBe(NOT_FOUND_BYTES);
-  });
-});
-
-describe('GET /api/titles/{titleId} — detail, episodes and anti-probing 404', () => {
-  it('returns the item with a same-origin poster and its episodes in numeric order', async () => {
-    const env = await fixture();
-    const response = await handleTitles(titlesRequest('d_eps'), env, env.clock);
-    expect(response.headers.get('Cache-Control')).toBe('public, max-age=60');
-    const body = await jsonOf<TitleDetail>(response);
-    expect(body.item.id).toBe('d_eps');
-    expect(body.episodes.map((episode) => episode.episodeNumber)).toEqual([1, 2, 3, 10]);
-    expect(body.episodes.map((episode) => episode.episodeId)).toEqual(
-      env.db.selectAll('SELECT id FROM content_episodes WHERE content_id = ? ORDER BY episode_number ASC', 'd_eps').map((row) => Number(row.id))
-    );
-    expect(body.episodes[0]).toMatchObject({ episodeNumber: 1, title: '第 1 集', durationSeconds: 100 });
-    expect(body.item.episodeCount).toBe(4);
-  });
-
-  it('maps a public detail through the proxy and never through the stored upstream poster', async () => {
-    const env = await fixture();
-    const response = await handleTitles(titlesRequest('d_a'), env, env.clock);
-    const body = await jsonOf<TitleDetail>(response);
-    expect(body.item).toMatchObject({ id: 'd_a', channelId: 'drama', title: '逆风剧集', isPrivate: false, enabled: true, shareable: true });
-    expect(body.item.coverUrl).toBe('http://localhost:8787/proxy/img/d_a');
-    expect(await response.text()).not.toContain(UPSTREAM_MARK);
-  });
-
-  it('answers unknown, delisted and unadmitted private ids with one byte-identical 404', async () => {
-    const env = await fixture();
-    const probes: Array<[string, Record<string, string>]> = [
-      ['d_unknown', {}],
-      ['d_off', {}],
-      [PRIVATE_WORK, {}],
-      [PRIVATE_WORK, { Authorization: await bearer(env, DEVICE_Q, 'Q') }],
-      [PRIVATE_WORK, { Authorization: await bearer(env, DEVICE_B, 'B') }]
-    ];
-    const seen = new Set<string>();
-    for (const [id, headers] of probes) {
-      const response = await handleTitles(titlesRequest(id, headers), env, env.clock);
-      expect(response.status, id).toBe(404);
-      expect(response.headers.get('Cache-Control')).toBe('no-store');
-      const text = await response.text();
-      expect(text.toLowerCase()).not.toContain('private');
-      expect(text).not.toContain(PRIVATE_TITLE);
-      seen.add(text);
-    }
-    expect([...seen]).toEqual([NOT_FOUND_BYTES]);
-  });
-
-  it('serves an admitted private detail no-store with a poster bound to the session', async () => {
-    const env = await fixture();
-    const session = await sessionFor(env, DEVICE_B);
-    const response = await handleTitles(titlesRequest(PRIVATE_WORK, { Authorization: await bearer(env, DEVICE_B, 'B'), [PRIVATE_SESSION_HEADER]: session.token }), env, env.clock);
-    expect(response.status).toBe(200);
-    expect(response.headers.get('Cache-Control')).toBe('no-store');
-    const text = await response.text();
-    const body = JSON.parse(text) as TitleDetail;
-    expect(body.item).toMatchObject({ id: PRIVATE_WORK, channelId: 'private', title: PRIVATE_TITLE, isPrivate: true, shareable: false });
-    expect(body.item.coverUrl).toContain('/proxy/img/');
-    expect(Number(new URL(body.item.coverUrl ?? '').searchParams.get('exp'))).toBeLessThanOrEqual(session.exp);
-    expect(text).not.toContain(UPSTREAM_MARK);
-  });
-
-  it('a delisted private work stays invisible even to a granted session', async () => {
-    const env = await fixture();
-    env.db.execute('UPDATE content_items SET enabled = 0 WHERE id = ?', PRIVATE_WORK);
-    const response = await handleTitles(titlesRequest(PRIVATE_WORK, await grantedHeaders(env)), env, env.clock);
-    expect(response.status).toBe(404);
-    expect(await response.text()).toBe(NOT_FOUND_BYTES);
-  });
-
-  it('refuses an empty or traversal-shaped path and tolerates one trailing slash', async () => {
-    const env = await fixture();
-    for (const id of ['', 'd%2Fa', 'd_a/related', '../api/catalog']) {
-      const response = await handleTitles(titlesRequest(id), env, env.clock);
-      expect(response.status, id).toBe(404);
-      expect(await response.text()).toBe(NOT_FOUND_BYTES);
-    }
-    expect((await handleTitles(titlesRequest('d_a/'), env, env.clock)).status).toBe(200);
   });
 });

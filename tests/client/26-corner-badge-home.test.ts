@@ -127,16 +127,21 @@ describe('AC-28 首页挂接：网格顺序来自 weave()，分页语义一字�
   const flush = async (): Promise<void> => { await new Promise((resolve) => setTimeout(resolve, 0)); };
 
   const seen: string[] = [];
+  /** 第二页可延迟落地：A-4 之后续载由尾部哨兵静默发起，用例必须能"先看不追加、再放行"。 */
   function viewHarness(page1: ContentItem[], page2: ContentItem[] = []) {
     const root = document.createElement('div');
     document.body.appendChild(root);
     const rows: WatchHistoryRow[] = [];
+    let release: ((response: Response) => void) | null = null;
     const view = createHomeView({
       api: new PrismApiClient({
         baseUrl: '',
         fetchImpl: async (input: string) => {
           seen.push(input);
           if (input.startsWith('/api/channels')) return reply({ version: 1, channels: [channel('drama', '短剧精选', 1, ['都市', '战神'])] });
+          if (input.includes('page=2') && page2.length > 0) {
+            return new Promise<Response>((resolve) => { release = resolve; });
+          }
           return reply(input.includes('page=2') ? catalog(page2, 2, page1.length + page2.length) : catalog(page1, 1, page1.length + page2.length));
         }
       }),
@@ -147,7 +152,7 @@ describe('AC-28 首页挂接：网格顺序来自 weave()，分页语义一字�
       onResume: () => undefined,
       historyPreview: async () => rows
     });
-    return { root, view };
+    return { root, view, settleSecond: () => release?.(reply(catalog(page2, 2, page1.length + page2.length))) };
   }
 
   it('AI 精品被提到块首槽并带【AI精品】角标，普通条目按判定留白', async () => {
@@ -155,7 +160,7 @@ describe('AC-28 首页挂接：网格顺序来自 weave()，分页语义一字�
     const { root, view } = viewHarness([entry('x-1'), entry('x-2', { isAi: true, category: '战神' })]);
     await view.mount();
 
-    expect(seen).toContain('/api/catalog?channel=drama&page=1&pageSize=24');
+    expect(seen).toContain('/api/catalog?channel=drama&page=1&pageSize=60');
     expect(Array.from(root.querySelectorAll('.poster-card')).map((card) => (card as HTMLElement).dataset.contentId))
       .toEqual(['x-2', 'x-1']);
     expect(root.querySelector('[data-content-id="x-2"] .poster-corner-badge--ai')?.textContent).toBe('AI精品');
@@ -163,21 +168,23 @@ describe('AC-28 首页挂接：网格顺序来自 weave()，分页语义一字�
     view.destroy();
   });
 
-  it('加载更多只追加：已渲染的首块顺序保持不变', async () => {
+  it('A-4 静默续载只追加：已渲染的首块顺序保持不变', async () => {
     seen.length = 0;
     const first = Array.from({ length: 20 }, (_, index) => entry(`b-${String(index + 1).padStart(2, '0')}`, { isAi: index < 3 }));
-    const { root, view } = viewHarness(first, [entry('b-21'), entry('b-22', { isAi: true })]);
+    const { root, view, settleSecond } = viewHarness(first, [entry('b-21'), entry('b-22', { isAi: true })]);
     await view.mount();
 
+    // 首屏 20 部落定后，尾部哨兵自己去接第二页——没有任何手动按钮参与。
     const before = Array.from(root.querySelectorAll('.poster-card')).map((card) => (card as HTMLElement).dataset.contentId);
     expect(before).toHaveLength(20);
-    (root.querySelector('.home-more-btn') as HTMLButtonElement).click();
-    await flush();
+    expect(seen).toContain('/api/catalog?channel=drama&page=2&pageSize=60&revision=99');
 
+    settleSecond();
+    await flush();
     const after = Array.from(root.querySelectorAll('.poster-card')).map((card) => (card as HTMLElement).dataset.contentId);
     expect(after).toHaveLength(22);
-    expect(after.slice(0, 20)).toEqual(before.slice(0, 20));
-    expect(seen).toContain('/api/catalog?channel=drama&page=2&pageSize=24&revision=99');
+    // 追加只发生在尾部：首块的相对顺序一位都不许变（混排重排的是展示层，不是分页语义）。
+    expect(after.slice(0, 20)).toEqual(before);
     view.destroy();
   });
 

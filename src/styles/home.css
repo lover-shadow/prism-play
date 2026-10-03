@@ -42,9 +42,14 @@
 .capsule.is-active { color: var(--accent-on); font-weight: 600; }
 .capsule.is-active .capsule-pill { background: var(--accent); border-color: var(--accent); }
 
-/* —— 首页核心搜索栏（原续播位置替换，48px 全宽极简，点击直达搜索） —— */
-.home-search-bar { margin: 6px 12px 4px; height: 48px; border-radius: var(--radius-lg); background: var(--surface); border: 1px solid var(--border-subtle); display: flex; align-items: center; padding: 0 var(--space-4); cursor: pointer; transition: all var(--duration-fast) var(--ease-standard); box-shadow: var(--elev-card); }
-.home-search-bar:hover { border-color: var(--accent); transform: translateY(-1px); }
+/* —— 首页核心搜索条（点击打开全屏搜索 Overlay；A-2 下隐上现） ——
+ * `position: sticky` 落位在吸顶子导航下沿（`--home-subnav-height`）：只有本身被钉住，"下滑收起 / 上滑复现"
+ * 才是真发生的事，而不是把一个已在视口外的普通流内元素再平移一次（虚假动效）。
+ * 收起用 transform + opacity 并交给 --duration-normal/--ease-standard（A-2 明令不引入新动效 token）；
+ * 层级低于 .home-sticky(z-index 20)，因此它是"滑到子导航背后"消失的，不留空洞。 */
+.home-search-bar { position: sticky; top: var(--home-subnav-height); z-index: 19; margin: 6px 12px 4px; height: 48px; border-radius: var(--radius-lg); background: var(--surface); border: 1px solid var(--border-subtle); display: flex; align-items: center; padding: 0 var(--space-4); cursor: pointer; box-shadow: var(--elev-card); transition: transform var(--duration-normal) var(--ease-standard), opacity var(--duration-normal) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard); }
+.home-search-bar:hover { border-color: var(--accent); }
+.home-search-bar--hidden { transform: translateY(-100%); opacity: 0; pointer-events: none; }
 .home-search-lead { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: var(--text-sm); width: 100%; }
 .home-search-lead svg { color: var(--accent); flex: none; }
 
@@ -97,7 +102,13 @@
 .poster-tag { font-size: var(--text-2xs); color: var(--meta); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 简介只在图文列表流出现：紧凑与书架模式塞不下，也不该塞。 */
 .poster-synopsis { display: none; font-size: var(--text-xs); color: var(--fg-2); line-height: var(--leading-snug); }
-.poster-share { position: absolute; top: var(--space-1); right: var(--space-1); z-index: 2; border: 1px solid var(--border); background: var(--surface-raised); color: var(--accent); }
+
+/* —— A-4 紧凑 3 列的卡片内收：内边距与行距同步收紧，把宽度还给海报本身 ——
+ * 只在 compact-3 覆盖，不动 `.poster-*` 基类：四模共用一套卡片内部样式是既有约定（AC-04）。
+ * A-5：海报卡右上角分享浮层（旧 `.poster-share`）已物理拔除，卡片只留"进详情"一个动作，
+ * 保留左上角微光角标与右下角集数徽章的黄金对角（两条规则都在上面，未移动）。 */
+.grid-posters-compact-3 .poster-open { padding: var(--space-1); gap: 2px; }
+.grid-posters-compact-3 .poster-body { gap: 1px; }
 
 /* 模式三·书架：书脊式微缩，只留海报与一行微字。 */
 .grid-posters-bookshelf-4 .poster-title { font-size: var(--text-2xs); }
@@ -110,14 +121,41 @@
 .grid-posters-list-1 .poster-title { font-size: var(--text-base); }
 .grid-posters-list-1 .poster-synopsis { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
-/* —— 骨架屏与加载更多 —— */
+/* —— 骨架屏与 A-4 无感加载（旧【加载更多】按钮已物理拔除，翻页由哨兵触发） —— */
 .poster-card--skeleton { pointer-events: none; }
 .poster-card--skeleton .poster-media,
 .poster-line { background: var(--surface-subtle); border-radius: var(--radius-xs); }
 .poster-line { height: var(--space-3); }
 .poster-line--short { width: 50%; }
-.home-more-host { display: flex; justify-content: center; padding: var(--space-3); }
-.home-more-btn { padding: 0 var(--space-4); border: 1px solid var(--border-strong); border-radius: var(--radius-pill); background: var(--surface); color: var(--fg-2); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+/* 哨兵必须是"有高度的真实节点"才能被 IntersectionObserver 命中：1px 足够，且永不参与布局视觉。 */
+.home-more-host { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); padding: var(--space-2) var(--space-3); }
+.home-sentinel { width: 100%; height: 1px; border: 0; background: transparent; }
+.home-more-status { display: none; align-items: center; gap: var(--space-2); font-size: var(--text-xs); color: var(--muted); font-variant-numeric: tabular-nums; }
+.home-more-status[data-active='1'] { display: inline-flex; }
+.home-more-status::before { content: ''; width: 12px; height: 12px; border: 2px solid var(--border-strong); border-top-color: var(--accent); border-radius: var(--radius-pill); animation: home-sentinel-spin var(--duration-slow) linear infinite; }
+@keyframes home-sentinel-spin { to { transform: rotate(360deg); } }
+
+/* —— A-3 全屏搜索 Overlay：盖住顶栏与底栏的固定层（搜索不是 Tab，故不进 tabbar） ——
+ * 层内只有一块可滚主体（.app-overlay-body 承载搜索视图），榜单/历史/结果都在其中纵向铺开。 */
+.app-overlay { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; background: var(--bg); padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+.app-overlay-bar { display: flex; align-items: center; gap: var(--space-2); min-height: var(--header-height); padding: 0 var(--space-3); border-bottom: 1px solid var(--border); background: var(--surface); }
+.app-overlay-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-width: none; }
+.app-overlay-body::-webkit-scrollbar { display: none; }
+
+/* —— A-3 榜单专区：三 Tab 本地切换 + 名次行（零网络请求，读的是本机公开快照） —— */
+.rank-tabs { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.rank-tab { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-pill); background: var(--surface-warm); color: var(--muted); font-size: var(--text-xs); font-weight: 600; cursor: pointer; transition: all var(--duration-fast) var(--ease-standard); }
+.rank-tab[aria-selected='true'] { background: var(--accent); border-color: var(--accent); color: var(--accent-on); }
+.rank-list { display: flex; flex-direction: column; gap: var(--space-1); }
+/* 名次行只用 flex：列数的真相源归 design-tokens.css，home.css 不声明 grid-template-columns（AC-04）。 */
+.rank-row { display: flex; align-items: center; gap: var(--space-3); width: 100%; min-height: 44px; padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-sm); background: var(--surface-warm); color: var(--fg); text-align: left; cursor: pointer; transition: background var(--duration-fast) var(--ease-standard); }
+.rank-row:hover { background: var(--surface-raised); }
+.rank-index { flex: 0 0 auto; min-width: var(--space-4); text-align: right; font-size: var(--text-sm); font-weight: 800; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* 前 3 名琥珀金高亮：颜色只走 --accent，深浅双模同值可用（P0-3）。 */
+.rank-row--top .rank-index { color: var(--accent); }
+.rank-title { flex: 1 1 auto; min-width: 0; font-size: var(--text-sm); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rank-meta { flex: 0 0 auto; font-size: var(--text-2xs); color: var(--meta); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rank-heat { flex: 0 0 auto; padding: 0 var(--space-2); border-radius: var(--radius-pill); background: var(--accent-subtle); color: var(--accent); font-size: var(--text-2xs); font-weight: 700; font-variant-numeric: tabular-nums; }
 
 /* —— 五态视图（SPEC §7：loading / empty / error / offline / disabled）—— */
 .state-view { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); margin: var(--space-2) var(--space-3); padding: var(--space-8) var(--space-4); border: 1px dashed var(--border); border-radius: var(--radius-md); background: var(--surface); text-align: center; }

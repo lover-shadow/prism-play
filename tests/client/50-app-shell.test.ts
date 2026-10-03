@@ -77,11 +77,13 @@ const tabButton = (bar: HTMLElement, tab: string): HTMLButtonElement =>
 describe('app-shell Tab 拓扑', () => {
   beforeEach(() => { document.body.replaceChildren(); });
 
-  it('主 Tab 是四枚闭集，中文口径逐字固定，且不存在任何私密入口', () => {
+  it('主 Tab 是三枚闭集（A-3 底栏 3 键），中文口径逐字固定，且不存在任何私密入口', () => {
     const h = harness();
-    expect(SHELL_TABS.map((tab) => tab.id)).toEqual(['home', 'history', 'search', 'settings']);
-    expect(SHELL_TABS.map((tab) => tab.label)).toEqual(['大视界', '追剧', '搜索', '设置']);
-    expect(h.tabbar.querySelectorAll('.app-tab')).toHaveLength(4);
+    expect(SHELL_TABS.map((tab) => tab.id)).toEqual(['home', 'history', 'settings']);
+    expect(SHELL_TABS.map((tab) => tab.label)).toEqual(['精选', '追剧', '我的']);
+    expect(h.tabbar.querySelectorAll('.app-tab')).toHaveLength(3);
+    // 搜索已从 Tab 降级为全屏 Overlay（A-3）：底栏里不该再有任何"搜索"字样与搜索节点。
+    expect(h.tabbar.textContent).not.toMatch(/搜索/);
     expect(h.tabbar.textContent).not.toMatch(/探索|私密|成人/);
   });
 
@@ -122,19 +124,19 @@ describe('app-shell Tab 拓扑', () => {
     await h.shell.activate('home');
     expect(h.main.querySelectorAll('.app-view')).toHaveLength(1);
     expect(h.shell.rootOf('home')?.hidden).toBe(false);
-    await h.shell.activate('search');
+    await h.shell.activate('settings');
     expect(h.shell.rootOf('home')?.hidden).toBe(true);
-    expect(h.shell.rootOf('search')?.hidden).toBe(false);
-    expect(tabButton(h.tabbar, 'search').getAttribute('aria-current')).toBe('true');
+    expect(h.shell.rootOf('settings')?.hidden).toBe(false);
+    expect(tabButton(h.tabbar, 'settings').getAttribute('aria-current')).toBe('true');
     expect(tabButton(h.tabbar, 'home').getAttribute('aria-current')).toBe('false');
-    expect(tabButton(h.tabbar, 'search').classList.contains('is-active')).toBe(true);
+    expect(tabButton(h.tabbar, 'settings').classList.contains('is-active')).toBe(true);
   });
 
   it('头部呈现品牌与当前 Tab 名，未登录/未初始化时也不留空', async () => {
     const h = harness({ initialTab: 'settings' });
     await h.shell.activate('settings');
     expect(h.header.textContent).toContain('光影Play');
-    expect(h.header.textContent).toContain('设置');
+    expect(h.header.textContent).toContain('我的');
   });
 
   it('点击 Tab 按钮即切换（真实事件路径，不只调 API）', async () => {
@@ -147,10 +149,10 @@ describe('app-shell Tab 拓扑', () => {
 
   it('并发切换被串行化：最终只有最后一个 Tab 可见', async () => {
     const h = harness();
-    await Promise.all([h.shell.activate('home'), h.shell.activate('search')]);
+    await Promise.all([h.shell.activate('home'), h.shell.activate('settings')]);
     expect(h.shell.rootOf('home')?.hidden).toBe(true);
-    expect(h.shell.rootOf('search')?.hidden).toBe(false);
-    expect(h.tabs).toEqual(['home', 'search']);
+    expect(h.shell.rootOf('settings')?.hidden).toBe(false);
+    expect(h.tabs).toEqual(['home', 'settings']);
   });
 
   it('视图构造失败不楔死外壳：后续 Tab 仍可进入', async () => {
@@ -169,7 +171,8 @@ describe('app-shell Tab 拓扑', () => {
     expect(h.destroys).toEqual(['home', 'history']);
     expect(h.main.querySelectorAll('.app-view')).toHaveLength(0);
     expect(h.tabbar.querySelectorAll('.app-tab')).toHaveLength(0);
-    await h.shell.activate('search');
+    // 搜索已降级为全屏 Overlay（A-3）：即便旧调用方仍传 'search'，运行期的 Tab 闭集也让它一个宿主都不产生。
+    await h.shell.activate('search' as ShellTab);
     expect(h.tabs).toEqual(['home', 'history']);
   });
 
@@ -196,7 +199,7 @@ describe('app-shell 顶栏与底栏骨架（AC-25 / AC-27）', () => {
     kept.type = 'button';
     kept.setAttribute('aria-pressed', 'true');
     accessory.replaceChildren(kept);
-    for (const tab of ['search', 'settings', 'history', 'home'] as ShellTab[]) await h.shell.activate(tab);
+    for (const tab of ['settings', 'history', 'home', 'settings'] as ShellTab[]) await h.shell.activate(tab);
     expect(accessory.children).toHaveLength(1);
     expect(accessory.firstElementChild).toBe(kept);
     expect(kept.getAttribute('aria-pressed')).toBe('true');
@@ -211,12 +214,12 @@ describe('app-shell 顶栏与底栏骨架（AC-25 / AC-27）', () => {
     expect(h.shell.headerAccessory().hidden).toBe(false);
   });
 
-  it('AC-27 四颗 Tab 住在 .app-tabbar-inner 内容区，栏本体仍可铺满背景', async () => {
+  it('AC-27 三颗 Tab 等宽住在 .app-tabbar-inner 内容区，栏本体仍可铺满背景', async () => {
     const h = harness();
     const inner = h.tabbar.querySelector('.app-tabbar-inner');
     expect(inner).not.toBeNull();
     // 限宽只能挂在内层：按钮直接挂在 .app-tabbar 上时，缩宽度会把底色与分隔线一起缩掉。
-    expect(inner?.children).toHaveLength(4);
+    expect(inner?.children).toHaveLength(3);
     expect(h.tabbar.children).toHaveLength(1);
   });
 });

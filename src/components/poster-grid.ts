@@ -4,6 +4,10 @@
  * 排版切换只有一条实现路径：**重新套用 design-tokens.css 里那个模式的 `.grid-posters-*` 类**。
  * JS 绝不算列数、绝不写 `grid-template-columns`，否则 768/1024 断点的列数倍增就会变成两套真相。
  * 模式来源是注入的 `mode()` getter，因此用户偏好（经 `onPosterModeChange` 持久化）天然穿越重绘。
+ *
+ * A-5 定案：卡片右上角的分享浮层按钮已**物理拔除**——用户没看内容就不会分享，挂在海报上还高发误触。
+ * 分享 100% 收敛在播放器内（`player-detail.ts` / `episode-drawer.ts`）。`isShareable()` 与
+ * `sharePathFor()` 作为分享出站口径继续导出，播放器与边缘 `/s/:id` 仍按同一判据走。
  */
 
 import type { ContentItem } from '../../edge/src/types/api';
@@ -45,12 +49,15 @@ export function episodeBadgeText(episodeCount: number): string {
   return episodeCount === 1 ? '全 1 集' : `共 ${episodeCount} 集`;
 }
 
-/** AC-02-6：私密内容永不出现分享入口；未显式 `shareable: true` 也不出现。缺席，而非禁用。 */
+/**
+ * AC-02-6：私密内容永不出现分享入口；未显式 `shareable: true` 也不出现。缺席，而非禁用。
+ * A-5 后海报卡不再消费它——判据唯一留给播放器内的分享键与边缘 `/s/:id` 出站。
+ */
 export function isShareable(item: ContentItem): boolean {
   return item.shareable === true && item.isPrivate !== true;
 }
 
-/** 边缘直出的分享落地页（SPEC §5）；没有注入分享落点时的唯一默认动作。 */
+/** 边缘直出的分享落地页路径（SPEC §5）：分享出站口径的唯一生成点，私密与未知剧目在服务端一律 404。 */
 export function sharePathFor(contentId: string): string {
   return `/s/${encodeURIComponent(contentId)}`;
 }
@@ -59,11 +66,6 @@ export interface PosterGridDeps {
   root: HTMLElement;
   mode: () => PosterMode;
   onOpenTitle: (contentId: string) => void;
-  /**
-   * 分享的真实落点由组合根决定（复制链接 / 原生分享面板）。缺省时退化为打开边缘 `/s/:id`，
-   * 这样按钮永远对应真实机制，不做只长样子的假控件。
-   */
-  onShare?: (item: ContentItem) => void;
 }
 
 export interface PosterGrid {
@@ -171,20 +173,6 @@ export function createPosterGrid(deps: PosterGridDeps): PosterGrid {
     return box;
   }
 
-  function shareButton(item: ContentItem): HTMLButtonElement {
-    const button = element('button', 'poster-share touch-target');
-    button.type = 'button';
-    button.dataset.contentId = item.id;
-    button.setAttribute('aria-label', `分享《${item.title}》`);
-    button.appendChild(iconNode('share', { size: 16 }));
-    button.addEventListener('click', (event) => {
-      event.stopPropagation();
-      if (deps.onShare !== undefined) deps.onShare(item);
-      else window.open(sharePathFor(item.id), '_blank', 'noopener,noreferrer');
-    });
-    return button;
-  }
-
   function card(item: ContentItem, badge?: BadgeKind): HTMLElement {
     const box = element('article', 'poster-card');
     box.dataset.contentId = item.id;
@@ -206,7 +194,7 @@ export function createPosterGrid(deps: PosterGridDeps): PosterGrid {
     open.addEventListener('click', () => deps.onOpenTitle(item.id));
     box.appendChild(open);
 
-    if (isShareable(item)) box.appendChild(shareButton(item));
+    // A-5：此处不再挂任何分享入口（私密与公开都不挂）——卡片只保留"进详情"这一个动作。
     return box;
   }
 

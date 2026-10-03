@@ -1,15 +1,41 @@
 name: Content Daily Sync & Incremental Catalog Ingest
 
+# SPEC-CLOUD-REFACTOR v2 §C-2 / §C-2b：采集产物改走 R2 静态资产 + KV 清单，停止灌 D1 内容表。
+# 旧的 `wrangler d1 execute … --file=scripts/sync-incremental.sql`（写 content_items /
+# content_episodes / episode_sources / public_search_fts / public_catalog_changes）已整段删除——
+# 那正是 D1 行读熔断与 503 的源头。这里只保留 §C-2.5 允许的归一映射小表写入，且默认不开启（见该步骤注释）。
+
 on:
   schedule:
     # 每日 UTC 19:00（北京时间次日凌晨 03:00）自动执行
     - cron: '0 19 * * *'
   workflow_dispatch:
+    inputs:
+      hours:
+        description: '增量窗口小时数（上游 h= 参数）'
+        required: false
+        default: '24'
+      dry_run:
+        description: '只生成本地资产、不触碰云端（true/false）'
+        required: false
+        default: 'false'
+
+concurrency:
+  group: content-sync
+  cancel-in-progress: false
 
 jobs:
   sync-catalog:
-    name: Sync Fresh Titles to Cloudflare D1
+    name: Build Catalog Assets → R2 + KV
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      HOURS: ${{ github.event.inputs.hours || '24' }}
+      DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+      WRITE_ALIAS_MAP: ${{ vars.WRITE_ALIAS_MAP || 'false' }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
     steps:
       - name: 检出代码仓库
@@ -22,21 +48,68 @@ jobs:
           cache: 'npm'
 
       - name: 安装项目依赖
-        run: |
-          npm ci
+        run: npm ci
 
-      - name: 执行每日增量抓取与数据清洗
-        run: |
-          node edge/scripts/sync-incremental.mjs
+      - name: 预装 wrangler（避免每次数百次上传各自走一次 npx 解析）
+        if: env.DRY_RUN == 'false'
+        run: npm install -g wrangler && echo "PRISM_WRANGLER_BIN=wrangler" >> "$GITHUB_ENV"
 
-      - name: 部署增量数据至 Cloudflare D1 生产库
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # SPEC-STATIC-PAGES v2 §S-3：分享页唯一站点级 JS 资产自托管，Worker 从 R2 键 assets/hls.min.js
+      # 读取（immutable 长缓存）。版本跟随 package.json 的 hls.js 锁定；日更重复上传幂等。
+      - name: 上传自托管播放器组件（hls.min.js → R2）
+        if: env.DRY_RUN == 'false'
         run: |
-          if [ -s edge/scripts/sync-incremental.sql ]; then
-            echo "开始执行增量 SQL 导入..."
-            cd edge && npx wrangler d1 execute prism-play-db --remote --file=scripts/sync-incremental.sql
+          ${PRISM_WRANGLER_BIN:-npx wrangler} r2 object put prism-play-releases/assets/hls.min.js \
+            --file=node_modules/hls.js/dist/hls.min.js \
+            --content-type=application/javascript
+
+      # SPEC-STATIC-PAGES v2 §S-3/S-4：门户与下载页的真机渲染图同样同源自托管（微信 WebView 里
+      # 第三方图床不可靠）。两张裁切随仓库版本走，重复上传幂等，改图 = 改仓库里的 webp 再跑一轮。
+      - name: 上传门户渲染图（hero-showcase-*.webp → R2）
+        if: env.DRY_RUN == 'false'
+        run: |
+          for w in 768 1280; do
+            ${PRISM_WRANGLER_BIN:-npx wrangler} r2 object put prism-play-releases/assets/hero-showcase-$w.webp \
+              --file=edge/assets/hero-showcase-$w.webp \
+              --content-type=image/webp
+          done
+
+      - name: 私密管线（§2.2 双条款 → private/ 前缀，独立 KV 清单）
+        run: |
+          ARGS="--network --hours=$HOURS"
+          if [ "$DRY_RUN" = "true" ]; then ARGS="$ARGS --dry-run"; else ARGS="$ARGS --publish --pull"; fi
+          node edge/scripts/sync-private.mjs $ARGS
+
+      - name: 公开增量管线（h=24 → 60 条/片分片 + 剧集清单 → R2/KV）
+        run: |
+          ARGS="--network --hours=$HOURS"
+          if [ "$DRY_RUN" = "true" ]; then ARGS="$ARGS --dry-run"; else ARGS="$ARGS --publish --pull"; fi
+          node edge/scripts/sync-incremental.mjs $ARGS
+
+      - name: 公开前缀扫描判据（AC-C2b-1：公开资产 is_private 计数必须为 0）
+        if: always() && env.DRY_RUN != 'true'
+        run: node edge/scripts/sync-private.mjs --verify --assets-dir edge/cache/library/assets
+
+      # §C-2.5 的归一映射仍走 D1，但默认关闭：trusted_work_mappings.content_id 以 FK 指向
+      # content_items，而该表按 §C-5 即将停用、现存行是旧 `channel_modu_id` 口径；
+      # 在新 `channel_m_id` 归一口径定稿前打开会因 FK 失败打断整条日更链路。
+      # 打开方式：仓库 Variables 设 WRITE_ALIAS_MAP=true（并先确认 FK 口径）。
+      - name: 归一映射写入 D1（仅小表，可选开关）
+        if: env.WRITE_ALIAS_MAP == 'true'
+        run: |
+          if [ -s edge/cache/library/sync-incremental.sql ]; then
+            cd edge && npx wrangler d1 execute prism-play-db --remote --file=cache/library/sync-incremental.sql
           else
-            echo "未生成有效增量 SQL，跳过入库。"
+            echo "未生成归一映射 SQL，跳过。"
           fi
+
+      - name: 上传本轮清单与日志证据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: catalog-manifest-${{ github.run_number }}
+          path: |
+            edge/cache/library/catalog-manifest.json
+            edge/cache/library/private-manifest.json
+          if-no-files-found: ignore
+          retention-days: 14

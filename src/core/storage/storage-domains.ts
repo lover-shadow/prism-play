@@ -11,7 +11,8 @@ export type StorageDomain = (typeof STORAGE_DOMAINS)[number];
 
 /** SPEC §6.1 quotas and eviction ceilings — one number each, no per-module copies. */
 export const HISTORY_MAX_ROWS = 500;
-export const POSTER_CACHE_LIMIT_BYTES = 128 * 1024 * 1024;
+/** SPEC-APP-REFACTOR §A-9 定案：海报配额由 128 MiB 提到 512 MiB（3 列紧凑大图才养得起整屏首屏不重抓）。 */
+export const POSTER_CACHE_LIMIT_BYTES = 512 * 1024 * 1024;
 export const CATALOG_CACHE_LIMIT_BYTES = 20 * 1024 * 1024;
 
 /** Backup policy per domain, mirrored by `dataExtractionRules.xml` on the native side. */

@@ -9,7 +9,8 @@ import { handleChannels } from './routes/channels';
 import { handleCatalog } from './routes/catalog';
 import { handleChanges } from './routes/changes';
 import { handleDevicePing } from './routes/device-ping';
-import { handleApkDownload, handleDownloadLanding } from './routes/dl';
+import { handleApkDownload, handleDownloadLanding, handlePortal } from './routes/dl';
+import { handleStaticAsset } from './routes/assets';
 import { handleMonetizationConfig } from './routes/monetization';
 import { handlePlayback } from './routes/playback';
 import { handlePrivateSessions } from './routes/private-sessions';
@@ -22,6 +23,7 @@ import { handleShare } from './routes/share';
 import { handleSources } from './routes/sources';
 import { handleTitles } from './routes/titles';
 import { handleUserSync } from './routes/user-sync';
+import { handleTelemetryLines } from './routes/telemetry';
 import { handleVersion } from './routes/version';
 
 type RouteHandler = (request: Request, env: Env, clock: Clock) => Promise<Response>;
@@ -34,7 +36,8 @@ interface Route {
 }
 
 /**
- * All 19 endpoints of openapi.yaml are mounted here, in declaration order. Patterns that carry extra
+ * All 19 endpoints of openapi.yaml are mounted here plus the two SPEC-STATIC-PAGES v2 surfaces
+ * (`/` portal and `/assets/{file}`), in declaration order. Patterns that carry extra
  * segments are listed before their shorter prefixes so `/api/titles/{id}/related` cannot be swallowed
  * by `/api/titles/{id}`. `/proxy/{kind}/{handle}` keeps its multi-segment shape and is never collapsed
  * into a single `{path}` wildcard (dispatch package §四.4).
@@ -54,10 +57,13 @@ const ROUTES: readonly Route[] = [
   { pattern: ['api', 'redeem'], allow: ['POST'], handle: handleRedeem },
   { pattern: ['api', 'device', 'ping'], allow: ['GET'], handle: handleDevicePing },
   { pattern: ['api', 'user', 'sync'], allow: ['GET', 'POST'], handle: handleUserSync },
+  { pattern: ['api', 'telemetry', 'lines'], allow: ['POST'], handle: handleTelemetryLines },
   { pattern: ['api', 'version'], allow: ['GET'], handle: handleVersion },
   { pattern: ['s', '{dramaId}'], allow: ['GET'], handle: handleShare },
   { pattern: ['dl', 'latest', '{platform}'], allow: ['GET'], handle: handleApkDownload },
   { pattern: ['dl'], allow: ['GET'], handle: handleDownloadLanding },
+  { pattern: ['assets', '{file}'], allow: ['GET'], handle: handleStaticAsset },
+  { pattern: [], allow: ['GET'], handle: handlePortal },
   { pattern: ['proxy', '{kind}', '{handle}'], allow: ['GET'], handle: handleProxy }
 ];
 

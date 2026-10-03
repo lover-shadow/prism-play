@@ -7,6 +7,7 @@ import type { ContentItem, EpisodeItem, TitleDetail } from '../../edge/src/types
 import { icon } from '../components/icons';
 import { isPrivateSubject } from '../core/storage/storage-domains';
 import { createCastPanel } from './cast-panel';
+import { createLineAwareCastStreamSource } from './cast-ports';
 
 export interface PlayerDetailStage {
   body: HTMLElement;
@@ -131,6 +132,8 @@ export function buildDetailBody(
   const castPanel = createCastPanel({
     root: body,
     episodes: info.episodes,
+    // A-7.5：电视推的是当前这一集的直连上游地址（清单在场时），清单缺席才退回云端代理句柄。
+    stream: createLineAwareCastStreamSource({ workId: () => info.item.id, episodes: info.episodes }),
     titleOf: () => info.item.title,
     currentEpisodeId: () => currentEpisodeId,
     isPrivate: () => isPrivateSubject(info.item),

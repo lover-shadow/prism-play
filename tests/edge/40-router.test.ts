@@ -5,6 +5,7 @@ import { revokeSession } from '../../edge/src/auth/private-session';
 import type { PrismTestEnv } from '../support/test-env';
 import { createTestEnv, TEST_BASE_TIME_SECONDS } from '../support/test-env';
 import { seedCoupon, seedStandardChannels } from '../support/seed';
+import { MemoryR2, asBucket, cardFixture, seedLibraryAssets } from './library-fixtures';
 
 const ctx: RequestContext = {
   waitUntil: () => undefined,
@@ -31,6 +32,8 @@ const MOUNTED: readonly { path: string; allow: string; wrongMethod: string }[] =
   { path: '/s/d_8f31c2', allow: 'GET', wrongMethod: 'POST' },
   { path: '/dl', allow: 'GET', wrongMethod: 'POST' },
   { path: '/dl/latest/android', allow: 'GET', wrongMethod: 'POST' },
+  { path: '/assets/hls.min.js', allow: 'GET', wrongMethod: 'POST' },
+  { path: '/', allow: 'GET', wrongMethod: 'POST' },
   { path: '/proxy/img/d_8f31c2', allow: 'GET', wrongMethod: 'POST' }
 ];
 
@@ -38,7 +41,7 @@ async function call(env: PrismTestEnv, method: string, path: string): Promise<Re
   return worker.fetch(new Request(`http://localhost:8787${path}`, { method }), env, ctx);
 }
 
-describe('edge router mounts all 19 contract endpoints', () => {
+describe('edge router mounts all 19 contract endpoints plus portal and asset surfaces', () => {
   it('answers 405 with the declared verbs instead of 404, proving each route is registered', async () => {
     const env = await createTestEnv();
     for (const route of MOUNTED) {
@@ -80,12 +83,23 @@ describe('edge router mounts all 19 contract endpoints', () => {
     expect(env.db.selectOne('SELECT expires_at FROM devices')?.expires_at).toBe(body.expiresAt);
   });
 
-  it('keeps the public catalogue reachable and its private sibling denied through the same mount', async () => {
+  it('serves the catalogue from R2 and refuses to guess when the publish is not there', async () => {
     const env = await createTestEnv();
     seedStandardChannels(env.db);
+
+    // No manifest and no bucket binding: an honest 503, never a page that tells clients the channel died.
+    const unprovisioned = await call(env, 'GET', '/api/catalog?channel=drama');
+    expect(unprovisioned.status).toBe(503);
+    expect(unprovisioned.headers.get('Cache-Control')).toBe('no-store');
+
+    const r2 = new MemoryR2();
+    env.APK_BUCKET = asBucket(r2);
+    await seedLibraryAssets({ kv: env.kv, r2 }, { revision: 3, channels: { drama: [cardFixture('d_a')] } });
     const publicPage = await call(env, 'GET', '/api/catalog?channel=drama');
     expect(publicPage.status).toBe(200);
-    expect((await publicPage.json() as { items: unknown[] }).items).toEqual([]);
+    const listed = await publicPage.json();
+    expect((listed as { items: { id: string }[] }).items.map((item) => item.id)).toEqual(['d_a']);
+    expect((listed as { revision: number }).revision).toBe(3);
 
     const privatePage = await call(env, 'GET', '/api/catalog?channel=private');
     expect(privatePage.status).toBe(404);
@@ -95,7 +109,9 @@ describe('edge router mounts all 19 contract endpoints', () => {
   it('answers undeclared paths with one indistinguishable 404', async () => {
     const env = await createTestEnv();
     const bodies = new Set<string>();
-    for (const path of ['/api/unknown', '/s', '/proxy/img', '/proxy/img/a/b', '/dl/latest/pc/x', '/']) {
+    // `/` and `/assets/{file}` joined `MOUNTED` when SPEC-STATIC-PAGES v2 S-3/S-4 were wired into
+    // ROUTES; the portal answers 200 and the asset route streams the self-hosted player bundle.
+    for (const path of ['/api/unknown', '/s', '/proxy/img', '/proxy/img/a/b', '/dl/latest/pc/x']) {
       const response = await call(env, 'GET', path);
       expect(response.status, path).toBe(404);
       bodies.add(await response.text());

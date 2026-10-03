@@ -1,11 +1,8 @@
 // @vitest-environment jsdom
-/**
- * 四模海报网格（AC-04 + AC-02-6 分享按钮缺席）与样式真相源静态对账。
- */
-
+/** 四模海报网格（AC-04；A-5 海报分享入口物理缺席）与样式真相源静态对账。 */
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from "node:path";
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { ContentItem } from '../../edge/src/types/api';
 import { POSTER_MODES, POSTER_MODE_CLASS, type PosterMode } from '../../src/core/state/theme';
 import {
@@ -58,15 +55,14 @@ function host(): HTMLElement {
 }
 
 function gridFor(
-  options: { mode?: PosterMode; onOpenTitle?: (id: string) => void; onShare?: (item: ContentItem) => void } = {}
+  options: { mode?: PosterMode; onOpenTitle?: (id: string) => void } = {}
 ) {
   let mode = options.mode ?? 'compact-3';
   const node = host();
   const grid = createPosterGrid({
     root: node,
     mode: () => mode,
-    onOpenTitle: options.onOpenTitle ?? (() => undefined),
-    onShare: options.onShare
+    onOpenTitle: options.onOpenTitle ?? (() => undefined)
   });
   return { node, grid, setMode: (next: PosterMode) => (mode = next) };
 }
@@ -162,52 +158,33 @@ describe('poster-grid：四模只靠重贴 design-tokens 的类', () => {
     expect(node.querySelectorAll('.poster-ep-badge').length).toBe(0);
   });
 
-  it('AC-02-6：分享按钮只随 shareable 出现，其余情况整颗缺席而非 disabled', () => {
+  it('AC-02-6 + A-5：海报卡物理不存在分享入口，公开与私密都一样', () => {
     const { node, grid } = gridFor();
     grid.render([
       item({ shareable: true }),
       item({ id: 'c-2', shareable: false }),
-      item({ id: 'c-3', shareable: undefined }),
       item({ id: 'c-4', shareable: true, isPrivate: true })
     ]);
 
-    expect(node.querySelectorAll('.poster-share').length).toBe(1);
-    expect(node.querySelectorAll('.poster-share[disabled]').length).toBe(0);
-    expect(node.querySelector('[data-content-id="c-1"] .poster-share')).not.toBeNull();
-    expect(node.querySelector('[data-content-id="c-4"] .poster-share')).toBeNull();
+    // 分享按钮不是"隐藏"或"disabled"，而是根本不存在：整棵树零 `.poster-share`，每卡只剩一颗进详情按钮。
+    expect(node.querySelectorAll('.poster-share').length).toBe(0);
+    expect(node.querySelectorAll('button')).toHaveLength(node.querySelectorAll('.poster-open').length);
+    expect(node.innerHTML).not.toMatch(/poster-share|分享《/);
+    // 判据本身仍然导出且口径不变：播放器内的分享键与边缘 `/s/:id` 用的就是这一条。
+    expect(isShareable(item({ shareable: true }))).toBe(true);
     expect(isShareable(item({ shareable: true, isPrivate: true }))).toBe(false);
-
-    const button = node.querySelector('.poster-share') as HTMLButtonElement;
-    expect(button.getAttribute('aria-label')).toBe('分享《战神之龙王归来》');
-    expect(button.querySelector('svg')).not.toBeNull();
-    expect(button.classList.contains('touch-target')).toBe(true);
+    expect(isShareable(item({ shareable: undefined }))).toBe(false);
+    expect(sharePathFor('c 1/中文')).toBe('/s/c%201%2F%E4%B8%AD%E6%96%87');
   });
 
-  it('点卡片回调 contentId，点分享回调 item 且不冒泡成打开剧目', () => {
+  it('A-5 卡片只有"进详情"一个动作，点卡回调 contentId', () => {
     const opened: string[] = [];
-    const shared: string[] = [];
-    const { node, grid } = gridFor({
-      onOpenTitle: (id) => opened.push(id),
-      onShare: (entry) => shared.push(entry.id)
-    });
+    const { node, grid } = gridFor({ onOpenTitle: (id) => opened.push(id) });
     grid.render([item({ shareable: true })]);
 
     (node.querySelector('.poster-open') as HTMLButtonElement).click();
     expect(opened).toEqual(['c-1']);
-
-    (node.querySelector('.poster-share') as HTMLButtonElement).click();
-    expect(shared).toEqual(['c-1']);
-    expect(opened).toEqual(['c-1']);
-  });
-
-  it('未注入分享落点时默认指向边缘 /s/:id（按钮背后必须有真实机制）', () => {
-    expect(sharePathFor('c 1/中文')).toBe('/s/c%201%2F%E4%B8%AD%E6%96%87');
-    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
-    const { node, grid } = gridFor();
-    grid.render([item({ shareable: true })]);
-    (node.querySelector('.poster-share') as HTMLButtonElement).click();
-    expect(open).toHaveBeenCalledWith('/s/c-1', '_blank', 'noopener,noreferrer');
-    open.mockRestore();
+    expect(node.querySelectorAll('.poster-open')).toHaveLength(1);
   });
 
   it('loading 态铺骨架且不可交互，默认 12 颗', () => {
@@ -292,6 +269,30 @@ describe('样式真相源静态对账（AC-04 / §10 / P0-3）', () => {
     expect(homeCss).toMatch(/\.home-sticky\s*\{[^}]*position:\s*sticky/);
     expect(tokensCss).toMatch(/--subnav-height:\s*44px/);
     expect(tokensCss).toMatch(/--header-height:\s*52px/);
+  });
+
+  it('A-4 紧凑 3 列：gap/padding 收到 6px / 8px，断点倍增只加列数不加间距', () => {
+    expect(tokensCss).toMatch(/--poster-gap-tight:\s*6px/);
+    const compact = tokensCss.match(/\.grid-posters-compact-3\s*\{([^}]*)\}/)?.[1] ?? '';
+    expect(compact).toMatch(/gap:\s*var\(--poster-gap-tight\)/);
+    expect(compact).toMatch(/padding:\s*0 var\(--space-2\)/);
+
+    const tablet = tokensCss.slice(tokensCss.indexOf('@media (min-width: 768px)'), tokensCss.indexOf('@media (min-width: 1024px)'));
+    const desktop = tokensCss.slice(tokensCss.indexOf('@media (min-width: 1024px)'));
+    // 平板/大屏若把 gap 放回 --space-4(16px)，6 列就会被摊成碎图（AC-A4-4）。
+    for (const segment of [tablet, desktop]) {
+      expect(segment).toMatch(/\.grid-posters-compact-3\s*\{[^}]*gap:\s*var\(--poster-gap-tight\)/);
+    }
+    // 卡片内边距同步收紧，把宽度还给海报本身。
+    expect(homeCss).toMatch(/\.grid-posters-compact-3 \.poster-open\s*\{[^}]*padding:\s*var\(--space-1\)/);
+  });
+
+  it('A-5 分享样式与手动加载按钮都已物理拔除，收起态与哨兵样式同步落地', () => {
+    // 判据是"规则声明"而不是"字样出现"：拔除说明里还会留痕，样式表里不许再有这条规则。
+    expect(homeCss).not.toMatch(/\.poster-share\s*[,{]/);
+    expect(homeCss).not.toMatch(/\.home-more-btn\s*[,{]/);
+    expect(homeCss).toMatch(/\.home-search-bar--hidden\s*\{[^}]*transform:\s*translateY\(-100%\)/);
+    expect(homeCss).toMatch(/\.home-sentinel\s*\{[^}]*height:\s*1px/);
   });
 
 });

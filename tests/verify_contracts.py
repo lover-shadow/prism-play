@@ -35,9 +35,12 @@ def check_openapi():
         "/api/device/ping",
         "/api/user/sync",
         "/api/version",
+        "/api/telemetry/lines",
         "/s/{drama_id}",
         "/dl",
         "/dl/latest/{platform}",
+        "/",
+        "/assets/{file}",
         "/proxy/{kind}/{handle}"
     ]
     for p in expected_paths:
@@ -98,8 +101,9 @@ def check_sqlite_schema():
     business_tables = [t for t in all_tables if t not in fts_shadow]
 
     # 诚实校验业务表与 FTS 影子表 (消除 R-7 虚假表数)
-    # 0002 新增 cloud_watch_history 与 cloud_user_profile 两张同步表。
-    assert len(business_tables) == 22, f"业务表数量不符: 期望 22, 实际 {len(business_tables)}: {business_tables}"
+    # 0002 新增 cloud_watch_history 与 cloud_user_profile 两张同步表；
+    # 0003 瘦身迁移新增线路健康遥测账本 line_health_signals（内容大表标记 DEPRECATED 但不物理 DROP）。
+    assert len(business_tables) == 23, f"业务表数量不符: 期望 23, 实际 {len(business_tables)}: {business_tables}"
     assert len(fts_shadow) == 5, f"FTS5 影子表数量不符: 期望 5, 实际 {len(fts_shadow)}: {fts_shadow}"
 
     # 验证多端同步表存在且幂等主键成立 (SPEC §2.1)
@@ -222,7 +226,7 @@ if __name__ == "__main__":
         check_design_tokens()
         print("\n==================================================")
         print("  【阶段 0：施工前契约复核门禁 (Gate G0)】通过检验！")
-        print("   (覆盖 19 API / 22 业务表 / 13 功能 / 30 AC 验收)")
+        print("   (覆盖 22 API / 23 业务表 / 13 功能 / 30 AC 验收)")
         print("==================================================")
     except Exception as e:
         print(f"\n[FAILED] 契约复核未通过: {e}", file=sys.stderr)

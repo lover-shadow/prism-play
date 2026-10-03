@@ -1,9 +1,12 @@
 node_modules/
 dist/
+build/
 .DS_Store
+vibe_images/
 *.local
 .wrangler/
 android/app/build/
+android/app/src/main/assets/
 android/.gradle/
 android/build/
 .idea/

@@ -1,4 +1,5 @@
 import type { ChannelId } from '../types/api';
+import type { TitleAsset } from '../library/title-asset';
 
 /**
  * Read-only access to the trusted content catalogue. Nothing here decides visibility policy beyond
@@ -249,4 +250,44 @@ export async function readPublicRevision(db: D1Database): Promise<number> {
 export async function listTagsOfContent(db: D1Database, contentId: string): Promise<string[]> {
   const rows = await db.prepare('SELECT tag FROM content_tags WHERE content_id = ? ORDER BY tag ASC').bind(contentId).all<{ tag: string }>();
   return rows.results.map((row) => row.tag);
+}
+
+export async function findTitleAssetFromDb(db: D1Database, contentId: string, nowSeconds: number): Promise<TitleAsset | null> {
+  const content = await findContentRow(db, contentId);
+  if (content === null || content.enabled === 0) return null;
+  const rows = await db.prepare(
+    'SELECT e.episode_number, e.title, e.duration_seconds, es.provider_id, es.upstream_media_url ' +
+    'FROM content_episodes e ' +
+    'LEFT JOIN episode_sources es ON es.episode_id = e.id AND es.enabled = 1 ' +
+    'WHERE e.content_id = ? ORDER BY e.episode_number ASC'
+  ).bind(contentId).all<{ episode_number: number; title: string | null; duration_seconds: number | null; provider_id: string | null; upstream_media_url: string | null }>();
+  const epMap = new Map<number, { episodeNumber: number; title?: string; durationSeconds?: number; lines: { providerId: string; mediaUrl: string }[] }>();
+  for (const r of rows.results) {
+    let ep = epMap.get(r.episode_number);
+    if (!ep) {
+      ep = { episodeNumber: r.episode_number, lines: [] };
+      if (r.title) ep.title = r.title;
+      if (r.duration_seconds) ep.durationSeconds = r.duration_seconds;
+      epMap.set(r.episode_number, ep);
+    }
+    if (r.provider_id && r.upstream_media_url) {
+      ep.lines.push({ providerId: r.provider_id, mediaUrl: r.upstream_media_url });
+    }
+  }
+  return {
+    workId: content.id,
+    title: content.title,
+    channelId: content.channel_id as ChannelId,
+    isPrivate: content.is_private === 1,
+    category: content.category,
+    hasCover: typeof content.cover_url === 'string' && content.cover_url !== '',
+    coverVersion: content.cover_version ?? undefined,
+    synopsis: content.synopsis ?? undefined,
+    episodeCount: content.episode_count ?? undefined,
+    isAi: content.is_ai === 1,
+    isHot: content.is_hot === 1,
+    firstPublishedAt: content.first_published_at ?? undefined,
+    episodes: [...epMap.values()],
+    generatedAt: nowSeconds
+  };
 }

@@ -88,10 +88,13 @@ describe('组合根：Web 宿主启动', () => {
     expect(probe.requests).toEqual([]);
   });
 
-  it('首屏装配四主 Tab 与云端下发的频道名，海报逐字采用响应内容', async () => {
+  it('首屏装配三主 Tab 与云端下发的频道名，海报逐字采用响应内容', async () => {
     const { app } = await start();
     expect(app).not.toBeNull();
-    expect(document.querySelectorAll('.app-tab')).toHaveLength(4);
+    expect(document.querySelectorAll('.app-tab')).toHaveLength(3);
+    // 搜索降级为全屏 Overlay（A-3）：底栏不再有搜索键，入口改由首页搜索条承担。
+    expect(document.querySelector('.app-tab[data-tab="search"]')).toBeNull();
+    expect(document.querySelector('.home-search-bar')).not.toBeNull();
     expect([...document.querySelectorAll('.channel-tab')].map((node) => node.textContent))
       .toEqual(['短剧精选', '院线电影', '热血动漫', '人文纪录']);
     expect(query('.channel-tab[aria-current="true"]')?.getAttribute('data-channel-id')).toBe('drama');
@@ -157,12 +160,15 @@ describe('组合根：Web 宿主启动', () => {
     expect(dumped).not.toContain('不应出现');
   });
 
-  it('destroy 归还通知钩子并拆掉全部视图宿主', async () => {
+  it('destroy 归还通知钩子并拆掉全部视图宿主与搜索 Overlay', async () => {
     const { app } = await start();
     expect(window.PrismNativeMedia).toBeDefined();
-    await app?.shell.activate('search');
+    // 点首页搜索条拉起全屏 Overlay（A-3），再整体拆除：Overlay 的节点与 handler 都必须跟着消失。
+    document.querySelector<HTMLElement>('.home-search-bar')?.click();
+    expect(document.querySelector('.app-overlay')).not.toBeNull();
     app?.destroy();
     expect(window.PrismNativeMedia).toBeUndefined();
+    expect(document.querySelector('.app-overlay')).toBeNull();
     expect(document.querySelectorAll('.app-view')).toHaveLength(0);
     expect(document.querySelectorAll('.app-tab')).toHaveLength(0);
   });
