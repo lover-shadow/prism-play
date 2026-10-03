@@ -9,7 +9,7 @@
  * 字节换成可显示地址。模块顶层零 I/O、零定时器、零全局注册，jsdom 可安全 import。
  */
 
-import type { CatalogChange, CatalogResponse, ChannelsResponse, ContentItem } from '../../edge/src/types/api';
+import type { CatalogChange, CatalogResponse, ChannelItem, ChannelsResponse, ContentItem } from '../../edge/src/types/api';
 import { CATALOG_DEFAULT_PAGE_SIZE, CHANGES_DEFAULT_LIMIT, CHANGES_MAX_LIMIT } from '../../edge/src/core/constants';
 import { ApiError, type PrismApiClient } from './api/client';
 import type { CacheReceipt, PublicCache } from './storage/public-cache';
@@ -48,8 +48,8 @@ type CatalogQuery = Parameters<HomeApi['catalog']>[0];
 const ABSENT_COVER_VERSION = 'v0';
 /** 订阅方只有主宿主与主视图：达上限还来注册即判定为泄漏，拒绝而不是无界增长。 */
 const SYNC_LISTENER_MAX = 8;
-/** 单轮兜底：目录 50 页、增量 10 页 × CHANGES_MAX_LIMIT；超出如实回报而不是空转。 */
-const RESYNC_MAX_PAGES = 50;
+/** 单轮兜底：目录 400 页、增量 10 页 × CHANGES_MAX_LIMIT；超出如实回报而不是空转。 */
+const RESYNC_MAX_PAGES = 400;
 const CHANGE_PAGES_PER_RUN = 10;
 const PROXY_IMAGE_PREFIX = '/proxy/img/'; // SPEC §5、API-SPEC §六 的受控图片代理形态；不是它就等于上游地址。
 
@@ -267,11 +267,11 @@ export function createCatalogCacheService(deps: CatalogCacheDeps): CatalogCacheS
   async function loadSeedBundle(): Promise<SyncOutcome | null> {
     for (const url of ['./seed/catalog-bundle.json', '/seed/catalog-bundle.json']) {
       try {
-        const res = await fetchImpl(url);
-        if (!res.ok) continue;
-        const b = (await res.json()) as { revision: number; channels: ChannelsResponse; items: ContentItem[] };
+        const res = await fetchImpl(url); if (!res.ok) continue;
+        const b = (await res.json()) as { revision: number; version?: number; channels: ChannelsResponse | ChannelItem[]; items: ContentItem[] };
         if (b?.items?.length) {
-          const r = await cache.importBundle(b);
+          const channels: ChannelsResponse = Array.isArray(b.channels) ? { version: b.version ?? b.revision, channels: b.channels } : b.channels;
+          const r = await cache.importBundle({ revision: b.revision, channels, items: b.items });
           if (r.accepted) { feedIndex(r.revision); return { appliedEntries: r.appliedEntries, revision: r.revision, full: true, offline: false }; }
         }
       } catch { /* 下一个备用地址 */ }
