@@ -3,19 +3,21 @@
  *
  * 职责只有一条：把「网络 → 公开缓存域 → 首屏」串成链，并把失败如实说成人话。视图只经 `api` 读（快照先显），
  * 落盘只经 `PublicCache` 的闸门、公开闭集与修订守卫——本文件不设第二份存储，也不自行判定"是不是私密"：判定
- * 咽喉点在 `storage-domains.ts`。`resyncFull` 只有在同一修订把各频道各页全部 stagePage 成功后才 commitSnapshot；
+ * 咽喉点在 `storage-domains.ts`。`resyncFull` 优先校验整包后 importBundle；明确 404 才逐页 stagePage/commitSnapshot；
  * `syncIncremental` 只按服务端 `nextRevision` 推进游标（绝不本地加一）。任一环节失败都不提交、不清盘，旧快照
  * 继续可读。海报字节与配额 LRU 全在公开缓存域内（ARCHITECTURE §2.1 禁止本层另立 Blob 台账），本服务只把域内
  * 字节换成可显示地址。模块顶层零 I/O、零定时器、零全局注册，jsdom 可安全 import。
  */
 
-import type { CatalogChange, CatalogResponse, ChannelItem, ChannelsResponse, ContentItem } from '../../edge/src/types/api';
+import type { CatalogChange, CatalogResponse, ChannelsResponse, ContentItem } from '../../edge/src/types/api';
+import { catalogBundleUrl, fetchCatalogBundle } from './catalog-bundle-loader';
 import { CATALOG_DEFAULT_PAGE_SIZE, CHANGES_DEFAULT_LIMIT, CHANGES_MAX_LIMIT } from '../../edge/src/core/constants';
 import { ApiError, type PrismApiClient } from './api/client';
 import type { CacheReceipt, PublicCache } from './storage/public-cache';
 import type { SnapshotFeed } from './storage/search-index';
 import { PrivateWriteBlockedError } from './storage/storage-domains';
 import type { HomeApi } from '../views/home-view';
+import { createPosterUrls } from './poster-urls';
 
 export interface SnapshotState { revision: number; items: number; channels: number; partial: boolean }
 export interface SyncOutcome { appliedEntries: number; revision: number; full: boolean; offline: boolean; reason?: string }
@@ -34,6 +36,8 @@ export interface CatalogCacheService {
 export interface CatalogCacheDeps {
   client: PrismApiClient;
   cache: PublicCache;
+  /** 与契约客户端同一 API base；原生宿主不能以 location.origin 作为云端地址。 */
+  baseUrl?: string;
   /** 时钟归公开缓存域与 HTTP 缓存层（`PUBLIC_POSTER_MAX_AGE_SECONDS`）：本层不另立时间台账，故不消费它。 */
   nowSeconds?: () => number;
   pageSize?: number;
@@ -51,7 +55,6 @@ const SYNC_LISTENER_MAX = 8;
 /** 单轮兜底：目录 400 页、增量 10 页 × CHANGES_MAX_LIMIT；超出如实回报而不是空转。 */
 const RESYNC_MAX_PAGES = 400;
 const CHANGE_PAGES_PER_RUN = 10;
-const PROXY_IMAGE_PREFIX = '/proxy/img/'; // SPEC §5、API-SPEC §六 的受控图片代理形态；不是它就等于上游地址。
 
 const REJECT_MESSAGE: Readonly<Record<NonNullable<CacheReceipt['reason']>, string>> = {
   'stale-revision': '云端目录修订旧于本地快照，按幂等处理并保留旧快照', 'mixed-revision': '同一快照单元混进了两个修订，整单元作废，旧快照保持不变',
@@ -72,18 +75,6 @@ function outcomeForError(error: unknown, at: number, full: boolean): SyncOutcome
   return isUnavailable(error) ? { ...base, offline: true, reason: `离线沿用本地公开快照（${error.code}）：${error.message}` } : { ...base, reason: `${error.code}：${error.message}` };
 }
 
-/** 边缘只会用请求自己的 origin 拼 `/proxy/img/{handle}`（serialize.ts）：形态即准入判据。 */
-function proxyImageOf(raw: unknown): string | null {
-  if (typeof raw !== 'string' || raw.trim() === '') return null;
-  const origin = typeof location === 'undefined' ? '' : location.origin;
-  let target: URL;
-  try { target = new URL(raw.trim(), origin === '' || origin === 'null' ? undefined : origin); } catch { return null; } // 拼不出基准：宁可不显示，绝不猜上游。
-  if (target.protocol !== 'https:' && target.protocol !== 'http:') return null;
-  if (!target.pathname.startsWith(PROXY_IMAGE_PREFIX)) return null;
-  const handle = target.pathname.slice(PROXY_IMAGE_PREFIX.length);
-  return handle === '' || handle.includes('/') || handle.includes('..') ? null : raw.trim();
-}
-
 /** 域内只存字节不存 MIME 旁注，故换成地址时嗅探文件头；嗅不出就交回代理地址，而不是伪造一个类型。 */
 const mimeOf = (b: Uint8Array): string | null =>
   b[0] === 0x89 ? 'image/png' : b[0] === 0xff && b[1] === 0xd8 ? 'image/jpeg' : b[0] === 0x47 ? 'image/gif'
@@ -96,6 +87,7 @@ const objectUrlFor = (bytes: Uint8Array): string | null => {
 
 export function createCatalogCacheService(deps: CatalogCacheDeps): CatalogCacheService {
   const { client, cache } = deps;
+  const posters = createPosterUrls(deps.baseUrl);
   const pageSize = deps.pageSize ?? CATALOG_DEFAULT_PAGE_SIZE;
   const fetchImpl = deps.fetchImpl ?? ((url: string, init?: RequestInit): Promise<Response> => fetch(url, init));
   const listeners = new Set<(outcome: SyncOutcome) => void>();
@@ -136,6 +128,16 @@ export function createCatalogCacheService(deps: CatalogCacheDeps): CatalogCacheS
   };
 
   async function fullResync(attempt: number, channelId?: string): Promise<SyncOutcome> {
+    if (channelId === undefined) {
+      try {
+        const bundle = await fetchCatalogBundle(catalogBundleUrl(deps.baseUrl), fetchImpl);
+        if (bundle !== null) {
+          const receipt = await cache.importBundle(bundle);
+          if (receipt.accepted) feedIndex(receipt.revision);
+          return { appliedEntries: receipt.accepted ? receipt.appliedEntries : 0, revision: receipt.revision, full: true, offline: false, ...(receipt.accepted ? {} : { reason: describeReject(receipt.reason) }) };
+        }
+      } catch (error) { return outcomeForError(error, revision(), true); }
+    }
     let targets: string[];
     try { targets = channelId !== undefined ? [channelId] : await pullPublicTargets(); } catch (error) {
       targets = channelIds(cache.getChannels());
@@ -214,6 +216,7 @@ export function createCatalogCacheService(deps: CatalogCacheDeps): CatalogCacheS
     },
     async catalog(query): Promise<CatalogResponse> {
       const request: CatalogQuery = { ...query, page: query.page ?? 1, pageSize: query.pageSize ?? pageSize };
+      if (revision() > 0 && !cache.snapshotIsPartial() && channelIds(cache.getChannels()).includes(request.channel)) return catalogFromSnapshot(request, undefined);
       try {
         let response: CatalogResponse;
         try {
@@ -232,7 +235,7 @@ export function createCatalogCacheService(deps: CatalogCacheDeps): CatalogCacheS
   };
 
   async function posterUrlFor(item: ContentItem): Promise<string | null> {
-    const url = proxyImageOf(item.coverUrl);
+    const url = posters.resolve(item.coverUrl);
     if (url === null) return null;
     const version = item.coverVersion ?? ABSENT_COVER_VERSION;
     const cached = await cache.getPoster(item.id, version);
@@ -267,13 +270,9 @@ export function createCatalogCacheService(deps: CatalogCacheDeps): CatalogCacheS
   async function loadSeedBundle(): Promise<SyncOutcome | null> {
     for (const url of ['./seed/catalog-bundle.json', '/seed/catalog-bundle.json']) {
       try {
-        const res = await fetchImpl(url); if (!res.ok) continue;
-        const b = (await res.json()) as { revision: number; version?: number; channels: ChannelsResponse | ChannelItem[]; items: ContentItem[] };
-        if (b?.items?.length) {
-          const channels: ChannelsResponse = Array.isArray(b.channels) ? { version: b.version ?? b.revision, channels: b.channels } : b.channels;
-          const r = await cache.importBundle({ revision: b.revision, channels, items: b.items });
-          if (r.accepted) { feedIndex(r.revision); return { appliedEntries: r.appliedEntries, revision: r.revision, full: true, offline: false }; }
-        }
+        const bundle = await fetchCatalogBundle(url, fetchImpl); if (bundle === null) continue;
+        const r = await cache.importBundle(bundle);
+        if (r.accepted) { feedIndex(r.revision); return { appliedEntries: r.appliedEntries, revision: r.revision, full: true, offline: false }; }
       } catch { /* 下一个备用地址 */ }
     }
     return null;

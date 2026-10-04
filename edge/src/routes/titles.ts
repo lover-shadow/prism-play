@@ -9,6 +9,7 @@ import { originOf, publicCoverProxyUrl, signedCoverProxyUrl } from '../http/seri
 import type { TitleAsset, TitleRead } from '../library/title-asset';
 import { readTitleAt, titleAssetResponse } from '../library/title-asset';
 import { readPrivateManifest, readPublicManifest } from '../library/manifest';
+import { readWorkFact } from '../library/work-facts';
 import { isKeySafeWorkId, privateTitleKey, stablePrivateTitleKey, stableTitleKey, titleKey } from '../library/paths';
 import { findTitleAssetFromDb } from '../db/content-repo';
 import { undifferentiatedNotFound } from './catalog';
@@ -135,6 +136,12 @@ export async function handleTitles(request: Request, env: Env, clock: Clock): Pr
   const manifest = await readPublicManifest(env.KV);
   if (manifest === null) return configUnavailableResponse();
 
+  if (manifest.workFacts !== undefined) {
+    const read = await readWorkFact(env, manifest, titleId);
+    if (read.status === 'rejected') return configUnavailableResponse();
+    if (read.status === 'ok') return publicTitleResponse(titleAssetResponse(read.fact.asset, read.fact.asset.hasCover ? publicCoverProxyUrl(origin, titleId) : undefined));
+    return await servePrivateTitle(request, env, clock, bucket, titleId, origin);
+  }
   const publicRead = await readTitleWithFallback(bucket, titleKey(manifest.revision, titleId), stableTitleKey(titleId), titleId);
   if (publicRead.status === 'ok') {
     if (publicRead.asset.isPrivate) {

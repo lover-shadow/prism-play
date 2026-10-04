@@ -4,8 +4,7 @@
  * gesture HUDs (system volume and window brightness reach the OS through `PrismNativeBridge`, so only a
  * device can prove them), double-tap seek, sleep timer, touch lock, episode drawer, call interruption and
  * the honest error states. `PlayerEngine` is injectable — the default factory lazy-imports ArtPlayer and
- * hls.js, tests hand in a fake. SPEC §10 caps a file at 300 lines: overlays live in `hud.ts`, yield
- * policies in `sleep-timer.ts`, episode/断点 bookkeeping in `episode-drawer.ts`, 起播地址与切线编排（A-7）in `line-runner.ts`。
+ * hls.js, tests hand in a fake; overlays, sleep policies, episode bookkeeping and line orchestration live in separate modules.
  */
 /// <reference types="vite/client" />
 import './player.css';
@@ -21,6 +20,7 @@ import { createEpisodeDrawer, createProgressReporter } from './episode-drawer';
 import type { ProgressContext } from './episode-drawer';
 import { createLineFallback } from './line-fallback';
 import { createLineRunner, type Surface } from './line-runner';
+import { usesLocalEpisodeIds } from '../core/api/title-detail';
 import { createTitleManifestStore, installTitleManifestStore } from './title-manifest';
 import { attachGestureLayer, createGestureController } from './gestures';
 import type { GestureBounds, GestureController, ValueChannel } from './gestures';
@@ -132,7 +132,7 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
   /** 剧集清单（§2.2）的进程内唯一缓存：装成"当前生效的那只"，投屏侧因此不必再造一份 api 客户端重拉清单。 */
   const manifests = installTitleManifestStore(createTitleManifestStore({ api }));
   const lines = createLineFallback({ workId: () => options.titleId, privacy: () => ({ isPrivate: detail?.item.isPrivate, channelId: detail?.item.channelId }) });
-  const runner = createLineRunner({ api, manifests, lines, engine: () => engine, clock, workId: () => options.titleId, episodeNumber });
+  const runner = createLineRunner({ api, manifests, lines, engine: () => engine, clock, workId: () => options.titleId, episodeNumber, localEpisodeIds: () => usesLocalEpisodeIds(detail) });
   const gesture: GestureController = createGestureController({
     clock, measure: options.measure ?? readSurface, isLocked: () => locked || destroyed,
     currentTime: () => engine?.currentTime() ?? 0, duration: () => engine?.duration() ?? 0,

@@ -12,6 +12,7 @@
  */
 
 import { assertWritable, HISTORY_MAX_ROWS, type WatchHistoryRow, type WriteGuardSubject } from './storage-domains';
+import { logger } from '../diagnostics';
 
 export const HISTORY_DATABASE = 'prism_local.db';
 export const HISTORY_TABLE = 'local_watch_history';
@@ -205,12 +206,24 @@ export function createHistoryStore(deps: { sqlite: SqliteLike; nowSeconds?: () =
   const database = HISTORY_DATABASE;
   const now = deps.nowSeconds ?? ((): number => Math.floor(Date.now() / 1000));
   let ready = false;
+  let initializing: Promise<void> | null = null;
 
   async function ensureReady(): Promise<void> {
     if (ready) return;
-    if (!(await sqlite.isConnected(database))) await sqlite.open(database);
-    await sqlite.executeSet(database, [{ statement: LOCAL_WATCH_HISTORY_DDL, values: [] }, { statement: LOCAL_WATCH_HISTORY_INDEX_DDL, values: [] }], true);
-    ready = true;
+    if (initializing !== null) return await initializing;
+    initializing = (async () => {
+      let stage = 'open';
+      try {
+        if (!(await sqlite.isConnected(database))) await sqlite.open(database);
+        stage = 'schema';
+        await sqlite.executeSet(database, [{ statement: LOCAL_WATCH_HISTORY_DDL, values: [] }, { statement: LOCAL_WATCH_HISTORY_INDEX_DDL, values: [] }], true);
+        ready = true;
+      } catch (error) {
+        logger.error('history', `${stage} failed`, error);
+        throw error;
+      }
+    })();
+    try { await initializing; } finally { initializing = null; }
   }
 
   async function select(sql: string, values: SqliteValue[]): Promise<WatchHistoryRow[]> {
@@ -237,14 +250,19 @@ export function createHistoryStore(deps: { sqlite: SqliteLike; nowSeconds?: () =
       assertWritable(HISTORY_TABLE, input);
       const row = toWatchHistoryRow(input, now());
       await ensureReady();
-      await sqlite.executeSet(
-        database,
-        [
-          { statement: UPSERT_SQL, values: rowValues(row) },
-          { statement: EVICT_SQL, values: [HISTORY_MAX_ROWS] }
-        ],
-        true
-      );
+      try {
+        await sqlite.executeSet(
+          database,
+          [
+            { statement: UPSERT_SQL, values: rowValues(row) },
+            { statement: EVICT_SQL, values: [HISTORY_MAX_ROWS] }
+          ],
+          true
+        );
+      } catch (error) {
+        logger.error('history', 'upsert failed', error);
+        throw error;
+      }
       return row;
     },
 

@@ -63,6 +63,7 @@ jobs:
       - name: 运行全量单元与集成测试
         run: |
           npm test
+          node --test tests/edge/*.test.mjs
 
       - name: 执行前端生产构建 (tsc + Vite)
         run: |
@@ -103,8 +104,8 @@ jobs:
         run: |
           APK_FILE=$(ls android/app/build/outputs/apk/debug/*.apk | head -n 1)
           if [ -f "$APK_FILE" ]; then
-            npx wrangler r2 object put prism-play-releases/dl/prism-play-latest.apk \
+            npx wrangler r2 object put prism-play-releases/releases/android/latest.apk \
               --file="$APK_FILE" \
-              --content-type=application/vnd.android.package-archive
+              --content-type=application/vnd.android.package-archive --remote
             echo "最新 APK 已成功发布至 R2 /dl/latest/android"
           fi

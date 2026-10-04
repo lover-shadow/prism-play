@@ -6,9 +6,6 @@
  * 返回 400 时同样落到这条文案。输入法组合期间（compositionstart…compositionend）绝不发查询，否则拼音未
  * 上屏就乱搜。热词只由调用方注入，未注入就承认「暂无本地热词」，绝不凭空编造。
  *
- * A-3 定案：搜索不再是底部 Tab，而是首页搜索条拉起的全屏 Overlay。Overlay 自上而下＝输入框 → 本次会话检索
- * 记录 → 端侧榜单专区（`rankings-rail.ts`，零网络）→ 补全 → 结果。榜单只读注入的本地快照，断网也出得来。
- *
  * A-6 定案：数据源换成端侧 SQLite FTS5——本视图不知道也不该知道数据来自哪张表，它只认 `api`。注入的门面把
  * `localFirst` 置真，本机命中与本机没命中才不会被说成"需联网"；`searchOnline` 存在时才给「联网补充检索」
  * 那颗按钮，且必须由用户点下去才发请求。没接索引的宿主（Web 构建）拿到的还是原样的云端门面，一条文案都不必改。
@@ -80,6 +77,7 @@ export function createSearchView(deps: SearchViewDeps): SearchView {
   let composing = false;
   let disposed = false;
   let generation = 0;
+  let mode: 'recommendations' | 'candidates' | 'results' = 'recommendations';
   const quick = band('猜你想搜', 'search-hot', '本地公开热词，只来自调用方注入');
   const suggest = band('补全建议', 'search-suggest');
   const results = band('搜索结果', 'search-results');
@@ -104,23 +102,26 @@ export function createSearchView(deps: SearchViewDeps): SearchView {
     : button('关闭', () => deps.onClose?.(), { icon: 'close', cls: 'pv-btn-ghost', el: 'search-close' }));
   form.append(input, button('搜索', () => void runSearch(), { icon: 'search', cls: 'pv-btn-primary', el: 'search-submit' }));
   deps.root.classList.add('pv-view', 'srch-view');
-  deps.root.append(head, form, quick.wrap, historyBand.wrap, suggest.wrap, results.wrap);
-  suggest.wrap.hidden = true;
+  deps.root.append(head, form, suggest.wrap, results.wrap, quick.wrap, historyBand.wrap);
+  suggest.wrap.hidden = results.wrap.hidden = true;
 
   // 榜单区：有本地快照读面才存在（AC-A3-3 断网可用就建立在这块完全不联网的前提上）。
   let rail: ReturnType<typeof createRankingsRail> | null = null;
   if (deps.localItems !== undefined) {
     const railHost = make('div', 'srch-rail-host');
     railHost.dataset.el = 'rank-host';
-    deps.root.insertBefore(railHost, suggest.wrap);
+    deps.root.append(railHost);
     rail = createRankingsRail({ root: railHost, items: deps.localItems, onOpenTitle: (contentId) => deps.onOpenTitle(contentId) });
     railHost.hidden = true;
   }
-  /** 空输入时把榜单区亮出来（Overlay 默认态 = 记录 + 三榜），一旦有词就让位给补全与结果。 */
-  function syncRail(): void {
-    if (rail !== null) rail.refresh();
+  function syncRail(next = mode): void {
+    mode = next;
+    quick.wrap.hidden = historyBand.wrap.hidden = mode !== 'recommendations';
+    suggest.wrap.hidden = mode !== 'candidates';
+    results.wrap.hidden = mode !== 'results';
+    if (rail !== null && mode === 'recommendations') rail.refresh();
     const railHost = deps.root.querySelector<HTMLElement>('[data-el="rank-host"]');
-    if (railHost !== null) railHost.hidden = currentQuery() !== '';
+    if (railHost !== null) railHost.hidden = mode !== 'recommendations';
   }
 
   const currentQuery = (): string => input.value.trim();
@@ -145,14 +146,10 @@ export function createSearchView(deps: SearchViewDeps): SearchView {
   function clearTimer(): void {
     if (timer !== null) { clearTimeout(timer); timer = null; }
   }
-  function showSuggest(): void {
-    suggest.wrap.hidden = false;
-    if (!deps.root.contains(suggest.wrap)) quick.wrap.after(suggest.wrap);
-  }
   function scheduleSuggestions(query: string): void {
     clearTimer();
     if (query === '') return hideSuggest(IDLE_COPY, 'empty');
-    showSuggest();
+    syncRail('candidates');
     if (query.length > MAX_QUERY_LENGTH) return stateBand(suggest, 'error', TOO_LONG_COPY);
     stateBand(suggest, 'loading', deps.api.localFirst === true ? '正在本机目录中补全…' : '正在获取词法补全…');
     timer = setTimeout(() => {
@@ -165,9 +162,10 @@ export function createSearchView(deps: SearchViewDeps): SearchView {
     stateBand(suggest, state, text);
   }
   async function paintSuggestions(query: string): Promise<void> {
-    if (disposed || query !== currentQuery()) return;
+    const ticket = generation;
+    if (disposed || mode !== 'candidates' || query !== currentQuery()) return;
     const result = await attempt(() => deps.api.suggestions(query));
-    if (disposed || query !== currentQuery()) return;
+    if (disposed || ticket !== generation || mode !== 'candidates' || query !== currentQuery()) return;
     if (!result.ok) return stateBand(suggest, isNetworkError(result.error) ? 'disabled' : 'error', errorCopy(result.error, NETWORK_COPY));
     const entries = result.value.suggestions.slice(0, SUGGESTION_LIMIT);
     if (entries.length === 0) return stateBand(suggest, 'empty', '没有匹配的补全项，可直接回车整词检索。');
@@ -240,6 +238,8 @@ export function createSearchView(deps: SearchViewDeps): SearchView {
   async function runSearch(online = false): Promise<void> {
     if (disposed || composing) return;
     clearTimer();
+    const ticket = ++generation;
+    syncRail('results');
     const query = currentQuery();
     const rejection = rejectLocalQuery(query);
     if (rejection !== null) {
@@ -250,7 +250,6 @@ export function createSearchView(deps: SearchViewDeps): SearchView {
     const task = (): Promise<SearchResponse> => online === true && deps.api.searchOnline !== undefined
       ? deps.api.searchOnline({ q: query })
       : deps.api.search({ q: query });
-    const ticket = ++generation;
     // 只有真的发出去的检索才进本次会话记录：本地拒绝的词一个都不记。
     historyLedger.note(query);
     historyBand.paint();
@@ -261,7 +260,9 @@ export function createSearchView(deps: SearchViewDeps): SearchView {
   function onInput(): void {
     if (composing) return;
     const query = currentQuery();
-    syncRail();
+    ++generation;
+    clearTimer();
+    syncRail(query === '' ? 'recommendations' : 'candidates');
     if (query === '') {
       hideSuggest(IDLE_COPY, 'empty');
       paintQuick();
@@ -271,7 +272,7 @@ export function createSearchView(deps: SearchViewDeps): SearchView {
     scheduleSuggestions(query);
   }
   input.addEventListener('compositionstart', () => { composing = true; });
-  input.addEventListener('compositionend', () => { composing = false; scheduleSuggestions(currentQuery()); });
+  input.addEventListener('compositionend', () => { composing = false; onInput(); });
   input.addEventListener('input', onInput);
   input.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); void runSearch(); } });
   form.addEventListener('submit', (event) => { event.preventDefault(); void runSearch(); });

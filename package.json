@@ -1,6 +1,6 @@
 {
   "name": "prism-play",
-  "version": "2.6.1",
+  "version": "2.6.2",
   "description": "《光影Play》(Prism Play) - 工业级流媒体全景终端 (Capacitor 7 + Vite + TypeScript + ArtPlayer)",
   "private": true,
   "type": "module",

@@ -61,7 +61,7 @@ jobs:
         run: |
           ${PRISM_WRANGLER_BIN:-npx wrangler} r2 object put prism-play-releases/assets/hls.min.js \
             --file=node_modules/hls.js/dist/hls.min.js \
-            --content-type=application/javascript
+            --content-type=application/javascript --remote
 
       # SPEC-STATIC-PAGES v2 §S-3/S-4：门户与下载页的真机渲染图同样同源自托管（微信 WebView 里
       # 第三方图床不可靠）。两张裁切随仓库版本走，重复上传幂等，改图 = 改仓库里的 webp 再跑一轮。
@@ -71,7 +71,7 @@ jobs:
           for w in 768 1280; do
             ${PRISM_WRANGLER_BIN:-npx wrangler} r2 object put prism-play-releases/assets/hero-showcase-$w.webp \
               --file=edge/assets/hero-showcase-$w.webp \
-              --content-type=image/webp
+              --content-type=image/webp --remote
           done
 
       - name: 私密管线（§2.2 双条款 → private/ 前缀，独立 KV 清单）

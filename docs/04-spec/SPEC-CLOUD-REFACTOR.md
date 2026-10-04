@@ -40,8 +40,8 @@ npm run scan:p0            # P0 红线静态扫描
 
 ### 1.2 架构决策（2026-10-03 定案）
 
-1. **D1 从"仓库"退回"账本"**：内容目录与剧集行整体移出 D1；仅保留卡密/设备/断点/画像/归一映射/遥测。
-2. **目录与剧集清单改走 R2 静态资产 + KV 清单 + 边缘缓存**：浏览路径 D1 行读 = 0。
+1. **D1 从"仓库"退回"账本"**：公开内容读路径迁往 facts；私密原路径依赖仍保留，不能整体停用其内容/剧集表。账本继续保留卡密/设备/断点/画像/归一映射/遥测。
+2. **公开目录与事实改走 R2 静态资产 + KV 清单 + 边缘缓存**：新 generation 公开浏览事实读取 D1 行读 = 0；不包含私密双准入鉴权的 D1 读取。
 3. **采集产物不再灌 D1**：CI 生成 JSON 资产推 R2 + 刷 KV 清单。
 4. **每日增量用 `h=24`**：实测全网单日更新仅 162 部/9 页，全天约 10 个温和请求。
 5. **视频流不经云端代理**：App 与分享页均直连上游（CORS `*` 已实测）。
@@ -89,7 +89,7 @@ GitHub Actions (ubuntu-latest, cron 0 19 * * * UTC = 北京 03:00)
 | **分类级** | 公开源中的成人分类同样归入个人探索：魔都 `tid 6`（里番动漫，实测 1,712 部）、`tid 39`（伦理片，实测 31 部） | 2026-10-03 现场查询，样本标题确认为成人内容 |
 
 **工程后果（必须实现）**：
-- 私密内容生成**物理隔离的另一套 R2 资产**（前缀 `private/`），永不混入公开分片；
+- 私密内容永不混入公开分片或 public pack；未来私密资产须真实访问隔离，**仅 `private/` 前缀不构成安全边界**。本次不发布任何 private objects，保留原双准入读取路径；公开 bucket 风险确认与私密发布批准为前置门禁；
 - 可扫描验收判据：公开资产中 `is_private=1` 计数恒为 0；
 - 该规则写入 KV `config:sources`（见 §C-6），"归入私密"与"完全排除"两种策略可配置切换，默认**归入私密**。
 
@@ -139,9 +139,11 @@ GitHub Actions (ubuntu-latest, cron 0 19 * * * UTC = 北京 03:00)
 
 > 契约变更声明：`firstPublishedAt` / `hitsTotal` 为对 `ContentItem` 的**新增可选字段**，覆盖 SPEC-v2.0 §1.8 的字段闭集；`verify_contracts.py` 与 `docs/03-contracts/openapi.yaml` 须同步增补（属本 Track 交付物）。
 
-### 3.2 剧集清单（按剧目，含播放地址）
+### 3.2 公开事实 pack 与剧目投影（按 generation，含播放地址）
 
-路径：公开 `library/v{revision}/titles/{workId}.json`；私密 `private/v{revision}/titles/{workId}.json`
+新公开事实以 §3.3 manifest 的 `workFacts` 为权威，不再要求每部单独发布 title 对象。pack 为 `{ "schema": 1, "works": { "<workId>": <fact> } }`；fact 包含真实 `coverTargetUrl`、`enabled` / `shareable` / `isPrivate:false` flags、目录字段与完整 `episodes[].lines[]` 多线路。真实封面与播放地址仅由 Worker 按请求投影，不在目录、启动 bundle、分享 HTML 中泄露整个 pack、pack key 或索引。
+
+以下为 `/api/titles/{workId}` 的公开投影示意（另含 `item` 供客户端边界适配），不是 pack 下载接口。无 `workFacts` 的旧 generation 才沿用公开 `library/v{revision}/titles/{workId}.json`；私密原有双准入路径保留，本次不发布 `private/` 对象。
 
 ```jsonc
 {
@@ -161,8 +163,8 @@ GitHub Actions (ubuntu-latest, cron 0 19 * * * UTC = 北京 03:00)
 }
 ```
 
-- **播放地址只存在于剧集清单**，不存在于目录分片；
-- 公开清单可 CDN 长缓存；**私密清单必须经 Worker 路由双重准入校验后 `no-store` 返回**（见 C-3b）；
+- **播放地址只存在于内部事实 pack 与按作投影的剧集清单**，不存在于目录分片；
+- 内容寻址 pack 可长缓存；无 revision 的详情/分享/海报入口须随 generation 重验证，不能以长期缓存保留旧 flags；**私密清单必须经 Worker 路由双重准入校验后 `no-store` 返回**（见 C-3b）；
 - 单部约 80 集 ≈ 12 KB，端侧打开剧目时惰性拉取并本地缓存。
 
 ### 3.3 KV 清单 `catalog:manifest`
@@ -173,9 +175,25 @@ GitHub Actions (ubuntu-latest, cron 0 19 * * * UTC = 北京 03:00)
   "pageSize": 60,
   "channels": { "drama": { "chunks": 14, "total": 820 }, "movie": {…}, "anime": {…}, "documentary": {…} },
   "generatedAt": 1790000000,
-  "taxonomyVersion": "modu-2026-10-03"
+  "taxonomyVersion": "modu-2026-10-03",
+  "workFacts": {
+    "schema": 1,
+    "maxBytes": 524288,
+    "packs": {
+      "ab": { "key": "library/facts/<sha>.json", "bytes": 12345, "sha256": "<64位小写hex>" }
+    }
+  },
+  "coverOrigins": ["https://<经核验的封面域名>"]
 }
 ```
+
+**新公开 generation 强制规则**：
+- 用 `SHA-256(UTF-8(workId))` 的小写 hex 前缀定位叶 pack；前缀长度为 2..64，叶索引无父子重叠。初始 2 位，超限逐位拆分；单个 work 无法装入时拒绝发布，不截断剧集或线路。
+- 单 pack 最终序列化 UTF-8 字节数（含 schema/works 包装）≤524288；`key` 为 `library/facts/<sha256>.json`，`bytes` / `sha256` 必须与实际 blob 一致，读取校验失败即拒绝。
+- 完整 manifest 序列化 UTF-8 ≤65536 byte（64 KiB），不是仅限制 `workFacts`；`coverOrigins` 必须为显式 HTTPS origin 名单，禁止通配或从请求动态放行。
+- 目录、title、share、poster 使用同一 manifest generation 的公开事实与 flags。存在 `workFacts` 时，缺失、损坏、未启用的公开事实不得回读旧 D1 或稳定 title 资产；私密仍只走原有效高级授权 + 当次手动开启的双准入路径。
+- 发布必须显式指定正整数 `revision` 且比当前已发布 revision 递增；先上传并校验本代全部 blobs，再切换 manifest 指针。内容寻址 blobs 可长缓存，但稳定 `assets/catalog-bundle.json(.gz)` URL 不能 `immutable`，须可重验证并检查 revision；不可把 KV 最后写误称为跨节点瞬时原子切换。
+- `library/facts/` 不开放 pack 下载路由；公开 bucket 若有直链，Worker 不开放路由不等于 bucket 私有。此次不发布任何 private objects（含私密清单/快照）；须先确认公开 bucket 风险及真实访问隔离，再另行批准私密发布。
 
 ---
 
@@ -198,14 +216,14 @@ GitHub Actions (ubuntu-latest, cron 0 19 * * * UTC = 北京 03:00)
 **预估 LOC**: ~180 行
 
 1. 增量请求追加 `&h=24`；页间 `await sleep(1000 + Math.random()*1000)`。
-2. 产物：按 §3.1 生成 60 条/片分片 + §3.2 剧集清单；`wrangler r2 object put` 上传。
-3. 刷新 KV `catalog:manifest`（§3.3）。
+2. 新 generation 产物：按 §3.1 生成 60 条/片目录 + §3.2/§3.3 完整公开事实 packs，保证真实封面、flags、剧集多线路同代；先上传 blobs。
+3. 按 §3.3 校验显式递增 revision 后最后刷新 KV `catalog:manifest`。旧日更 publisher 若发现当前 manifest 有 `workFacts`，必须拒绝覆盖并保留现有 generation；该保护不是日更闭环完成，支持新 packs 的日更生成与真实 CI 周期仍待验收。
 4. **删除** `content-sync.yml` 中 `wrangler d1 execute …sync-incremental.sql` 步骤。
 5. 归一映射表（`content_aliases`/`trusted_work_mappings`）INSERT 仍走 D1。
 
 **验收**: AC-C2-1 R2 出现 `library/v{N}/drama/chunk-0.json`；AC-C2-2 KV manifest 可读且 revision 递增；AC-C2-3 本次运行 D1 无 `content_items` 写入；AC-C2-4 CI 日志页间隔 ≥1s。
 
-### C-2b: 私密资产独立管线
+### C-2b: 私密资产独立管线（后续门禁，本次禁止发布）
 
 **文件**: `edge/scripts/sync-private.mjs`(新建), `.github/workflows/content-sync.yml`
 **预估 LOC**: ~90 行
@@ -233,9 +251,9 @@ GitHub Actions (ubuntu-latest, cron 0 19 * * * UTC = 北京 03:00)
 **文件**: `edge/src/routes/titles.ts`
 **预估 LOC**: ~70 行
 
-1. `/api/titles/{id}`：公开 work → 读 R2 公开清单，`Cache-Control: public, max-age=86400`；私密 work → 双重准入校验后读 R2 私密清单，`no-store`。
-2. 未命中/未知/私密未准入 → 三者字节一致的 404。
-3. `/api/episodes/{id}/playback` 保留为**兼容重定向**：返回 302 至剧集清单中对应 `mediaUrl`（供旧版 APK 过渡），新客户端不再调用。
+1. `/api/titles/{id}`：有 `workFacts` 时公开 work 从当前 generation pack 投影详情（含 `item`、`workId` 与剧集多线路）；无 packs 的旧代才沿用旧 title 读取。私密保留原双重准入路径，`no-store`；本次不新增私密发布。
+2. 未命中/未知/私密未准入 → 三者字节一致的 404。pack 校验错误须按完整性错误拒绝，不能以旧 D1 事实掩盖；share 与 poster 同样按本代 facts 判定可见性、分享 flags 与真实封面，封面 origin 限于 manifest 显式名单。
+3. 旧 `/api/episodes/{id}/playback` 仅属于真实旧全局 episode id 的兼容边界；新详情的 `episodeNumber` 是本作局部编号，禁止把它送进旧 playback/proxy fallback。新客户端只消费详情线路，空线路/坏响应必须落错误态，不伪造旧代理兜底。
 
 **验收**: AC-C3b-1 公开剧目详情 D1 行读 = 0；AC-C3b-2 私密剧目未准入时响应与未知剧目字节一致。
 
@@ -262,7 +280,7 @@ GitHub Actions (ubuntu-latest, cron 0 19 * * * UTC = 北京 03:00)
 
 - **保留**: devices, card_coupons, coupon_bindings, coupon_rejected_devices, cloud_watch_history, cloud_user_profile, content_aliases, trusted_work_mappings, invitation_logs, private_session_revocations, line_health_signals
 - **停用（标记 DEPRECATED，不物理 DROP）**: content_items, content_episodes, episode_sources, public_search_fts, public_catalog_changes, source_records, ingest_sources, source_episode_links, content_tags, channels, channel_tier_audit_logs, source_providers
-- 路由层停止查询停用表（C-3/C-3b 已完成切换后才执行本项）。
+- 公开新 generation 路由停止查询旧公开内容事实表；私密原双准入路径依赖的 D1 表不得因公开 packs 切换而停用。只有相关消费者全部迁移并验收后，才可执行对应停用（本次不执行 migration）。
 
 **验收**: AC-C5-1 migration 执行成功；AC-C5-2 核销/断点/私密会话三流程回归通过。
 
@@ -300,8 +318,9 @@ KV `config:sources`：
 ## 五、施工顺序硬依赖（违反即产生脏状态）
 
 ```
-C-1(映射修正) → C-6(配置化) → C-2/C-2b(R2资产生成)
-        → C-3/C-3b(读路径切换) → [稳定验证 ≥ 1 个 CI 周期] → C-5(D1 停写停用)
+C-1(映射修正) → C-6(配置化) → C-2(公开 packs/目录生成)
+        → C-3/C-3b(同代读路径切换) → [稳定验证 ≥ 1 个 CI 周期，日更待闭环] → C-5(D1 停写停用)
+C-2b(私密发布) 本次不执行；先确认公开 bucket 风险与访问隔离，再另行批准
 C-4(遥测) 独立，任意时点可施工
 ```
 
@@ -317,3 +336,17 @@ C-4(遥测) 独立，任意时点可施工
 | → Track 3 | 目录与增量 | `/api/catalog`、`/api/catalog/changes`，Schema 见 §3.1；pageSize 恒 60 |
 | ← Track 3 | 遥测上报 | `POST /api/telemetry/lines`（C-4） |
 | → 契约文档 | 字段增补 | `firstPublishedAt`/`hitsTotal` 入 `ContentItem`；同步 openapi.yaml 与 verify_contracts |
+
+---
+
+## 七、变更记录与交付门禁
+
+| 日期 | 变更 | 状态/边界 |
+| :--- | :--- | :--- |
+| 2026-10-03 | v2 审计后重写 | 原任务基线保留 |
+| 2026-10-04 | 新公开事实 pack：UTF-8 id 哈希前缀叶索引、512 KiB blob / 64 KiB manifest、显式 coverOrigins、同 generation 目录/title/share/poster、无旧公开 D1 fallback；显式递增 revision、blob 后 manifest、稳定 bundle 禁 immutable；旧日更 publisher 禁覆盖 workFacts | 本次仅修订本 SPEC 与 SPEC-APP-REFACTOR；不执行代码/CI/Git/云端修改或发布 |
+| 2026-10-04 | 私密原双准入保留，本次不发布任何 private objects；公开 bucket 风险确认先于后续私密发布 | 用户已批准必要工程步骤与新 APK，但此文档任务不执行构建/签名/部署；不得据此标记生产完成 |
+
+**只读代码核查**：已有 `edge/scripts/work-fact-packs.mjs`、`edge/src/library/work-facts.ts`、`edge/scripts/library-catalog.mjs` 与打包器/路由接线可作为施工依据，不重复实现。打包器已有显式 revision 参数检查与 blobs 后 KV 发布；“比线上 revision 递增”仍为发布验收门禁，不因参数检查存在而视为已闭环。
+
+**全局进度地图**：G0 本次两份相关 SPEC 对齐；G1 生产 packs/manifest/封面与 flags 一致性待验；G2 新 packs 日更真实周期待闭环（旧 publisher 拒绝覆盖仅防退化）；G3 新 APK 真机播放/搜索/海报/手动目录检查待验；G4 集中交付与生产完成结论待上述证据。未取得证据不得跨门禁宣称完成。

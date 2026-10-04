@@ -79,6 +79,7 @@ export const createArtEngine: EngineFactory = async ({ container, theme, poster,
       art.on(name, wrapped);
       return () => art.off(name, wrapped);
     },
-    resize: () => art.autoSize(), destroy: () => { hls?.destroy(); art.destroy(); }
+    // autoSize() 会按媒体比例缩小容器；舞台尺寸必须由宿主 CSS 保持。
+    resize: () => { art.emit('resize'); }, destroy: () => { hls?.destroy(); art.destroy(); }
   };
 };

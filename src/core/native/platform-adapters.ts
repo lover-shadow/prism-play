@@ -1,15 +1,10 @@
 /**
- * Capacitor 原生插件到四大存储域注入接口的适配层 (SPEC §6.1 / §10)。
- *
- * 组合根只认这里的四个入口：平台判定、偏好域 `PreferenceStore`、公开缓存域 `CacheDisk`、
- * 追剧历史域 `SqliteLike`。接口形状由域文件定义，本层只做映射：不新增第二个写入入口，
- * 也不提供绕过 `assertWritable` 的旁路 —— 私密零留痕的闸门在 `PublicCache` 之上。
- *
- * 模块顶层零插件注册、零 I/O：jsdom 下的客户端测试必须能安全 import 本模块，
- * 插件一律在工厂内部按需 `await import()`。
+ * 原生存储接口适配（SPEC §6.1 / §10），不新增绕过域层写入闸门的入口。
+ * 顶层零插件注册、零 I/O；插件在工厂内按需 import，供 Web/jsdom 安全加载。
  */
 
 import { Capacitor } from '@capacitor/core';
+import { logger } from '../diagnostics';
 import type { CacheDisk, CacheWrite } from '../storage/public-cache';
 import type { PreferenceStore } from '../state/theme';
 import type { SqliteLike, SqliteStatement, SqliteValue } from '../storage/history-store';
@@ -21,11 +16,7 @@ export function isNativeHost(platform: () => boolean = (): boolean => Capacitor.
 
 // ------------------------------------------------------------------ 偏好域（Domain 2 的偏好半边）
 
-/**
- * `shared_prefs/CapacitorStorage.xml` 被备份白名单整文件收录，写进来的任何键都会换机迁移，
- * 所以本层只接受 `prism.` 前缀的键：凭证与会话形状的键不得借偏好域混进备份 (M-8)。
- * 键名原样透传、绝不重新拼装 —— 备份恢复是按键名对账的。
- */
+/** 偏好整文件进入备份白名单 (M-8)：只接受 prism.*，键名原样透传，不容凭证混入。 */
 export const PREFERENCE_KEY_PREFIX = 'prism.';
 
 export interface PreferencesLike {
@@ -183,11 +174,7 @@ export async function createCacheDisk(deps: CacheDiskDeps = {}): Promise<CacheDi
       return fromBase64(data);
     },
 
-    /**
-     * 暂存 -> 删除 -> 改名三段，复刻 MemoryCacheDisk 的"先删后写、整批失败整批不落"：
-     * 片段落在目标同目录（跨目录改名在 POSIX 上不保证原子替换），删除排在任何可见写入之前，
-     * 于是改名阶段的目标必然已被腾出。暂存阶段失败时目标与旧键都未被触碰，整批不落盘。
-     */
+    /** 同目录暂存 -> 删除 -> 改名；暂存失败不触碰旧键，删除先于可见写入。 */
     async writeBatch(writes: CacheWrite[], removes: string[]): Promise<void> {
       const targets = writes.map((write) => ({ path: cachePathOf(write.key), bytes: write.bytes }));
       const doomed = removes.map(cachePathOf);
@@ -255,6 +242,7 @@ function unavailableSqlite(): SqliteLike {
 
 function nativeSqlite(driver: SqliteDriverLike): SqliteLike {
   const handles = new Map<string, SqliteConnectionLike>();
+  const pending = new Map<string, Promise<SqliteConnectionLike>>();
   // 手里的句柄就是最权威的连接状态，不必再问一次原生桥；探测只在冷启动发生。
   async function probed(database: string): Promise<boolean> {
     return handles.has(database) || (await driver.isConnection(database, false)).result === true;
@@ -263,12 +251,25 @@ function nativeSqlite(driver: SqliteDriverLike): SqliteLike {
   async function attach(database: string): Promise<SqliteConnectionLike> {
     const held = handles.get(database);
     if (held !== undefined) return held;
-    const connection = (await probed(database))
-      ? await driver.retrieveConnection(database, false)
-      : await driver.createConnection(database, false, SQLITE_MODE, SQLITE_VERSION, false);
-    await connection.open();
-    handles.set(database, connection);
-    return connection;
+    const flight = pending.get(database);
+    if (flight !== undefined) return await flight;
+    const attaching = (async () => {
+      let stage = 'create';
+      try {
+        const connection = (await probed(database))
+          ? await driver.retrieveConnection(database, false)
+          : await driver.createConnection(database, false, SQLITE_MODE, SQLITE_VERSION, false);
+        stage = 'open';
+        await connection.open();
+        handles.set(database, connection);
+        return connection;
+      } catch (error) {
+        logger.error('history', `${stage} failed`, error);
+        throw error;
+      }
+    })();
+    pending.set(database, attaching);
+    try { return await attaching; } finally { pending.delete(database); }
   }
   return {
     isConnected: probed,

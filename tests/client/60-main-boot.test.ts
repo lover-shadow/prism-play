@@ -6,7 +6,7 @@
  * 所以【追剧】必须落 disabled 而不是空历史，【个人探索】开关必须不出现而不是灰着，
  * 断网必须退回离线态而不是伪造目录。任何"看起来更友好"的兜底都在这里被证伪。
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { boot } from '../../src/main';
 import type { PrismApp } from '../../src/main';
 import type { PrismNativeBridge } from '../../src/core/native/bridge';
@@ -33,7 +33,7 @@ function route(path: string, search: URLSearchParams): unknown {
   if (path === '/api/config/monetization') return { activeTiers: [], nudgePolicy: NUDGE, privateAccessTiers: ['B', 'Y', 'S'] };
   if (path === '/api/version') return { android: { versionCode: 200, versionName: '2.0.0', changelog: '断点续播', downloadUrl: '/dl/latest/android' } };
   const channel = search.get('channel') ?? 'drama';
-  return { items: [item({ channelId: channel, isPrivate: channel === 'private' })], page: Number(search.get('page') ?? '1'), pageSize: 24, total: 1, revision: 41 };
+  return { items: [item({ id: `${channel}_a`, channelId: channel, isPrivate: channel === 'private' })], page: Number(search.get('page') ?? '1'), pageSize: 24, total: 1, revision: 41 };
 }
 
 interface Probe { authorization?: string | null; requests: string[] }
@@ -59,6 +59,8 @@ function mountDom(): void {
 async function start(options: { offline?: boolean; catalogItems?: unknown[]; bridge?: PrismNativeBridge | null; channels?: unknown } = {}): Promise<{ app: PrismApp | null; probe: Probe }> {
   mountDom();
   const probe: Probe = { requests: [] };
+  // JSON 客户端与整包下载是独立通道；此套件验证无 seed / 未部署整包时的网络启动。
+  vi.stubGlobal('fetch', async () => new Response(null, { status: 404 }));
   if (options.channels !== undefined) CHANNEL_OVERRIDE = options.channels;
   const app = await boot({
     apiBaseUrl: 'https://play.prismos.org',
@@ -74,6 +76,7 @@ const flush = async (): Promise<void> => { for (let i = 0; i < 10; i += 1) await
 const query = <T extends Element>(selector: string): T | null => document.querySelector<T>(selector);
 
 describe('组合根：Web 宿主启动', () => {
+  afterEach(() => vi.unstubAllGlobals());
   beforeEach(() => {
     document.body.replaceChildren();
     window.localStorage.clear();

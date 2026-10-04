@@ -169,7 +169,9 @@ export function createEpisodeDrawer(options: EpisodeDrawerOptions): EpisodeDrawe
     if (target.closest('.prism-drawer__close') !== null) closeDrawer();
     const row = target.closest<HTMLElement>('.prism-drawer__item');
     if (row === null || row.dataset['episodeId'] === undefined) return;
-    currentId = Number(row.dataset['episodeId']);
+    const selected = Number(row.dataset['episodeId']);
+    if (!Number.isSafeInteger(selected) || selected < 1 || !detail?.episodes.some((episode) => episode.episodeId === selected)) return;
+    currentId = selected;
     mark();
     options.onSelect(currentId);
   });

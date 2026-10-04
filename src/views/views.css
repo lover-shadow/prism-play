@@ -85,12 +85,16 @@
 .pv-dialog-body { margin: 0; font-size: var(--text-sm); line-height: var(--leading-normal); color: var(--fg-2); }
 .pv-dialog-actions { display: flex; justify-content: flex-end; gap: var(--space-3); }
 
-.srch-suggest-item { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 44px; padding: 0 var(--space-3); border: 0; border-radius: var(--radius-sm); background: var(--surface-warm); color: var(--fg); text-align: left; cursor: pointer; transition: background var(--duration-fast) var(--ease-standard); }
+.srch-view > [hidden] { display: none; }
+.srch-view > .pv-field + [data-el='search-suggest'] { margin-top: calc(var(--space-2) - var(--space-4)); }
+.srch-view .srch-suggest { max-height: calc(var(--space-16) * 3); overflow-y: auto; overscroll-behavior: contain; }
+.srch-suggest-item { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 44px; padding: 0 var(--space-3); border: 0; border-radius: var(--radius-sm); background: var(--surface-warm); color: var(--fg); text-align: left; cursor: pointer; transition: background var(--duration-fast) var(--ease-standard); }
 .srch-suggest-item:hover { background: var(--surface-raised); }
 
 @media (min-width: 768px) {
   .pv-view { padding: var(--space-5) var(--space-6) var(--space-12); gap: var(--space-5); }
   .pv-rail-card { width: 132px; }
+  .srch-view > .pv-field + [data-el='search-suggest'] { margin-top: calc(var(--space-2) - var(--space-5)); }
 }
 
 @media (min-width: 1024px) {

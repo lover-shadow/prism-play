@@ -18,6 +18,7 @@ import type { RedeemOutcome } from './views/settings-view';
 import { CATALOG_CACHE_LIMIT_BYTES, createLocalSearchApi, createSearchIndex, createStorageDomains, isPrivateSubject, MemoryCacheDisk, POSTER_CACHE_LIMIT_BYTES } from './core/storage';
 import { PrismApiClient } from './core/api/client';
 import { createCatalogCacheService } from './core/catalog-cache';
+import { createPosterUrls } from './core/poster-urls';
 import { createUserSync } from './core/user-sync';
 import { createGrantProbe, grantAdaptersFor } from './core/identity/offline-grant';
 import { bindNotificationActions, installBridgeForPlatform } from './core/native/capacitor-bridge';
@@ -35,7 +36,6 @@ import { createSettingsView, SETTINGS_PREF_KEYS } from './views/settings-view';
 
 /** 搜索热词的唯一来源：本机公开快照的剧名，绝不内置词表（SPEC §10 私密与公开同条约束）。 */
 const HOT_WORD_LIMIT = 8;
-
 export interface BootOptions {
   bridge?: PrismNativeBridge | null;
   apiBaseUrl?: string;
@@ -73,6 +73,7 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
   storage.privateVault.clear();
 
   const defaultApiBaseUrl = options.apiBaseUrl ?? (isNativeHost() ? 'https://play.prismos.org' : '');
+  const posters = createPosterUrls(defaultApiBaseUrl);
   const client = new PrismApiClient({ baseUrl: defaultApiBaseUrl, fetchImpl: options.fetchImpl });
   client.bindSessionHolder(storage.privateVault.session);
   const grant = createGrantProbe({ credentials: storage.credentials, prefs, nowSeconds: now });
@@ -87,7 +88,7 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
   client.setAuthorization(stored.token);
 
   // §A-6.2 数据流：快照/增量批次落地即喂端侧 FTS5 索引；索引自己吞异常并记进 status()，不改落盘结论。
-  const catalog = createCatalogCacheService({ client, cache: storage.cache, nowSeconds: now, onSnapshotEntries: (feed) => void searchIndex.sync(feed) });
+  const catalog = createCatalogCacheService({ client, baseUrl: defaultApiBaseUrl, cache: storage.cache, nowSeconds: now, onSnapshotEntries: (feed) => void searchIndex.sync(feed) });
 
   /**
    * AC-02-3 的端侧兜底：公开频道响应里若混进私密条目（服务端故障或响应被篡改），它既不进界面也不进缓存读取面。
@@ -97,13 +98,12 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
     channels: () => catalog.api.channels(),
     catalog: async (input) => {
       const page = await catalog.api.catalog(input);
-      if (input.channel === 'private') return page;
-      const items = page.items.filter((entry) => !isPrivateSubject(entry));
-      return items.length === page.items.length ? page : { ...page, items };
+      const items = input.channel === 'private' ? page.items : page.items.filter((entry) => !isPrivateSubject(entry));
+      return { ...page, items: posters.items(items) };
     },
     cachedSnapshot: () => ({
       channels: storage.cache.getChannels(),
-      items: (channel: string) => storage.cache.list(channel).filter((entry) => !isPrivateSubject(entry))
+      items: (channel: string) => posters.items(storage.cache.list(channel).filter((entry) => !isPrivateSubject(entry)))
     })
   };
 
@@ -150,7 +150,7 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
    * 本机公开快照的剧目集合：榜单与热词的唯一数据源。私密判定同 `homeApi` 再挡一道（AC-02-3），
    * 私密内容连标题都不进 DOM。搜索 Overlay（A-3）不是 Tab，由首页搜索条拉起并在返回栈注册为 Layer（A-1）。
    */
-  const publicLocalItems = () => storage.cache.list().filter((entry) => !isPrivateSubject(entry));
+  const publicLocalItems = () => posters.items(storage.cache.list().filter((entry) => !isPrivateSubject(entry)));
   // A-6：搜索数据源换成本机 FTS5 索引；本机没有可用索引（Web 宿主无 SQLite）才如实回落云端检索。
   const searchApi = createLocalSearchApi({ index: searchIndex, localItems: publicLocalItems, remote: client });
   const overlay = createSearchOverlay({
@@ -215,14 +215,14 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
     const view = createSettingsView({
       api: client,
       apiBaseUrl: defaultApiBaseUrl,
+      catalogStatus: () => catalog.snapshotState(), checkCatalogUpdate: () => catalog.syncIncremental(),
       prefs,
       bridge,
       tokens: storage.privateVault.session,
       root,
       tierSource: identity.tierSource,
       deviceIdSource: identity.deviceIdSource,
-      bridgeSourceOf: bridgeSource,
-      now,
+      bridgeSourceOf: bridgeSource, now,
       onThemeChange: (mode) => applyTheme(mode),
       // 核销成功后凭证归位：视图自身不留 JWT 副本，写 Keystore 属凭证域。
       onOpenRedeem: (outcome: RedeemOutcome) => void handOffCredential(outcome),

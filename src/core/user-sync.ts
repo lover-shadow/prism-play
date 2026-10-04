@@ -1,20 +1,12 @@
 /**
- * 端云状态同步中枢（WP7 · SPEC §1.9 · AC-30）。三条纪律决定本文件的形状：
- * 1. **字段映射只此一处**（§1.9.2）：`local_watch_history`（snake_case + `last_` 前缀）⇄ `cloud_watch_history`（无前缀）
- *    ⇄ JSON（camelCase）只在下节映射函数里各转换一次，调用方不得再手写 `episode_number` / `episodeNumber`。
- * 2. **离场两触发、零轮询**（§1.9.3）：节点 ① 播放器销毁、节点 ② `appStateChange(isActive=false)`；本模块没有任何定时器。
- * 3. **私密零上报由既有闸门裁定**（§1.9.4）：待发队列是落盘动作，写入前一律过 `assertWritable()`（`storage-domains.ts:71`），
- *    它按 `isPrivate` / `channelId === 'private'` 判定而不看调用方自述；被拒时既不落盘也不发请求并如实出声，
- *    本文件不另起第二套私密判定。
- * 自带一条窄 transport 而不复用 `PrismApiClient`：客户端的 `request()` 是私有的、其 DTO 门面没有 `/api/user/sync`
- * （那文件属别的施工包），而 §3.1 的 `keepalive` 只能落在裸 `RequestInit` 上；这里只借它的 `FetchLike` 类型与
- * 同一个 JWT（组合根从凭证域读出后注入，与 `setAuthorization()` 同源）。诚实边界：云端只回传 `episode_number`、
- * 不回传本机 `last_episode_id`，集数不符的跨端断点由 `player-host.episodeFor` 按集数再认；云端完全陌生的剧目
- * 没有剧名与封面，不合并、不虚构卡片。
+ * 端云同步（SPEC §1.9）：字段映射集中于此，仅播放器离场与切后台触发，无轮询。
+ * 待发队列写入沿用 assertWritable 私密闸门；窄 transport 使用同源 JWT 与 keepalive。
+ * 云端不回传集 ID、剧名或封面：跨端集数由 player-host.episodeFor 识别，陌生剧目不虚构卡片。
  */
 import { App } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { flushLineTelemetry } from './native/telemetry';
+import { logger } from './diagnostics';
 import type { SyncHistoryRow, TitleDetail, UserSyncHistoryInput, UserSyncPreferences, UserSyncRequest, UserSyncStateResponse } from '../../edge/src/types/api';
 import type { FetchLike } from './api/client';
 import type { PreferenceStore } from './state/theme';
@@ -252,7 +244,10 @@ export function createUserSync(deps: UserSyncDeps): UserSyncService {
       try {
         await deps.history.upsertWatch(localInputOf(entry, mine, deps.provenanceOf?.(entry.contentId) ?? {}));
         merged += 1;
-      } catch { unresolved.push(entry.contentId); }
+      } catch (error) {
+        logger.error('history', 'upsert failed', error);
+        unresolved.push(entry.contentId);
+      }
     }
     return { merged, unresolved, rows: await listHistory() };
   }
@@ -281,7 +276,10 @@ export function createUserSync(deps: UserSyncDeps): UserSyncService {
         isPrivate: context.isPrivate === true, channelId: context.channelId,
         positionSeconds: row.position_seconds, durationSeconds: row.duration_seconds
       };
-      void deps.history.upsertWatch(input).catch(() => deps.onNotice?.('断点未能写入本机历史：追剧进度需端侧 SQLite 就绪'));
+      void deps.history.upsertWatch(input).catch((error: unknown) => {
+        logger.error('history', 'upsert failed', error);
+        deps.onNotice?.('历史写入失败，请查看诊断');
+      });
       last = exitReportOfProgress(row, context);
     },
     reportExit, replayPending, pull, observeBackground,

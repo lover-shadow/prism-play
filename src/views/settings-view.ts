@@ -17,6 +17,7 @@ import { ApiError } from '../core/api/client';
 import { applyTheme, readThemePreference, writeThemePreference, type PreferenceStore, type ThemeMode } from '../core/state/theme';
 import { attempt, band, button, errorCopy, glyphInto, make, readyBand, rowLine, stateBand, type Band, type ViewState } from './history-view';
 import { createDiagnosticsBand } from './diagnostics-band';
+import { createCatalogStatusBand, type CatalogStatusDeps } from './catalog-status';
 import './views.css';
 
 /** 注入的短时凭据持有者：必须与 `PrismApiClient.bindSessionHolder` 绑的是同一个 RAM holder。 */
@@ -34,7 +35,7 @@ export interface SettingsApi {
   closePrivateSession(): Promise<void>;
 }
 export interface RedeemOutcome { tier: CouponTier; tierName: string; expiresAt: number; token: string; }
-export interface SettingsViewDeps {
+export interface SettingsViewDeps extends CatalogStatusDeps {
   api: SettingsApi; prefs: PreferenceStore; bridge: PrismNativeBridge; tokens: VolatileTokens; root: HTMLElement;
   onThemeChange?: (mode: ThemeMode) => void;
   /** 核销成功后把契约结果交给宿主：写 Keystore 属凭证域工作包，本视图不留 JWT 副本。 */
@@ -115,8 +116,9 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
   const privateRow = rowLine('row-private', '个人探索（当次手动开启）', '冷启动默认关闭；开启态只存内存，不写历史、不可分享。', [privateSwitch]);
   ota.head.append(button('检查更新', () => void checkVersion(), { icon: 'refresh', cls: 'pv-btn-ghost', el: 'ota-check' }));
   const diagController = createDiagnosticsBand({ apiBaseUrl: deps.apiBaseUrl ?? '', nativeSource: nativeOnly, paintRows });
+  const catalogController = createCatalogStatusBand(deps);
   deps.root.classList.add('pv-view', 'set-view');
-  deps.root.append(make('h2', 'pv-head-title', '系统设置中枢'), appearance.wrap, playback.wrap, redeem.wrap, ota.wrap, diagController.wrap);
+  deps.root.append(make('h2', 'pv-head-title', '系统设置中枢'), appearance.wrap, playback.wrap, redeem.wrap, ota.wrap, ...(catalogController ? [catalogController.wrap] : []), diagController.wrap);
   // AC-02-2：构造即「关」，并丢弃任何遗留的当次凭据，绝不允许「界面已关但凭据仍在飞」。
   deps.tokens.write(null);
 
@@ -273,7 +275,7 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
     if (deps.deviceIdSource === undefined) paintRows(redeem, 'disabled', NO_DEVICE_ID_COPY, [redeemRow]);
     else paintRows(redeem, 'ready', '核销请求只提交 Android 端；离线可验证授权，但点播仍需联网。', [redeemRow]);
     await paintPrivateSection();
-    await diagController.paint();
+    await diagController.paint(); catalogController?.paint();
     // 视图级五态：loading → ready；偏好域不可读则整视图 error（其余态在各分区上如实呈现）。
     deps.root.dataset.state = theme.ok ? 'ready' : 'error';
   }
@@ -281,7 +283,7 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
     async mount(): Promise<void> { await reload(); },
     reload,
     destroy(): void {
-      disposed = true;
+      disposed = true; catalogController?.destroy();
       const hadSession = deps.tokens.read() !== null;
       closeDialog();
       // AC-02-4：离开视图必解除 FLAG_SECURE；顺手丢弃内存凭据，绝不留「界面已关但会话仍活」。

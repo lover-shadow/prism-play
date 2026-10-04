@@ -38,6 +38,8 @@ import { HTTP_STATUS_BY_ERROR_CODE, buildErrorResponse } from '../http/errors';
 import { jsonResponse } from '../http/json';
 import { renderSharePage } from '../html/share-page';
 import { sanitizeDisplayToken } from '../html/escape';
+import { factsManifest, readWorkFact } from '../library/work-facts';
+import { configUnavailableResponse } from '../config/kv-config';
 
 /** The document is public and short-lived: a takedown must be visible within a minute. */
 const SHARE_CACHE_CONTROL = 'public, max-age=60';
@@ -121,7 +123,17 @@ export async function handleShare(request: Request, env: Env, _clock: Clock): Pr
   const episodeNumber = dramaId === null ? null : parseRequestedEpisode(url.searchParams.get('ep'));
   if (dramaId === null || episodeNumber === null) return shareNotFoundResponse();
 
-  const resolved = await resolveShareableEpisode(env.DB, dramaId, episodeNumber);
+  const manifest = await factsManifest(env);
+  if (manifest === null) return configUnavailableResponse();
+  let resolved: ShareEpisode | null;
+  if (manifest?.workFacts !== undefined) {
+    const read = await readWorkFact(env, manifest, dramaId);
+    if (read.status === 'rejected') return configUnavailableResponse();
+    if (read.status !== 'ok' || !read.fact.shareable) return shareNotFoundResponse();
+    const ep = read.fact.asset.episodes.find((entry) => entry.episodeNumber === episodeNumber);
+    if (!ep) return shareNotFoundResponse();
+    resolved = { row: read.fact.row, episode: { id: 0, content_id: dramaId, episode_number: ep.episodeNumber, title: ep.title ?? null, duration_seconds: ep.durationSeconds ?? null } };
+  } else resolved = await resolveShareableEpisode(env.DB, dramaId, episodeNumber);
   if (resolved === null) return shareNotFoundResponse();
 
   // `?ref=` is display-only attribution: a URL parameter cannot survive the APK install, so it is

@@ -19,6 +19,7 @@ import type {
   VersionResponse
 } from '../../../edge/src/types/api';
 import { logger } from '../diagnostics';
+import { adaptTitleDetail } from './title-detail';
 
 /**
  * Typed client for the edge contract. DTOs are imported from `edge/src/types/api.ts` on purpose: one
@@ -144,8 +145,13 @@ export class PrismApiClient {
     return this.get(`/api/search/suggestions${queryString({ q })}`);
   }
 
-  title(titleId: string): Promise<TitleDetail> {
-    return this.get(`/api/titles/${encodeURIComponent(titleId)}`);
+  async title(titleId: string): Promise<TitleDetail> {
+    const raw = await this.get<unknown>(`/api/titles/${encodeURIComponent(titleId)}`);
+    try {
+      return adaptTitleDetail(raw, titleId);
+    } catch {
+      throw new ApiError('UNEXPECTED_RESPONSE', 200, '服务端返回了无法识别的剧集详情');
+    }
   }
 
   /**

@@ -141,6 +141,14 @@ describe('GET /assets/{file} (S-3)', () => {
     expect(miss.status).toBe(404);
   });
 
+  it('revalidates replaceable library bundles instead of caching them forever', async () => {
+    const key = 'assets/catalog-bundle.json';
+    const env = await assetEnv({ [key]: '{}' });
+    const response = await handleStaticAsset(new Request(`${ORIGIN}/${key}`), env, env.clock);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toBe('public, max-age=0, must-revalidate');
+  });
+
   it('404s an absent object, a missing bucket and any other name, and never guesses bytes', async () => {
     const cases: TestAssetEnv[] = [await assetEnv({}), await createTestEnv() as TestAssetEnv];
     for (const env of cases) {

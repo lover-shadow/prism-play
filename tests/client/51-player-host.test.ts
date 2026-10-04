@@ -12,6 +12,10 @@ import type { TitleDetail } from '../../edge/src/types/api';
 import type { WatchHistoryRow } from '../../src/core/storage/storage-domains';
 import { dispatchBackButtonForTest } from '../../src/core/native/back-button';
 import { detailOf, settle } from './player-harness';
+import Artplayer from 'artplayer';
+import { createArtEngine } from '../../src/player/art-engine';
+import playerCss from '../../src/player/player.css?raw';
+import hostCss from '../../src/player/player-host.css?raw';
 
 type FakeEngine = PlayerEngine & { sources: string[]; times: number[]; volumes: number[] };
 
@@ -179,6 +183,63 @@ describe('player-host 装配', () => {
     const back2 = await dispatchBackButtonForTest();
     expect(back2).toBe(true);
     expect(h.player.isOpen()).toBe(false);
+  });
+
+  it('真实 ArtPlayer 全屏/退出重排只通知 resize，不按 9:16 媒体比例缩小舞台容器', async () => {
+    // jsdom 不做像素布局：仅提供舞台几何，验证真实厂商代码的 inline style 与事件。
+    const css = document.createElement('style');
+    css.textContent = `${playerCss}\n${hostCss}`;
+    document.head.append(css);
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+    const load = vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {});
+    let art!: Artplayer;
+    const h = host({ engine: async (options) => {
+      vi.spyOn(options.container, 'getBoundingClientRect').mockImplementation(() => {
+        const fullscreen = !!options.container.closest('.prism-player-host--fullscreen');
+        return { width: 360, height: fullscreen ? 800 : 202.5, top: 0, left: 0, right: 360,
+          bottom: fullscreen ? 800 : 202.5, x: 0, y: 0, toJSON: () => ({}) };
+      });
+      const engine = await createArtEngine(options);
+      art = Artplayer.instances.at(-1)!;
+      Object.defineProperties(art.video, { videoWidth: { value: 540 }, videoHeight: { value: 960 } });
+      return engine;
+    } });
+    try {
+      await h.player.open('c1'); await settle();
+      const hostEl = h.mount.querySelector('.prism-player-host') as HTMLElement;
+      const playerEl = art.template.$player;
+      const autoSize = vi.fn();
+      art.on('autoSize', autoSize);
+      const resized = vi.fn();
+      art.on('resize', resized);
+      const cinemaBtn = Array.from(h.mount.querySelectorAll<HTMLButtonElement>('.action-island-item'))
+        .find((button) => button.textContent?.includes('沉浸全屏'))!;
+      const expectStageFill = () => {
+        expect(playerEl.style.height).toBe('');
+        expect(playerEl.style.width).toBe('');
+        expect(getComputedStyle(playerEl).width).toBe('100%');
+        expect(getComputedStyle(playerEl).height).toBe('100%');
+        expect(getComputedStyle(art.video).objectFit).toBe('contain');
+      };
+      expect(art.option.autoSize).toBe(false);
+      expectStageFill();
+      for (let cycle = 0; cycle < 2; cycle += 1) {
+        cinemaBtn.click();
+        expect(hostEl.classList.contains('prism-player-host--fullscreen')).toBe(true);
+        expectStageFill();
+        expect(await dispatchBackButtonForTest()).toBe(true);
+        expect(hostEl.classList.contains('prism-player-host--fullscreen')).toBe(false);
+        expect(h.player.isOpen()).toBe(true);
+        expectStageFill();
+      }
+      expect(autoSize).not.toHaveBeenCalled();
+      expect(resized).toHaveBeenCalledTimes(4);
+    } finally {
+      h.player.close();
+      css.remove();
+      play.mockRestore(); pause.mockRestore(); load.mockRestore();
+    }
   });
 
   it('通知栏动作映射到当前实例：切换播放、上下集、焦点回程', async () => {

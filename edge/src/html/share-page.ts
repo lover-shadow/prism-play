@@ -81,7 +81,8 @@ const SHARE_ELEMENT_IDS = {
 /** Copy is server-owned so the player script stays a mechanism with no strings in it. */
 const PLAYER_COPY: SharePlayerCopy = {
   unavailable: `这一集暂时没有可用播放源，请稍后重新打开本链接，或在【${APP_NAME}】App 内继续观看。`,
-  exhausted: `当前线路暂不可用：已按序尝试全部线路仍未起播，请稍后重新打开本链接，或在【${APP_NAME}】App 内继续观看。`,
+  exhausted: `当前线路暂不可用：本次候选线路尝试已结束，仍未起播，请稍后重新打开本链接，或在【${APP_NAME}】App 内继续观看。`,
+  interrupted: `播放中断：本次候选线路尝试已结束，请稍后重新打开本链接，或在【${APP_NAME}】App 内继续观看。`,
   noLibrary: `播放组件未能载入，请检查网络后重新打开本链接，或在【${APP_NAME}】App 内继续观看。`,
   noEngine: `当前浏览器内核既不接受该播放格式，也无法以硬件解码承载它，请在【${APP_NAME}】App 内继续观看。`,
   episode: '第 ',

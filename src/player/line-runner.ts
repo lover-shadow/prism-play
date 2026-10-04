@@ -21,6 +21,7 @@ import { clamp } from './gestures';
 import type { LineFallback } from './line-fallback';
 import type { PlayerEngine } from './engine-seam';
 import type { TitleManifestStore } from './title-manifest';
+import { ApiError } from '../core/api/client';
 
 /** 同一次故障的连发事件合并窗口。 */
 export const LINE_SWITCH_GUARD_MS = 1_200;
@@ -50,6 +51,8 @@ export interface LineRunnerDeps {
   clock: Clock;
   workId: () => string;
   episodeNumber: () => number;
+  /** Local manifest ids must never be sent to the legacy D1 endpoint, even if manifest loading fails. */
+  localEpisodeIds?: () => boolean;
 }
 
 export interface LineRunner {
@@ -86,6 +89,9 @@ export function createLineRunner(deps: LineRunnerDeps): LineRunner {
         lineIndex = hop.index;
         lastSwitchAt = -Infinity;
         return { kind: 'surface', surface: hopSurface(hop), resumeSeconds: resumed(resumeSeconds, 0) };
+      }
+      if (deps.localEpisodeIds?.() === true) {
+        return { kind: 'unavailable', error: new ApiError('SERVICE_UNAVAILABLE', 503, '暂无可用播放源') };
       }
       try {
         const info = await deps.api.playback(episodeId);

@@ -81,7 +81,8 @@ describe('§A-6.2 数据流：快照与增量批次落地即建索引', () => {
     const feeds: SnapshotFeed[] = [];
     const full = server({ '/api/channels': () => ok(topology()), '/api/catalog': () => ok(catalogPage('drama', CORPUS, 9)) });
     const service = createCatalogCacheService({
-      client: full.client, cache, pageSize: 3,
+      client: full.client, cache, pageSize: 3, baseUrl: EDGE,
+      fetchImpl: async () => new Response(null, { status: 404 }), // 明确未部署整包，验证分页 feed 路径。
       onSnapshotEntries: (feed) => { feeds.push(feed); void index.sync(feed); }
     });
     expect(await service.resyncFull()).toMatchObject({ revision: 9, full: true, offline: false });
@@ -106,7 +107,8 @@ describe('§A-6.2 数据流：快照与增量批次落地即建索引', () => {
     const cache = newCache();
     const service = createCatalogCacheService({
       client: server({ '/api/channels': () => ok(topology()), '/api/catalog': () => ok(catalogPage('drama', CORPUS, 9)) }).client,
-      cache, pageSize: 3, onSnapshotEntries: () => { throw new Error('索引写盘失败'); }
+      cache, pageSize: 3, baseUrl: EDGE, fetchImpl: async () => new Response(null, { status: 404 }),
+      onSnapshotEntries: () => { throw new Error('索引写盘失败'); }
     });
     expect(await service.resyncFull()).toMatchObject({ revision: 9, offline: false });
     expect(cache.list()).toHaveLength(CORPUS.length);

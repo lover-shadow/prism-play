@@ -212,6 +212,15 @@ export async function runPipeline(options = {}) {
   console.log(`=== ${isPrivate ? '私密' : '公开'}管线：${targets.length} 个采集目标（tid 归属全部来自 config-sources）===`);
   if (cli.pull) console.log(`状态快照取回: ${await pullState(isPrivate) ? 'R2' : '云端缺失，用本地空状态'}`);
 
+  if (cli.publish && !isPrivate) {
+    const { discoverRestAuth } = await import('./publish.mjs');
+    const auth = await discoverRestAuth();
+    if (auth === null) throw new Error('Cannot verify current catalog generation before legacy publication');
+    const url = `https://api.cloudflare.com/client/v4/accounts/${auth.account}/storage/kv/namespaces/${INFRA.kvNamespaceId}/values/${encodeURIComponent(KV_KEYS.manifest)}`;
+    const response = await fetch(url, { headers: { Authorization: `Bearer ${auth.token}` } });
+    if (!response.ok) throw new Error(`Cannot verify catalog manifest: ${response.status}`);
+    if ((await response.json()).workFacts) throw new Error('Legacy incremental publisher cannot replace a work-facts generation; preserve the current catalog');
+  }
   const state = loadState(isPrivate);
   const entries = cli.network ? await collectFromNetwork(targets, cli.hours) : collectFromCache(targets);
   console.log(`本轮条目: ${entries.length} 条（${cli.network ? `上游 h=${cli.hours} 小时窗口` : '本地 harvest 缓存离线干跑'}）`);

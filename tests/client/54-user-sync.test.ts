@@ -6,12 +6,27 @@
  * 请求被掐断后条目是否仍在队列里并在下次冷启动先补传、私密断点是否做到零网络、合并是否只取较新者。
  * 历史/偏好替身见 `user-sync-harness.ts`——闸门用生产的 `assertWritable`，不在测试里另立一套判定。
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { logger } from '../../src/core/diagnostics';
 import { localInputOf, PENDING_QUEUE_KEY, USER_SYNC_PATH, wireHistoryOf, wireRequest } from '../../src/core/user-sync';
 import { createPrivateVault } from '../../src/core/storage/private-vault';
 import { bodyOf, breakpoint, fakeHistory, harness, MemoryPrefs, NOW, posted, queuedOf, row, settle, SYNC_URL, TOKEN } from './user-sync-harness';
 
 describe('AC-30 端云同步：上报管道与字段映射', () => {
+  it('公开断点失败诊断保留原异常，不附剧名 URL 或凭证，不误报插件缺席', async () => {
+    const history = fakeHistory();
+    const error = new Error('write failed');
+    history.upsertWatch = async () => { throw error; };
+    const logged = vi.spyOn(logger, 'error');
+    try {
+      const { sync, notices } = harness([], undefined, { history });
+      sync.onProgress(row(), { channelId: 'drama' });
+      await settle();
+      expect(logged).toHaveBeenCalledWith('history', 'upsert failed', error);
+      expect(notices).toContain('历史写入失败，请查看诊断');
+      expect(logged.mock.calls).toEqual([['history', 'upsert failed', error]]);
+    } finally { logged.mockRestore(); }
+  });
   it('AC-30 离场断点以 keepalive POST /api/user/sync 上报，并带上凭证域读出的 Bearer', async () => {
     const { sync, calls } = harness();
     expect(await sync.reportExit(breakpoint())).toBe(true);

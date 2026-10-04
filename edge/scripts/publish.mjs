@@ -140,7 +140,7 @@ async function putWithRetry(upload, key, file) {
 
 /** 上传：分片与清单走 R2，KV 键走 kv key put，状态快照回写供下一日增量续算。 */
 export async function publishFiles(files, kvEntries, options) {
-  const { dryRun, publish, isPrivate } = options;
+  const { dryRun, publish, isPrivate, skipState = false } = options;
   if (dryRun || !publish) {
     console.log(`${dryRun ? '[dry-run]' : '[未加 --publish]'} 跳过 ${files.length} 个 R2 对象与 ${kvEntries.length} 个 KV 键的上传（未触碰云端）。`);
     return;
@@ -157,6 +157,11 @@ export async function publishFiles(files, kvEntries, options) {
       await wrangler('r2', 'object', 'put', `${INFRA.r2Bucket}/${key}`, '--file', file, '--content-type', cType, '--remote');
     });
   }
+  const statePath = path.resolve(LOCAL.state(isPrivate));
+  if (!skipState && fs.existsSync(statePath)) {
+    if (auth !== null) await restPut(auth, stateKey(isPrivate), fs.readFileSync(statePath));
+    else await wrangler('r2', 'object', 'put', `${INFRA.r2Bucket}/${stateKey(isPrivate)}`, '--file', statePath, '--content-type', 'application/json', '--remote');
+  }
   for (const { key, value } of kvEntries) {
     if (auth !== null) {
       await restKvPut(auth, key, value);
@@ -166,10 +171,6 @@ export async function publishFiles(files, kvEntries, options) {
       await wrangler('kv', 'key', 'put', key, '--binding', INFRA.kvBinding, '--path', tmp, '--remote');
       fs.rmSync(tmp, { force: true });
     }
-  }
-  const statePath = path.resolve(LOCAL.state(isPrivate));
-  if (fs.existsSync(statePath)) {
-    await wrangler('r2', 'object', 'put', `${INFRA.r2Bucket}/${stateKey(isPrivate)}`, '--file', statePath, '--content-type', 'application/json', '--remote');
   }
 }
 

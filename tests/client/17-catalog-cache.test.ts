@@ -1,11 +1,5 @@
 // @vitest-environment jsdom
-/**
- * Builder-Catalog 验收：`src/core/catalog-cache.ts`（SPEC §7 公开目录缓存服务；AC-01 快照先显 / AC-18 同修订原子
- * 替换、增量游标、断网保留旧版、海报落域 / AC-02-5 私密零留痕；API-SPEC §一.2、§八 的 409/410 线协议义务）。
- * 落盘一律用真实 `PublicCache + MemoryCacheDisk`，只以 Proxy 记录调用序列：私密闸门、修订守卫与容量 LRU 一刻也没被
- * 替换掉，"绕过公开缓存域"在这套用例里不可能成立。网络侧用真 `PrismApiClient` + 脚本化 fetch，查询串与错误码都按真实
- * 线协议走一遍；断网用 fetch 抛错表达（客户端据此产出 NETWORK_ERROR），而不是伪造响应体。
- */
+/** 公开目录缓存验收：真实缓存域与契约客户端覆盖 AC-01、AC-18、AC-02-5。 */
 import { afterEach, describe, expect, it } from 'vitest';import type { CatalogChangesResponse, CatalogResponse, ChannelItem, ChannelsResponse, ContentItem } from '../../edge/src/types/api';
 import { ApiError, PrismApiClient } from '../../src/core/api/client';
 import { createCatalogCacheService, type SyncOutcome } from '../../src/core/catalog-cache';
@@ -72,8 +66,11 @@ function harness(routes: Record<string, Handler> = {}, options: { disk?: MemoryC
     const handler = routes[url.pathname];
     return handler === undefined ? down(url) : await handler(url);
   } });
-  const service = createCatalogCacheService({ client, cache: spyCache(real, calls), pageSize: 1, nowSeconds: () => 1_700_000_000,
-    fetchImpl: async (url: string) => { posterFetches.push(url); return options.poster === undefined ? image(PNG) : await options.poster(new URL(url, EDGE)); } });
+  const service = createCatalogCacheService({ client, baseUrl: EDGE, cache: spyCache(real, calls), pageSize: 1, nowSeconds: () => 1_700_000_000,
+    fetchImpl: async (url: string) => {
+      if (url.includes('catalog-bundle.json')) return { ok: false, status: 404 } as Response;
+      posterFetches.push(url); return options.poster === undefined ? image(PNG) : await options.poster(new URL(url, EDGE));
+    } });
   service.onSynced((outcome) => outcomes.push(outcome));
   const commits = () => calls.filter((call) => call === 'commitSnapshot:'), staged = (channelId?: string) => calls.filter((call) => channelId === undefined ? call.startsWith('stagePage') : call === `stagePage:${channelId}`);
   return { service, cache: real, disk, calls, seen, outcomes, posterFetches, commits, staged };
@@ -234,7 +231,9 @@ describe('api 读面：网络优先、快照兜底、两者皆无则抛出原错
     expect((await degraded.service.api.catalog({ channel: 'drama', page: 1, pageSize: 1 })).total).toBe(2);
     const gone = harness({ '/api/catalog': () => fail('NOT_FOUND', 404, '资源不存在') }, { disk });
     await gone.service.hydrate();
-    await expect(gone.service.api.catalog({ channel: 'drama', page: 1, pageSize: 1 })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect((await gone.service.api.catalog({ channel: 'drama', page: 1, pageSize: 1 })).revision).toBe(7);
+    expect(gone.seen).toEqual([]); // 完整公开快照优先，不让旧云端首屏覆盖。
+    await expect(gone.service.api.catalog({ channel: 'private', page: 1, pageSize: 1 })).rejects.toMatchObject({ code: 'NOT_FOUND' });
     const empty = harness(); // 断网且无快照：错误原样抛出，由视图渲染 offline 态，而不是返回空 items
     await expect(empty.service.api.catalog({ channel: 'drama', page: 1, pageSize: 20 })).rejects.toMatchObject({ code: 'NETWORK_ERROR' });
     await expect(empty.service.api.channels()).rejects.toBeInstanceOf(ApiError);

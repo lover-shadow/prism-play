@@ -13,7 +13,11 @@ type FileEntry = { name: string; type: string; size: number };
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
-const write = (key: string, text: string): CacheWrite => ({ key, bytes: enc.encode(text) });const only = (ops: string[], verb: string): number[] => ops.map((op, index) => ({ op, index })).filter((entry) => entry.op.startsWith(verb)).map((entry) => entry.index);
+const write = (key: string, text: string): CacheWrite => ({ key, bytes: enc.encode(text) });
+const only = (ops: string[], verb: string): number[] => ops
+  .map((op, index) => ({ op, index }))
+  .filter((entry) => entry.op.startsWith(verb))
+  .map((entry) => entry.index);
 
 /** 只记运算与路径：断言适配层的调用形状，而不是插件实现。 */
 class FakeFs implements FilesystemLike {

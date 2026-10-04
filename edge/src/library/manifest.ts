@@ -33,6 +33,8 @@ export interface CatalogManifest {
   revision: number;
   pageSize: number;
   channels: Record<string, ChannelInventory>;
+  workFacts?: { schema: 1; maxBytes: 524288; packs: Record<string, { key: string; bytes: number; sha256: string }> };
+  coverOrigins?: string[];
 }
 
 function isChannelKey(value: string): boolean {
@@ -69,7 +71,30 @@ export function validatePublicManifest(raw: unknown): CatalogManifest | null {
   if (!isCount(raw.pageSize) || raw.pageSize < 1) return null;
   if (Number(raw.pageSize) !== CATALOG_PAGE_SIZE) return null;
   if (!isRecord(raw.channels)) return null;
-  return { revision: Number(raw.revision), pageSize: CATALOG_PAGE_SIZE, channels: validateChannels(raw.channels) };
+  const manifest: CatalogManifest = { revision: Number(raw.revision), pageSize: CATALOG_PAGE_SIZE, channels: validateChannels(raw.channels) };
+  if (raw.workFacts !== undefined) {
+    const facts = raw.workFacts;
+    if (!isRecord(facts) || facts.schema !== 1 || facts.maxBytes !== 524288 || !isRecord(facts.packs)) return null;
+    if (new TextEncoder().encode(JSON.stringify(facts)).byteLength >= 65536) return null;
+    const leaves = Object.keys(facts.packs).sort();
+    for (let i = 0; i < leaves.length; i++) {
+      const prefix = leaves[i], pack = facts.packs[prefix];
+      if (!/^[a-f0-9]{2,64}$/.test(prefix) || (i > 0 && prefix.startsWith(leaves[i - 1]))) return null;
+      if (!isRecord(pack) || typeof pack.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(pack.sha256)) return null;
+      if (pack.key !== `library/facts/${pack.sha256}.json` || !isCount(pack.bytes) || pack.bytes < 1 || pack.bytes > 524288) return null;
+    }
+    manifest.workFacts = facts as unknown as NonNullable<CatalogManifest['workFacts']>;
+    if (!Array.isArray(raw.coverOrigins)) return null;
+  }
+  if (raw.coverOrigins !== undefined) {
+    if (!Array.isArray(raw.coverOrigins) || !raw.coverOrigins.every((origin) => {
+      if (typeof origin !== 'string') return false;
+      try { const url = new URL(origin); return url.protocol === 'https:' && url.origin === origin && !url.username && !url.password; }
+      catch { return false; }
+    })) return null;
+    manifest.coverOrigins = raw.coverOrigins;
+  }
+  return manifest;
 }
 
 /**

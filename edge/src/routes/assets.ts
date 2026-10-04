@@ -115,7 +115,8 @@ export async function handleStaticAsset(
 
   const headers: Record<string, string> = {
     'Content-Type': target.contentType,
-    'Cache-Control': IMMUTABLE_CACHE_CONTROL,
+    'Cache-Control': /(?:library\.db|catalog-bundle(?:\.[0-9a-f]+)?\.json)/.test(target.key)
+      ? 'public, max-age=0, must-revalidate' : IMMUTABLE_CACHE_CONTROL,
     // Sniffing a script is the whole point of serving it, so say what it is and mean it.
     'X-Content-Type-Options': 'nosniff',
     Vary: 'Accept-Encoding'

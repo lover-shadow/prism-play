@@ -1,3 +1,4 @@
+import { factsManifest, readWorkFact } from '../library/work-facts';
 import type { Clock } from '../core/clock';
 import type { Env } from '../types/env';
 import type { ContentRow } from '../db/content-repo';
@@ -15,23 +16,7 @@ import { originOf } from '../http/serialize';
 import { HLS_MANIFEST_CONTENT_TYPE, HlsReferenceUnresolvableError, isHlsManifest, rewriteMediaPlaylist } from '../media/hls-rewrite';
 import { assertAllowedTarget, globalFetcher, openUpstream, UpstreamFetchFailure, UpstreamTargetRejectedError } from '../media/upstream';
 
-/**
- * `GET /proxy/{kind}/{handle}` — the client's only media entry point (API-SPEC §六).
- *
- * Authorization is re-derived on *every* request, including each HLS child, key, subtitle and Range:
- * D1 row visibility, the private double-admission predicate, the D1 upstream whitelist, and for `media`
- * the short-lived signature over (kind, handle, exp). A sealed handle is trusted as data only, never as
- * authority, because a copyable URL must not outlive the state that minted it.
- *
- * Refusal shapes (documented contract gap — see the G2 report):
- * - `404` + `no-store`, undifferentiated: unknown row, unpublished row, private row without admission,
- *   unparseable or tampered sealed handle, episode whose source is gone. Private must never answer
- *   403/401, or the status itself becomes a probe for "there is a private thing here".
- * - `403` + `no-store`, one body for expired/invalid/missing: a `media` signature that does not verify,
- *   or a target origin that left the whitelist. openapi pins 403 to 「代理签名失效」, but the closed
- *   error enum has no proxy member, so `CREDENTIAL_EXPIRED` carries it and no message names the target.
- * Nothing here reads or writes KV: a CDN/KV tier in front of the proxy is deliberately not part of G2.
- */
+/** Public posters use manifest facts when published; private/media retain admission and D1 authority. */
 
 /** Public posters are revalidated by ETag, so a long max-age would only delay a cover swap. */
 /** Only `Range` is forwarded upstream: a client header must never steer the outbound request further. */
@@ -164,8 +149,9 @@ async function relay(input: {
   targetUrl: string;
   isPrivate: boolean;
   childMinter?: (childTargetUrl: string) => Promise<string>;
+  coverOrigins?: readonly string[];
 }): Promise<Response> {
-  const allowedOrigins = await listAllowedUpstreamOrigins(input.env.DB);
+  const allowedOrigins = input.coverOrigins === undefined ? await listAllowedUpstreamOrigins(input.env.DB) : new Set(input.coverOrigins);
   let target: URL;
   let upstream: Response;
   try {
@@ -230,7 +216,20 @@ async function relay(input: {
  * valid signature, and every denial is the same 404 so privacy is never announced.
  */
 async function servePoster(request: Request, env: Env, clock: Clock, url: URL, handle: string, fetcher: UpstreamFetcher) {
-  const row = await findContentRow(env.DB, handle);
+  const manifest = await factsManifest(env);
+  if (manifest === null) refusal('SERVICE_UNAVAILABLE', 503);
+  let row: ContentRow | null;
+  let coverOrigins: readonly string[] | undefined;
+  if (manifest?.workFacts !== undefined) {
+    const read = await readWorkFact(env, manifest, handle);
+    if (read.status === 'rejected') refusal('SERVICE_UNAVAILABLE', 503);
+    if (read.status === 'ok') { row = read.fact.row; coverOrigins = manifest.coverOrigins; }
+    else {
+      if (!(await privateAdmitted(request, env, clock))) refusal('NOT_FOUND', 404);
+      row = await findContentRow(env.DB, handle);
+      if (row === null || !isPrivateRow(row)) refusal('NOT_FOUND', 404);
+    }
+  } else row = await findContentRow(env.DB, handle);
   if (row === null || row.enabled !== 1) refusal('NOT_FOUND', 404);
   const coverUrl = row.cover_url;
   if (coverUrl === null || coverUrl === '') refusal('NOT_FOUND', 404);
@@ -243,7 +242,7 @@ async function servePoster(request: Request, env: Env, clock: Clock, url: URL, h
   if (etag !== null && ifNoneMatchHits(request.headers.get('If-None-Match'), etag)) {
     return new Response(null, { status: 304, headers: posterCacheHeaders(etag, isPrivate) });
   }
-  const relayed = await relay({ request, env, fetcher, targetUrl: coverUrl, isPrivate });
+  const relayed = await relay({ request, env, fetcher, targetUrl: coverUrl, isPrivate, coverOrigins });
   if (etag !== null) relayed.headers.set('ETag', etag);
   relayed.headers.set('Cache-Control', isPrivate ? 'no-store' : `public, max-age=${PUBLIC_POSTER_MAX_AGE_SECONDS}`);
   return relayed;
