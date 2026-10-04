@@ -175,7 +175,7 @@ public class MainActivity extends BridgeActivity {
         super.onWindowFocusChanged(focus);
         if (focus && immersive) hideBars();
     }
-    @Override protected void onDestroy() { restoreBars(); super.onDestroy(); }
+    @Override public void onDestroy() { restoreBars(); super.onDestroy(); }
 
     private void applyFlag(int flag, boolean on) {
         if (on) {
