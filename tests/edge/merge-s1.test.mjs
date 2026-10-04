@@ -2,6 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mergeS1, validateCandidates } from '../../edge/scripts/merge-s1.mjs';
 const fact = (id = '123') => ({ id: `drama_s_${id}`, workId: `drama_s_${id}`, sourceItemId: id, providerId: 'provider_s1', title: '同名剧', channelId: 'drama', category: '都市', isPrivate: false, enabled: true, shareable: true, episodeCount: 1, classificationEvidence: { category: 'ai-drama', basis: 'authorized-category-screenshot' }, episodes: [{ episodeNumber: 1, sourceEpisodeId: `${id}1`, title: '第1集', lines: [{ providerId: 'provider_s1', mediaUrl: 'https://media.example/real.mp4' }] }] });
@@ -34,12 +37,24 @@ test('reject partial, private, duplicate, unsafe URL, missing classification evi
 });
 test('CLI dry-run accepts candidates without opening database; protects original and unsupported options', () => {
   const cli = fileURLToPath(new URL('../../edge/scripts/merge-s1.mjs', import.meta.url));
-  const run = (...args) => spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8' });
-  const dry = run('--dry-run');
-  assert.equal(dry.status, 0);
-  assert.equal(JSON.parse(dry.stdout).dryRun, true);
-  assert.equal(run('--db=D:/DEV/prism-play/build/library_full.db').status, 1);
-  assert.equal(run('--publish').status, 1);
+  const dir = mkdtempSync(path.join(tmpdir(), 'merge-s1 fixture-'));
+  try {
+    const candidates = path.join(dir, 'candidates.json');
+    writeFileSync(candidates, JSON.stringify({ candidates: [fact()] }));
+    const run = (...args) => spawnSync(process.execPath, [cli, `--candidates=${candidates}`, ...args], { encoding: 'utf8', cwd: dir });
+    const dry = run('--dry-run');
+    assert.equal(dry.status, 0, dry.stderr);
+    assert.deepEqual(JSON.parse(dry.stdout), {
+      dryRun: true, works: 1, episodes: 1,
+      dbPath: fileURLToPath(new URL('../../build/library_repair.db', import.meta.url)),
+    });
+    assert.equal(run(`--db=${fileURLToPath(new URL('../../build/library_full.db', import.meta.url))}`).status, 1);
+    assert.equal(run('--publish').status, 1);
+    const missing = spawnSync(process.execPath, [cli, '--dry-run', `--candidates=${path.join(dir, 'missing.json')}`], { encoding: 'utf8', cwd: dir });
+    assert.equal(missing.status, 1);
+    assert.equal(missing.stdout, '');
+    assert.match(missing.stderr, /S1 merge rejected or rolled back; no media details logged/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 test('transaction rollback preserves previous works on late identity conflict', () => {
   const db = fixture();
