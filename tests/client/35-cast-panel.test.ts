@@ -10,7 +10,6 @@ import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { buildDetailBody } from '../../src/player/player-detail';
-import { AUTO_CONTINUE_GRACE_MS } from '../../src/player/cast-ports';
 import { PROXY, harness, pick } from './cast-harness';
 import { detailOf, settle } from './player-harness';
 
@@ -108,19 +107,17 @@ describe('AC-24 激活态与自动连播', () => {
     expect(h.pushed).toEqual([{ id: 'lan-1', url: `${PROXY}&ep=11`, title: '测试剧 第1集' }]);
     expect(h.panel.phase()).toBe('casting');
     expect(h.banner().hidden).toBe(false);
-    expect(h.text('.prism-cast-banner__text')).toBe('正在投屏至 客厅的小米电视 · 支持自动无缝连播');
+    expect(h.text('.prism-cast-banner__text')).toBe('正在投屏至 客厅的小米电视');
     expect(h.sheet().hidden).toBe(true);
   });
 
-  it('AC-24 连播按整集时长再加保护间隔计时，到点自动推下一集', async () => {
+  it('R26-06 duration does not prove renderer ended: never advance on a wall timer', async () => {
     const h = harness({ durationSeconds: 100 });
     await pick(h);
-    expect(h.timers.delays).toEqual([100 * 1000 + AUTO_CONTINUE_GRACE_MS]);
+    expect(h.timers.delays).toEqual([]);
     h.timers.fire();
     await settle();
-    expect(h.pushed).toHaveLength(2);
-    expect(h.pushed[1].url).toBe(`${PROXY}&ep=12`);
-    expect(h.pushed[1].title).toBe('测试剧 第2集');
+    expect(h.pushed).toHaveLength(1);
     expect(h.panel.phase()).toBe('casting');
   });
 
@@ -173,6 +170,11 @@ describe('AC-24 激活态与自动连播', () => {
     await h.panel.syncNow();
     expect(h.pushed).toHaveLength(2);
     expect(h.pushed[1].url).toBe(`${PROXY}&ep=13`);
+  });
+
+  it('R26-06 destroy stops the actual renderer and discovery client', async () => {
+    const h = harness(); await pick(h); h.panel.destroy(); await settle();
+    expect(h.calls).toContain('control:stop'); expect(h.calls).toContain('stop');
   });
 
   it('AC-24 样式口径：设备行与状态条按钮命中区 ≥44px，取值全部来自 tokens 且零裸色值', () => {

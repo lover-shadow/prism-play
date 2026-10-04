@@ -17,10 +17,10 @@
 -->
 <full-backup-content>
     <!-- Domain 2: watch history + resume breakpoints (换机可接着看). -->
-    <include domain="database" path="prism_local.db" />
-    <include domain="database" path="prism_local.db-journal" />
-    <include domain="database" path="prism_local.db-wal" />
-    <include domain="database" path="prism_local.db-shm" />
+    <include domain="database" path="prism_localSQLite.db" />
+    <include domain="database" path="prism_localSQLite.db-journal" />
+    <include domain="database" path="prism_localSQLite.db-wal" />
+    <include domain="database" path="prism_localSQLite.db-shm" />
     <include domain="sharedpref" path="CapacitorStorage.xml" />
 
     <!-- Domain 1: keystore-bound ciphertext, unrestorable on any other device. -->

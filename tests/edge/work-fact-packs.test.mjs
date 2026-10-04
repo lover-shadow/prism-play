@@ -182,6 +182,25 @@ test('recursive hash nibble splitting is deterministic, byte accurate and conten
   assert.deepEqual(recovered.sort(), ids.sort());
 });
 
+test('large route inventory uses compact directory without dropping any facts or raising caps', () => {
+  const facts = new Map(Array.from({ length: 1000 }, (_, i) => {
+    const id = `drama_m_${i}`;
+    return [id, fact(id, { synopsis: 'x'.repeat(130000) })];
+  }));
+  const result = buildWorkFactPacks(facts);
+  assert.equal(result.workFacts.schema, 2);
+  assert.ok(Buffer.byteLength(serializeManifest({ workFacts: result.workFacts })) <= 65536);
+  let count = 0;
+  for (const [prefix, [bytes, sha256]] of Object.entries(result.workFacts.packs)) {
+    const object = result.objects.find((entry) => entry.key === `library/facts/${sha256}.json`);
+    assert.equal(bytes, Buffer.byteLength(object.value));
+    assert.equal(sha256, digest(object.value));
+    assert.ok(bytes <= MAX_PACK_BYTES);
+    for (const id of Object.keys(JSON.parse(object.value).works)) { assert.ok(digest(id).startsWith(prefix)); count++; }
+  }
+  assert.equal(count, facts.size);
+});
+
 test('exact final UTF-8 boundary passes and oversized single work fails', () => {
   const value = fact('a', { synopsis: '' });
   const overhead = Buffer.byteLength(JSON.stringify({ schema: 1, works: { a: value } }), 'utf8');

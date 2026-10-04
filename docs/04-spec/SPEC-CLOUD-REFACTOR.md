@@ -339,6 +339,14 @@ C-4(遥测) 独立，任意时点可施工
 
 ---
 
+## 6.1 v2.6修复增量（当前规则，全部待验）
+
+关联正本§10.1与 `D:/DEV/prism-play/docs/04-spec/SPEC-v2.6.3-REPAIR.md` R26-02/08/11/12。搜索、补全及related候选必须复核当前generation公开facts，与目录/title/share/poster同代；禁止旧anime ID、两集截断、有workFacts回旧公开D1。完整集数与真实热度缺失明确不足，不制造来源数量、集数或热度。
+
+每日增量必须产新完整fact packs、目录、bundle、manifest，显式递增revision、校验后blobs先指针后；旧publisher拒覆盖workFacts仅防退化，不标日更完成。完整基库与当天touched不得混淆；来源覆盖按待证矩阵逐provider调查，旧库另一来源多集与provider_m3部分合集分别记录，后台调查未完。
+
+私密原双准入读取及D1消费者保持，本次不发布private objects；真实bucket访问隔离和CI secrets/备份分别后续批，无权限/密钥写入授权，不从历史“已配置”推导当前可用性。二维码字段与公开计时持久模型待先立契约，云商业配置和核销安全边界不变。
+
 ## 七、变更记录与交付门禁
 
 | 日期 | 变更 | 状态/边界 |

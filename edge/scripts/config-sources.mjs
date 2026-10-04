@@ -53,6 +53,8 @@ export const TYPE_LABELS = {
  * policy: private | exclude —— AC-C6-2 三态开关，exclude 表示该分类彻底不进任何管线。
  */
 export const PROVIDERS = [
+  { id: 'provider_s1', shortCode: 's', baseUrl: 'https://hongguoduanju.com', privacy: 'public',
+    crawlable: false, adapter: 'public-router', channels: [{ channelId: 'drama', typeIds: [] }] },
   {
     id: 'provider_m1',
     shortCode: 'm',

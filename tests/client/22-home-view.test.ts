@@ -39,7 +39,7 @@ describe('home-view 挂载与默认高亮（AC-01）', () => {
     expect(h.root.querySelectorAll('[data-channel-id="private"]').length).toBe(0);
     expect(h.root.innerHTML.toLowerCase()).not.toContain('private');
     expect(h.root.textContent ?? '').not.toContain('个人探索');
-    expect(Array.from(h.root.querySelectorAll('.capsule')).map((pill) => pill.textContent)).toEqual(['全部', '都市', '战神', '逆袭']);
+    expect(Array.from(h.root.querySelectorAll('.capsule[data-category]')).map((pill) => pill.textContent)).toEqual(['全部', '都市', '战神', '逆袭']);
   });
 
   it('云端下发 private 时才渲染它；私密条目自身也不带分享按钮', async () => {

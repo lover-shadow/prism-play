@@ -10,11 +10,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
-  INFRA, KV_KEYS, LOCAL, PAGE_SIZE, PUBLIC_CHANNEL_IDS, TAXONOMY_VERSION,
-  assertPublicAssetClean, buildCatalogChunk, buildManifest, chunkKey, crawlTargets,
-  sourceConfigPayload, stableTitleKey, titleKey, validateSourceConfig
+  INFRA, KV_KEYS, LOCAL, TAXONOMY_VERSION,
+  buildManifest, crawlTargets,
+  stableTitleKey, titleKey, validateSourceConfig
 } from './config-sources.mjs';
-import { assignHotFlags, buildTitleManifest, emitAliasSql, normalizeWork, sortForSharding, toCatalogItem } from './compute-hotscore.mjs';
+import { buildTitleManifest, emitAliasSql, normalizeWork, toCatalogItem } from './compute-hotscore.mjs';
+import { emitDailyFacts, bootstrapDailyState, importPublicResults } from './daily-facts.mjs';
+import { serializeManifest } from './work-fact-packs.mjs';
+import { buildPublicationEntries, validatePublication } from './publication-guard.mjs';
+export { buildPublicationEntries };
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 /** C-2.1 页间温和休眠（AC-C2-4 要求实测间隔 ≥1s）。 */
@@ -36,7 +40,10 @@ export function parseCliArgs(argv) {
     pull: flag('--pull'),
     isPrivate: argv.includes('--private'),
     hours: read('hours', 24),
-    revision: read('revision', null) === null ? null : read('revision', null)
+    revision: read('revision', null) === null ? null : read('revision', null),
+    bootstrapManifest: argv.find((arg) => arg.startsWith('--bootstrap-manifest='))?.slice(21),
+    bootstrapRoot: argv.find((arg) => arg.startsWith('--bootstrap-root='))?.slice(17),
+    publicResultsFile: argv.find((arg) => arg.startsWith('--public-results='))?.slice(17)
   };
 }
 
@@ -49,11 +56,11 @@ export function loadState(isPrivate = false) {
   if (!fs.existsSync(file)) return emptyState(isPrivate);
   try {
     const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (typeof parsed?.works !== 'object' || parsed.works === null) return emptyState(isPrivate);
+    if (typeof parsed?.works !== 'object' || parsed.works === null || Array.isArray(parsed.works) ||
+        parsed.isPrivate !== isPrivate || !Number.isSafeInteger(parsed.revision)) throw new Error('Invalid state');
     return { ...emptyState(isPrivate), ...parsed };
   } catch {
-    // 快照损坏退回空状态：下一轮 harvest-all bootstrap 会重建，绝不让半截 JSON 生成脏资产。
-    return emptyState(isPrivate);
+    throw new Error('Existing state is invalid; refusing to replace a complete generation with an empty catalog');
   }
 }
 
@@ -79,6 +86,17 @@ export function mergeRawsIntoState(state, entries, nowSeconds) {
     } else {
       added += 1;
     }
+    if (!record.isPrivate) {
+      const title = buildTitleManifest(record, entry.item, { generatedAt: 0, revision: 0 });
+      record.enabled = true;
+      record.fact = { ...toCatalogItem(record), ...title, id: record.id, generatedAt: 0, enabled: true, shareable: true };
+      delete record.fact.revision;
+      if (record.coverUrl) {
+        const cover = new URL(entry.item.vod_pic);
+        if (cover.protocol !== 'https:' || cover.username || cover.password) throw new Error('Unsafe public cover target');
+        record.fact.coverTargetUrl = cover.href;
+      }
+    }
     state.works[record.id] = record;
     resolved.push({ record, item: entry.item });
   }
@@ -91,7 +109,7 @@ async function fetchPage(target, page, hours) {
   url.searchParams.set('t', String(target.typeId));
   url.searchParams.set('pg', String(page));
   url.searchParams.set('h', String(hours));
-  const response = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' } });
+  const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(15000), headers: { 'User-Agent': UA, Accept: 'application/json' } });
   if (!response.ok) throw new Error(`HTTP ${response.status} @ ${target.provider.id}/tid=${target.typeId}/pg=${page}`);
   return response.json();
 }
@@ -106,11 +124,13 @@ export async function collectFromNetwork(targets, hours) {
     while (page <= pagecount) {
       try {
         const data = await fetchPage(target, page, hours);
-        pagecount = Number(data.pagecount ?? 1);
-        for (const item of data.list ?? []) entries.push({ target, item });
+        pagecount = Number(data.pagecount);
+        if (!Number.isSafeInteger(pagecount) || pagecount < page || pagecount > 200 || !Array.isArray(data.list)) {
+          throw new Error('Invalid or out-of-budget incremental pagination');
+        }
+        for (const item of data.list) entries.push({ target, item });
       } catch (error) {
-        console.warn(`  ! ${target.provider.id}/tid=${target.typeId} p${page} 抓取失败: ${error.message}`);
-        break;
+        throw new Error(`${target.provider.id}/tid=${target.typeId} p${page} incomplete daily input: ${error.message}`);
       }
       page += 1;
       if (page <= pagecount) await sleep(PAGE_DELAY_BASE_MS + Math.random() * PAGE_DELAY_JITTER_MS);
@@ -133,9 +153,10 @@ export function collectFromCache(targets) {
     for (const name of files) {
       try {
         const parsed = JSON.parse(fs.readFileSync(path.join(cacheDir, name), 'utf8'));
-        for (const item of parsed.list ?? []) entries.push({ target, item });
+        if (!Array.isArray(parsed.list)) throw new Error('Missing page list');
+        for (const item of parsed.list) entries.push({ target, item });
       } catch {
-        console.warn(`  ! 缓存页损坏，跳过: ${name}`);
+        throw new Error(`Invalid daily input cache page: ${name}; refusing incomplete generation`);
       }
     }
   }
@@ -156,6 +177,7 @@ function writeFileToKey(outDir, key, payload) {
  */
 export function emitAssets(state, resolved, options) {
   const { revision, outDir, isPrivate, nowSeconds, versionedTitles = true } = options;
+  if (!isPrivate) return emitDailyFacts(state, resolved, options);
   const files = [];
   const touched = [];
   for (const { record, item } of resolved) {
@@ -170,25 +192,7 @@ export function emitAssets(state, resolved, options) {
     }
     touched.push(record.id);
   }
-  const channels = {};
-  if (isPrivate) return { files, channels, touched };
-
-  if (touched.length > 0) assignHotFlags(Object.values(state.works), nowSeconds);
-  for (const channelId of PUBLIC_CHANNEL_IDS) {
-    const items = Object.values(state.works)
-      .filter((record) => record.channelId === channelId && record.isPrivate === false)
-      .sort(sortForSharding)
-      .map(toCatalogItem);
-    const pageCount = Math.ceil(items.length / PAGE_SIZE);
-    channels[channelId] = { chunks: pageCount, total: items.length };
-    for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
-      const key = chunkKey(revision, channelId, pageIndex);
-      const chunk = buildCatalogChunk(items.slice(pageIndex * PAGE_SIZE, (pageIndex + 1) * PAGE_SIZE), pageIndex, items.length, revision);
-      assertPublicAssetClean(chunk, key);
-      files.push(writeFileToKey(outDir, key, chunk));
-    }
-  }
-  return { files, channels, touched };
+  return { files, channels: {}, touched };
 }
 
 /**
@@ -212,6 +216,8 @@ export async function runPipeline(options = {}) {
   console.log(`=== ${isPrivate ? '私密' : '公开'}管线：${targets.length} 个采集目标（tid 归属全部来自 config-sources）===`);
   if (cli.pull) console.log(`状态快照取回: ${await pullState(isPrivate) ? 'R2' : '云端缺失，用本地空状态'}`);
 
+  if (cli.publish && isPrivate) throw new Error('Private publication requires verified resource isolation');
+  let currentManifest;
   if (cli.publish && !isPrivate) {
     const { discoverRestAuth } = await import('./publish.mjs');
     const auth = await discoverRestAuth();
@@ -219,33 +225,50 @@ export async function runPipeline(options = {}) {
     const url = `https://api.cloudflare.com/client/v4/accounts/${auth.account}/storage/kv/namespaces/${INFRA.kvNamespaceId}/values/${encodeURIComponent(KV_KEYS.manifest)}`;
     const response = await fetch(url, { headers: { Authorization: `Bearer ${auth.token}` } });
     if (!response.ok) throw new Error(`Cannot verify catalog manifest: ${response.status}`);
-    if ((await response.json()).workFacts) throw new Error('Legacy incremental publisher cannot replace a work-facts generation; preserve the current catalog');
+    const current = await response.json();
+    currentManifest = current;
+    if (!Number.isSafeInteger(current.revision) || !Number.isSafeInteger(cli.revision) || cli.revision <= current.revision) {
+      throw new Error('Public publication requires an explicit revision newer than the current generation');
+    }
   }
-  const state = loadState(isPrivate);
+  if (isPrivate && (cli.bootstrapManifest || cli.publicResults || cli.publicResultsFile)) throw new Error('Public inputs forbidden in private pipeline');
+  const publicResults = cli.publicResultsFile ? JSON.parse(fs.readFileSync(path.resolve(cli.publicResultsFile), 'utf8')) : cli.publicResults ?? [];
+  if (!Array.isArray(publicResults)) throw new Error('Public results must be an array');
+  const localManifest = cli.bootstrapManifest ? JSON.parse(fs.readFileSync(path.resolve(cli.bootstrapManifest), 'utf8')) : null;
+  const state = localManifest ? bootstrapDailyState(localManifest, path.resolve(cli.bootstrapRoot ?? LOCAL.assets(false)),
+    { expectedRevision: currentManifest?.revision ?? localManifest.revision }) : loadState(isPrivate);
+  if (currentManifest && (state.revision !== currentManifest.revision ||
+      Object.values(state.works).filter((record) => record.enabled !== false).length !==
+      Object.values(currentManifest.channels).reduce((n, inventory) => n + inventory.total, 0))) {
+    throw new Error('Daily base state is not the complete current generation; bootstrap it explicitly');
+  }
   const entries = cli.network ? await collectFromNetwork(targets, cli.hours) : collectFromCache(targets);
   console.log(`本轮条目: ${entries.length} 条（${cli.network ? `上游 h=${cli.hours} 小时窗口` : '本地 harvest 缓存离线干跑'}）`);
-  const { added, updated, resolved } = mergeRawsIntoState(state, entries, nowSeconds);
+  const merged = mergeRawsIntoState(state, entries, nowSeconds);
+  const imported = !isPrivate ? importPublicResults(state, publicResults, nowSeconds) : { added: 0, updated: 0, resolved: [] };
+  const added = merged.added + imported.added, updated = merged.updated + imported.updated;
+  const resolved = [...merged.resolved, ...imported.resolved];
   const revision = cli.revision ?? state.revision + 1;
   const outDir = path.resolve(LOCAL.assets(cli.dryRun));
   const emitted = emitAssets(state, resolved, { revision, outDir, isPrivate, nowSeconds, versionedTitles: state.revision > 0 });
 
-  const manifest = buildManifest(revision, emitted.channels, nowSeconds);
-  if (!isPrivate) assertPublicAssetClean(manifest, 'catalog:manifest');
+  const manifest = { ...buildManifest(revision, emitted.channels, nowSeconds), ...(!isPrivate ? {
+    workFacts: emitted.workFacts, coverOrigins: emitted.coverOrigins, publicSearch: emitted.publicSearch
+  } : {}) };
+  serializeManifest(manifest);
+  if (!isPrivate && (!manifest.workFacts || !manifest.publicSearch)) throw new Error('Public publication requires complete facts and search projection');
   writeFileToKey(path.resolve(LOCAL.dir), isPrivate ? 'private-manifest.json' : 'catalog-manifest.json', manifest);
   state.revision = revision;
   state.updatedAt = nowSeconds;
-  const stateFile = saveState(state, isPrivate);
+  const stateFile = path.resolve(LOCAL.state(isPrivate));
 
   const privateStats = { revision, generatedAt: nowSeconds, titles: emitted.touched.length, taxonomyVersion: TAXONOMY_VERSION };
   // 私密管线的清单键与公开 manifest 物理分离（C-2b.2）：绝不用私密统计覆盖公开 catalog:manifest。
-  const kvEntries = [
-    isPrivate
-      ? { key: KV_KEYS.privateManifest, value: JSON.stringify(privateStats) }
-      : { key: KV_KEYS.manifest, value: JSON.stringify(manifest) },
-    { key: KV_KEYS.sources, value: JSON.stringify(sourceConfigPayload()) }
-  ];
+  const kvEntries = buildPublicationEntries(manifest, privateStats, isPrivate);
+  if (!isPrivate) validatePublication(emitted.files, kvEntries, false);
   const alias = cli.skipAliasSql ? null : emitAliasSql(resolved, nowSeconds, path.resolve(LOCAL.sqlOut(isPrivate)));
-  await publishFiles(emitted.files, kvEntries, { dryRun: cli.dryRun, publish: cli.publish, isPrivate });
+  await publishFiles(emitted.files, kvEntries, { dryRun: cli.dryRun, publish: cli.publish, isPrivate, skipState: true });
+  saveState(state, isPrivate);
 
   console.log('--- 产物摘要 ---');
   console.log(`revision ${revision} | 新增 ${added} / 更新 ${updated} | 快照 ${stateFile}`);
@@ -254,7 +277,7 @@ export async function runPipeline(options = {}) {
     const inChannel = Object.values(state.works).filter((record) => record.channelId === channelId);
     const ai = inChannel.filter((record) => record.isAi).length;
     const hot = inChannel.filter((record) => record.isHot).length;
-    console.log(`  ${channelId}: ${stat.total} 部 / ${stat.chunks} 片 × ${PAGE_SIZE} 条 | is_ai=${ai} | is_hot=${hot}`);
+    console.log(`  ${channelId}: ${stat.total} 部 / ${stat.chunks} 片 × 60 条 | is_ai=${ai} | is_hot=${hot}`);
   }
   console.log(alias === null ? '归一映射 SQL: 跳过' : `归一映射 SQL: ${alias.file}（${alias.rows} 行）`);
   return { revision, files: emitted.files.length, manifest, stateFile, outDir, touched: emitted.touched, alias };

@@ -1,0 +1,6 @@
+.set-view .set-support-dialog { max-height: calc(100dvh - var(--space-8)); overflow-y: auto; }
+.set-view .set-support-image { display: block; width: 100%; max-height: calc(100dvh - var(--space-16) * 4); object-fit: contain; }
+.set-view .set-support-dialog .pv-btn { flex-shrink: 0; }
+.set-view [data-el='set-rates'] .pv-row { flex-wrap: wrap; }
+.set-view [data-el='set-rates'] select { min-width: var(--space-16); }
+.set-view [data-el='set-support'] .pv-band-body { align-items: stretch; }

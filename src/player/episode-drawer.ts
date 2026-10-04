@@ -173,6 +173,7 @@ export function createEpisodeDrawer(options: EpisodeDrawerOptions): EpisodeDrawe
     if (!Number.isSafeInteger(selected) || selected < 1 || !detail?.episodes.some((episode) => episode.episodeId === selected)) return;
     currentId = selected;
     mark();
+    closeDrawer();
     options.onSelect(currentId);
   });
 

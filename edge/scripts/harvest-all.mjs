@@ -90,26 +90,36 @@ async function runPool(jobs, concurrency, worker) {
 }
 
 /** 首页探测决定每个 tid 要翻多少页：上游 pagecount 比旧代码写死的 maxPages 准。 */
-async function planCrawl(targets, maxPages) {
+export async function planCrawl(targets, maxPages, { cacheDir = LOCAL.harvestCache, fetch: probe = fetchJson } = {}) {
+  const cacheFile = (typeId, page) => path.join(cacheDir, `t_${typeId}_p_${page}.json`);
+  const validPagecount = (value) => (typeof value === 'number' || typeof value === 'string')
+    && Number.isSafeInteger(Number(value)) && Number(value) > 0;
   const jobs = [];
   for (const target of targets) {
-    let pagecount = 1;
-    const firstFile = cacheFileFor(target.typeId, 1);
+    let pagecount;
+    const firstFile = cacheFile(target.typeId, 1);
     if (fs.existsSync(firstFile)) {
       try {
-        pagecount = Number(JSON.parse(fs.readFileSync(firstFile, 'utf8')).pagecount ?? 1);
+        pagecount = JSON.parse(fs.readFileSync(firstFile, 'utf8'))?.pagecount;
       } catch {
-        pagecount = 1;
+        // 损坏快照仅触发探测；规划不覆写或删除旧缓存。
       }
-    } else {
-      const data = await fetchJson(detailUrl(target, 1)).catch(() => null);
-      pagecount = Number(data?.pagecount ?? 1);
     }
-    const pages = Math.max(1, Math.min(Number.isFinite(pagecount) ? pagecount : 1, maxPages));
+    if (!validPagecount(pagecount)) {
+      try {
+        const data = await probe(detailUrl(target, 1));
+        pagecount = data?.pagecount;
+        if (!validPagecount(pagecount)) throw new Error('首页未返回有效正整数 pagecount');
+      } catch (error) {
+        throw new Error(`tid=${target.typeId} pagecount 探测失败，无法规划: ${error.message}`, { cause: error });
+      }
+    }
+    pagecount = Number(pagecount);
+    const pages = Math.max(1, Math.min(pagecount, maxPages));
     const suffix = pagecount > pages ? `（上游 ${pagecount} 页，受 --max-pages 截断）` : '';
     console.log(`  ${target.provider.id} tid=${target.typeId} → ${target.channelId}${target.isPrivate ? ' [私密]' : ''}: ${pages} 页${suffix}`);
     for (let page = 1; page <= pages; page += 1) {
-      if (fs.existsSync(cacheFileFor(target.typeId, page))) continue;
+      if (fs.existsSync(cacheFile(target.typeId, page))) continue;
       jobs.push({ typeId: target.typeId, page, url: detailUrl(target, page) });
     }
   }

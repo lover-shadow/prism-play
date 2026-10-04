@@ -10,6 +10,14 @@ import {
 
 /** Legacy cache filenames identify a type, not a provider: only accept unambiguous targets. */
 export function readHarvestMetadata(directory) {
+  if (Array.isArray(directory)) {
+    const merged = new Map();
+    for (const dir of directory) for (const [id, evidence] of readHarvestMetadata(dir)) {
+      const previous = merged.get(id);
+      merged.set(id, { ...evidence, item: { ...previous?.item, ...evidence.item } });
+    }
+    return merged;
+  }
   const metadata = new Map();
   if (!fs.existsSync(directory)) return metadata;
   const targets = publicTargets();

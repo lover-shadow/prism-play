@@ -8,6 +8,10 @@ info:
     2. 动态“大视界”拓扑下发，私密频道在「授权 + 当次开启」双重条件未满足时物理不可见；
     3. 预制卡密条件原子核销 + 非对称签名凭证（Ed25519），客户端仅持公钥。
     本文件为接口机读正本；文字说明见 `API-SPEC.md`，施工总契约见 `docs/04-spec/SPEC-v2.0.md`。
+    2026-10-04 R26执行事实同步：局部实现已存在，旧1040通过仅首批report，新全量/浏览器/原生/生产未验，不代表R26全完成。
+    publicSearch是内部manifest描述（schema=1/count/key/bytes/sha256，library/search/{sha256}.json，最多16 MiB），不新增公网路由或响应字段。
+    内部对象schema=1/revision/entries(item/aliases/pinyin/tags)与workFacts同代，须校验hash/bytes/count/频道总数并复核返回事实。
+    现代workFacts代缺失或损坏投影503，不回旧D1；仅真实无workFacts旧代可兼容。上线须同代blobs先校验上传、manifest pointer后切、Worker配套，禁止单独部署搜索Worker。
   version: 2.0.0
   contact:
     name: PrismOS Architecture Team
@@ -399,6 +403,7 @@ components:
 
     UserSyncRequest:
       type: object
+      description: 仅既有公开断点与画像；不新增local_following收藏或prism.watch_seconds_total/prism.watch_seconds_last_nudge累计标量云同步字段。私密不落盘不上报，private/unknown观看时长零计。
       required: [history, preferences]
       properties:
         history:
@@ -588,6 +593,7 @@ components:
 
     MonetizationConfig:
       type: object
+      description: 商业价格、档位与提醒策略仍100%云端。作者contact/reward二维码可由host静态注入旧已确认本地public/images/author-contact.jpg及author-reward.jpg，不新增云QR字段；旧reward历史权益不构成当前购买/授权承诺，须附免责声明。下载文件不等于保存手机图库。
       required: [activeTiers, nudgePolicy]
       properties:
         activeTiers:
@@ -702,7 +708,7 @@ paths:
     get:
       tags: [搜索与同步]
       summary: 公开目录输入补全（不调用在线生成模型）
-      description: 仅包含当前可公开的作品/标签及纠错候选；私密及失效内容永不出现。客户端缓存只允许公开建议。中文单字、双字、多音字和拼音召回通过写入侧词元及样本检验，不把 unicode61 当作中文分词。
+      description: 仅包含当前generation可公开的作品/标签及纠错候选；现代workFacts代从内部publicSearch召回并复核同代事实，缺失或损坏投影/事实返回503，禁止回旧D1。私密及失效内容永不出现。客户端缓存只允许公开建议。中文单字、双字、多音字和拼音召回通过写入侧词元及样本检验，不把 unicode61 当作中文分词。
       parameters:
         - name: q
           in: query
@@ -727,11 +733,17 @@ paths:
                     maxItems: 10
                     items:
                       $ref: '#/components/schemas/SearchSuggestion'
+        '503':
+          description: 当前公开generation的搜索投影或事实缺失/损坏；不得回旧D1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/search:
     get:
       tags: [搜索与同步]
       summary: 公开目录关键词/拼音/模糊词法检索
-      description: 本期专注高响应词法搜索（包含精确剧名、拼音缩写、错字纠偏与题材同类关联），所有候选直接通过 D1 全文索引与表联合检索。混合排序在每次请求内先精确/别名，再拼音/首字母，再模糊纠偏，按内容 ID 去重；当前 page 为尽力分页，客户端跨页去重。
+      description: 本期专注词法搜索（精确剧名、拼音缩写、错字纠偏与题材同类关联）。现代workFacts代候选来自内部同代publicSearch并逐项复核事实，缺失或损坏投影/事实返回503，不回旧D1；D1全文索引仅用于真实无workFacts旧代兼容。混合排序每请求先精确/别名，再拼音/首字母，再模糊纠偏，按内容ID去重；page为尽力分页，客户端跨页去重。无新公网投影路由。
       parameters:
         - name: q
           in: query
@@ -776,10 +788,17 @@ paths:
                       $ref: '#/components/schemas/SearchResult'
                   page:
                     type: integer
+        '503':
+          description: 当前公开generation的搜索投影或事实缺失/损坏；不得回旧D1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/titles/{titleId}/related:
     get:
       tags: [搜索与同步]
       summary: 同类公开作品推荐
+      description: 现代workFacts代使用内部publicSearch同代分类/标签候选，并复核源剧和候选事实；缺失或损坏投影/事实返回503，不回旧D1。私密及撤片不召回，仅真实无workFacts旧代兼容。
       parameters:
         - name: titleId
           in: path
@@ -801,6 +820,12 @@ paths:
                       $ref: '#/components/schemas/ContentItem'
         '404':
           description: 未知、下架或未获准的作品
+        '503':
+          description: 当前公开generation的搜索投影或事实缺失/损坏；不得回旧D1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/catalog/changes:
     get:
       tags: [搜索与同步]
@@ -886,8 +911,9 @@ paths:
           schema:
             type: integer
             minimum: 1
-            maximum: 50
-            default: 20
+            maximum: 60
+            default: 60
+          description: 新公开facts generation按60条分片消费；私密及真实旧代兼容另验，不改变搜索分页。
         - name: revision
           in: query
           required: false
@@ -933,7 +959,7 @@ paths:
       description: |
         未同时满足「有效 B/Y/S 授权」与「有效 X-Private-Session」的私密剧目，以及不存在或未上架的剧目，一律返回 404，不区分差异以防探测；
         公开剧目或已获双重准入的私密剧目正常返回 200 及完整剧集清单（TitleAssetResponse，含向后兼容的 item 投影）。
-        数据源为 CI 发布的 R2 剧集清单资产（SPEC-CLOUD-REFACTOR v2 §3.2），公开清单可 CDN 缓存，私密清单恒 no-store。
+        新公开数据源为当前manifest generation的workFacts按作投影，必须与目录、搜索、分享、海报同代；完整保留集数与线路，不截取两集。有workFacts时缺失或损坏不得回读旧公开D1/稳定title；无workFacts的真实旧代才使用旧资产兼容。公开清单须随generation重验证，私密原双准入路径恒no-store。本轮仅契约修订，R26行为待验。
       security:
         - BearerAuth: []
         - BearerAuth: []

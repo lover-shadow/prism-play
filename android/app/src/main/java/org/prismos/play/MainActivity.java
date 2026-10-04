@@ -120,6 +120,63 @@ public class MainActivity extends BridgeActivity {
         });
     }
 
+    private boolean immersive = false;
+    private int priorUi, priorOrientation, priorBehavior;
+    private boolean priorStatus, priorNavigation;
+
+    void toggleImmersive(PluginCall call, @Nullable Boolean enabled) {
+        if (enabled == null) { call.reject("缺少参数 enabled", "ARGUMENT_REQUIRED"); return; }
+        runOnUiThread(() -> {
+            try {
+                if (enabled && !immersive) {
+                    priorUi = getWindow().getDecorView().getSystemUiVisibility();
+                    priorOrientation = getRequestedOrientation();
+                    if (Build.VERSION.SDK_INT >= 30) {
+                        android.view.WindowInsets insets = getWindow().getDecorView().getRootWindowInsets();
+                        priorStatus = insets == null || insets.isVisible(android.view.WindowInsets.Type.statusBars());
+                        priorNavigation = insets == null || insets.isVisible(android.view.WindowInsets.Type.navigationBars());
+                        priorBehavior = getWindow().getInsetsController().getSystemBarsBehavior();
+                    }
+                    immersive = true;
+                    hideBars();
+                } else if (!enabled) restoreBars();
+                call.resolve(new JSObject().put("value", true));
+            } catch (RuntimeException error) {
+                restoreBars(); call.reject("系统栏切换失败", "IMMERSIVE_FAILED", error);
+            }
+        });
+    }
+
+    private void hideBars() {
+        if (Build.VERSION.SDK_INT >= 30) {
+            android.view.WindowInsetsController controller = getWindow().getInsetsController();
+            controller.setSystemBarsBehavior(android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            controller.hide(android.view.WindowInsets.Type.systemBars());
+        } else getWindow().getDecorView().setSystemUiVisibility(priorUi
+                | android.view.View.SYSTEM_UI_FLAG_FULLSCREEN | android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                | android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+    }
+
+    private void restoreBars() {
+        if (!immersive) return;
+        immersive = false;
+        if (Build.VERSION.SDK_INT >= 30) {
+            android.view.WindowInsetsController controller = getWindow().getInsetsController();
+            controller.setSystemBarsBehavior(priorBehavior);
+            if (priorStatus) controller.show(android.view.WindowInsets.Type.statusBars());
+            else controller.hide(android.view.WindowInsets.Type.statusBars());
+            if (priorNavigation) controller.show(android.view.WindowInsets.Type.navigationBars());
+            else controller.hide(android.view.WindowInsets.Type.navigationBars());
+        } else getWindow().getDecorView().setSystemUiVisibility(priorUi);
+        setRequestedOrientation(priorOrientation);
+    }
+
+    @Override public void onWindowFocusChanged(boolean focus) {
+        super.onWindowFocusChanged(focus);
+        if (focus && immersive) hideBars();
+    }
+    @Override protected void onDestroy() { restoreBars(); super.onDestroy(); }
+
     private void applyFlag(int flag, boolean on) {
         if (on) {
             getWindow().addFlags(flag);

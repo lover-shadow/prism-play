@@ -77,10 +77,10 @@ function harness(overrides: Partial<GestureControllerOptions> = {}): Harness {
 }
 
 describe('classifyTouch — 区域划分（AC-06 / AC-07）', () => {
-  it('splits 0-48 volume / 48-52 dead / 52-100 brightness at both band edges', () => {
+  it('splits 0-48 brightness / 48-52 dead / 52-100 volume at both band edges', () => {
     const edges: Array<[number, string]> = [
-      [0, 'volume'], [0.2, 'volume'], [0.479, 'volume'], [0.48, 'dead-band'], [0.481, 'dead-band'],
-      [0.5, 'dead-band'], [0.519, 'dead-band'], [0.52, 'dead-band'], [0.521, 'brightness'], [0.9, 'brightness'], [1, 'brightness']
+      [0, 'brightness'], [0.2, 'brightness'], [0.479, 'brightness'], [0.48, 'dead-band'], [0.481, 'dead-band'],
+      [0.5, 'dead-band'], [0.519, 'dead-band'], [0.52, 'dead-band'], [0.521, 'volume'], [0.9, 'volume'], [1, 'volume']
     ];
     for (const [fraction, zone] of edges) expect(base({ x: fraction * 400, deltaY: -40 }).zone).toBe(zone);
   });
@@ -96,9 +96,9 @@ describe('classifyTouch — 区域划分（AC-06 / AC-07）', () => {
 
   it('keeps the control bands inert on both ends', () => {
     const bands = { topBandPx: 48, bottomBandPx: 64 };
-    for (const y of [6, 47, 137, 150, 199]) expect(base({ x: 40, y, ...bands }).zone).toBe('control-band');
-    for (const y of [48, 136]) expect(base({ x: 40, y, ...bands }).zone).toBe('volume');
-    expect(base({ x: 360, y: 100, ...bands }).zone).toBe('brightness');
+    for (const y of [6, 47, 137, 150, 199]) expect(base({ x: 360, y, ...bands }).zone).toBe('control-band');
+    for (const y of [48, 136]) expect(base({ x: 360, y, ...bands }).zone).toBe('volume');
+    expect(base({ x: 40, y: 100, ...bands }).zone).toBe('brightness');
   });
 
   it('maps a full-height swipe onto the whole 0..1 range, linearly and clamped', () => {
@@ -107,38 +107,38 @@ describe('classifyTouch — 区域划分（AC-06 / AC-07）', () => {
     expect(base({ deltaY: 100 }).deltaRatio).toBeCloseTo(-0.5, 10);
     expect(base({ deltaY: -4000 }).deltaRatio).toBe(1);
     expect(base({ deltaY: 4000 }).deltaRatio).toBe(-1);
-    expect(base({ x: 40, deltaY: -200 }).deltaRatio).toBeGreaterThan(base({ x: 40, deltaY: -20 }).deltaRatio);
+    expect(base({ x: 360, deltaY: -200 }).deltaRatio).toBeGreaterThan(base({ x: 360, deltaY: -20 }).deltaRatio);
   });
 });
 
 describe('GestureController — 竖向拖动与 rAF 合并', () => {
-  it('drives volume only on the left band and brightness only on the right band', () => {
+  it('drives volume only on the right band and brightness only on the left band', () => {
     const left = harness();
-    left.down(40, 120);
-    left.move(40, 90);
+    left.down(360, 120);
+    left.move(360, 90);
     left.frames.run();
-    left.up(40, 90);
+    left.up(360, 90);
     expect(left.volumes).toHaveLength(1);
     expect(left.brightness).toHaveLength(0);
     expect(left.volumes[0]).toBeGreaterThan(0.5);
     const right = harness();
-    right.down(360, 120);
-    right.move(360, 90);
+    right.down(40, 120);
+    right.move(40, 90);
     right.frames.run();
-    right.up(360, 90);
+    right.up(40, 90);
     expect(right.brightness).toHaveLength(1);
     expect(right.volumes).toHaveLength(0);
   });
 
   it('emits at most one bridge call per animation frame for a fast swipe', () => {
     const h = harness();
-    h.down(40, 180);
-    for (let y = 170; y >= 40; y -= 10) h.move(40, y);
+    h.down(360, 180);
+    for (let y = 170; y >= 40; y -= 10) h.move(360, y);
     expect(h.volumes).toHaveLength(0);
     expect(h.frames.size()).toBe(1);
     h.frames.run();
     expect(h.volumes).toEqual([1]);
-    h.up(40, 40);
+    h.up(360, 40);
     expect(h.volumes).toHaveLength(1);
   });
 
@@ -150,7 +150,7 @@ describe('GestureController — 竖向拖动与 rAF 合并', () => {
     dead.up(200, 60);
     expect([dead.volumes, dead.brightness, dead.seeks, dead.taps].map((list) => list.length)).toEqual([0, 0, 0, 0]);
     const side = harness();
-    side.down(40, 100);
+    side.down(360, 100);
     for (let x = 60; x <= 360; x += 20) side.move(x, 100);
     side.frames.run();
     side.up(360, 100);
@@ -159,15 +159,15 @@ describe('GestureController — 竖向拖动与 rAF 合并', () => {
 
   it('clamps at 0 and 1 instead of wrapping', () => {
     const h = harness({ volumeSeed: 0.05 });
-    h.down(40, 60);
-    h.move(40, 190);
+    h.down(360, 60);
+    h.move(360, 190);
     h.frames.run();
-    h.move(40, 199);
+    h.move(360, 199);
     h.frames.run();
     expect(h.volumes.at(-1)).toBe(0);
     const top = harness({ volumeSeed: 0.95 });
-    top.down(40, 150);
-    top.move(40, 40);
+    top.down(360, 150);
+    top.move(360, 40);
     top.frames.run();
     expect(top.volumes.at(-1)).toBe(1);
   });
@@ -232,10 +232,10 @@ describe('GestureController — 双击快进退（AC-08）', () => {
 describe('GestureController — 全屏触摸锁与生命周期', () => {
   it('suppresses every callback while locked, including taps', () => {
     const h = harness({ isLocked: () => true });
-    h.down(40, 150);
-    h.move(40, 60);
+    h.down(360, 150);
+    h.move(360, 60);
     h.frames.run();
-    h.up(40, 60);
+    h.up(360, 60);
     h.tap(320, 100);
     h.clock.advance(1_000);
     expect([h.volumes, h.brightness, h.seeks, h.taps].map((list) => list.length)).toEqual([0, 0, 0, 0]);
@@ -251,8 +251,8 @@ describe('GestureController — 全屏触摸锁与生命周期', () => {
     });
     controller.pointerDown({ pointerId: 1, clientX: 60, clientY: 100 });
     controller.pointerUp({ pointerId: 1, clientX: 60, clientY: 100 });
-    controller.pointerDown({ pointerId: 2, clientX: 40, clientY: 150 });
-    controller.pointerMove({ pointerId: 2, clientX: 40, clientY: 70 });
+    controller.pointerDown({ pointerId: 2, clientX: 360, clientY: 150 });
+    controller.pointerMove({ pointerId: 2, clientX: 360, clientY: 70 });
     expect([clock.pending().length, frames.size()]).toEqual([1, 1]);
     controller.destroy();
     expect([clock.pending().length, frames.size()]).toEqual([0, 0]);

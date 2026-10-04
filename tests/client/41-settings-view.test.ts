@@ -20,6 +20,7 @@ interface Options {
   tiers?: PrivateEligibleTier[]; monetizationError?: unknown; tier?: DeviceTier | null; deviceId?: string | null;
   redeemError?: unknown; release?: AndroidRelease; versionError?: unknown; openError?: unknown; closeError?: unknown;
   expiresInSeconds?: number; bridgeSourceOf?: BridgeSource; prefs?: Record<string, string>; seededToken?: string | null;
+  cache?: SettingsViewDeps['cache']; supportAssets?: SettingsViewDeps['supportAssets'];
 }
 
 function setup(options: Options = {}) {
@@ -55,7 +56,7 @@ function setup(options: Options = {}) {
   const root = document.createElement('div');
   document.body.replaceChildren(root);
   const deps: SettingsViewDeps = {
-    api, prefs, bridge, tokens, root, now: () => NOW,
+    api, prefs, bridge, tokens, root, now: () => NOW, cache: options.cache, supportAssets: options.supportAssets,
     onThemeChange: (mode) => void themeEvents.push(mode), onOpenRedeem: (outcome) => void redeemEvents.push(outcome),
     onPrivateSessionChange: (active) => void privateEvents.push(active),
     deviceIdSource: options.deviceId === null ? undefined : { currentDeviceId: async () => options.deviceId ?? 'GY-DEVICE-0001' },

@@ -70,6 +70,8 @@ export function genrePreference(rows: readonly WatchHistoryRow[], nowSeconds: nu
 
 export interface WeaveOptions {
   genreOf?: GenreOf;
+  /** 分页累积列表按到达次序划块，避免后来较小 ID 插入已完成的块。 */
+  preserveAppend?: boolean;
 }
 
 export interface WeaveResult {
@@ -99,11 +101,14 @@ const byPreferenceDesc = (scores: GenreScores, genreOf?: GenreOf) =>
   (a: ContentItem, b: ContentItem): number => scoreOf(scores, genreOf, b) - scoreOf(scores, genreOf, a) || byId(a, b);
 
 /**
- * B 轨排序键：`isHot === true` 优先，其余按 id 稳定序。
- * 规格书原案按 `hotScore` 数值降序排，但该字段不在线上契约内（§1.8.0 口径修正），故收敛为布尔 + 稳定序。
+ * B 轨优先使用真实非负 hitsTotal 降序，真实同分仅 ID 收口。
+ * 缺热度时沿用旧供给标记降级，不将该降级冒充频道热度榜。
  */
+const heat = (item: ContentItem): number =>
+  typeof item.hitsTotal === 'number' && Number.isFinite(item.hitsTotal) && item.hitsTotal >= 0 ? item.hitsTotal : -1;
 const byHotFirst = () =>
-  (a: ContentItem, b: ContentItem): number => Number(b.isHot === true) - Number(a.isHot === true) || byId(a, b);
+  (a: ContentItem, b: ContentItem): number => heat(b) - heat(a)
+    || (heat(a) < 0 ? Number(b.isHot === true) - Number(a.isHot === true) : 0) || byId(a, b);
 
 /**
  * C 轨排序键：主键「非热门优先」（热门是 B 轨的存货，探索轨不得把它们提前吃掉，否则 7:7:6 配额在
@@ -134,7 +139,7 @@ function badgeFor(from: Supply, item: ContentItem, hasProfile: boolean): BadgeKi
  * 三轨互斥编织（§1.8.3 + §1.8.4）。
  *
  * 块切分口径：先对**累积集合**按 id 稳定序得到 `S`，块 c 消费 `S[20c, 20c+20)`。于是
- * 「加载更多」只把新条目接到 `S` 尾部、只生成新块，凑满 20 条的块内容固化、永不再变；
+ * 默认保留纯函数 ID 基线；首页传 preserveAppend 按到达次序划块，新页较小 ID 也不扰动已满块；
  * **不足 20 条的尾块**按 `A H E` 循环尽力填充、允许比例偏离，并明确接受它会随下一页数据到达而重排
  * （重排范围严格限于尾块 ≤19 条，不波及已固化块）。
  */
@@ -147,7 +152,8 @@ export function weave(items: readonly ContentItem[], scores: GenreScores, option
     if (isPrivateSubject(item)) { hidden += 1; continue; }
     if (!unique.has(item.id)) unique.set(item.id, item);
   }
-  const baseline = [...unique.values()].sort(byId);
+  const baseline = [...unique.values()];
+  if (!options.preserveAppend) baseline.sort(byId);
   const hasProfile = Object.keys(scores).length > 0;
   /**
    * §1.8.1 行 1/行 4 的降级开关：`isAi` 在整个集合里**一个都没有**（字段缺失或全 false）时，A 轨槽位

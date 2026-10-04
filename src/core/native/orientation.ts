@@ -10,6 +10,33 @@
  * 也不因为锁失败就放弃全屏（全屏本身仍由 CSS 权威成立）。
  */
 import { Capacitor } from '@capacitor/core';
+import type { PrismNativeBridge } from './bridge';
+
+/** Serialize entry/exit so a late lock can never outlive its queued restoration. */
+export function createFullscreenPolicy(orientation: OrientationPort, bridge: PrismNativeBridge) {
+  let desired = false, locked = false;
+  let queue = Promise.resolve();
+  return (on: boolean): Promise<void> => {
+    if (desired === on) return queue;
+    desired = on;
+    queue = queue.then(async () => {
+      try {
+        if (on) {
+          await bridge.setImmersiveMode?.(true);
+          locked = await orientation.lock('landscape');
+        } else {
+          if (locked) { locked = false; await orientation.unlock(); }
+          await bridge.setImmersiveMode?.(false);
+        }
+      } catch {
+        locked = false;
+        await orientation.unlock().catch(() => false);
+        await bridge.setImmersiveMode?.(false).catch(() => false);
+      }
+    });
+    return queue;
+  };
+}
 
 export type OrientationLock = 'landscape' | 'portrait';
 

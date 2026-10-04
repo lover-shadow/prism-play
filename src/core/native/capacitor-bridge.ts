@@ -27,6 +27,7 @@ interface PrismNativePlugin {
   getSystemVolume(): Promise<VolumeResult>;
   setSystemVolume(args: { value: number }): Promise<VolumeResult>;
   setSecureScreen(args: { enabled: boolean }): Promise<{ value: boolean }>;
+  setImmersiveMode(args: { enabled: boolean }): Promise<{ value: boolean }>;
   setKeepScreenOn(args: { enabled: boolean }): Promise<void>;
   startBackgroundAudio(args: { title: string; episodeLabel: string }): Promise<void>;
   stopBackgroundAudio(): Promise<void>;
@@ -78,6 +79,7 @@ export function createCapacitorBridge(): PrismNativeBridge {
     getSystemVolume: () => plugin.getSystemVolume(),
     setSystemVolume: async (value) => await plugin.setSystemVolume({ value }),
     setSecureScreen: async (enabled) => (await plugin.setSecureScreen({ enabled })).value === true,
+    setImmersiveMode: async (enabled) => (await plugin.setImmersiveMode({ enabled })).value === true,
     setKeepScreenOn: async (enabled) => {
       await plugin.setKeepScreenOn({ enabled });
     },

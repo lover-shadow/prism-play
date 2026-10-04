@@ -197,7 +197,7 @@ describe('AC-28 首页挂接：网格顺序来自 weave()，分页语义一字�
     expect(Array.from(root.querySelectorAll('.poster-card')).map((card) => (card as HTMLElement).dataset.contentId))
       .toEqual(['q-1', 'q-2', 'q-3']);
     expect(root.querySelectorAll('.poster-corner-badge').length).toBe(0);
-    expect(root.innerHTML).not.toMatch(/AI精品|热门/);
+    expect(root.querySelector('.home-grid-host')?.innerHTML).not.toMatch(/AI精品|热门/);
     view.destroy();
   });
 });

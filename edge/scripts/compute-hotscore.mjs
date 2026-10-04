@@ -22,7 +22,7 @@ const HOT_TOP_PERCENT = 0.15;
 const AI_PATTERN = /AI漫剧|AI短剧|AI剧|AI动漫|虚拟人|数字人/i;
 
 /** 状态快照里的内部字段：绝不进目录分片，避免资产体积被无用键撑大。 */
-const INTERNAL_FIELDS = ['hotScore', 'hitsWeek', 'providerId', 'sourceItemId', 'upstreamUpdatedAt', 'updatedAt'];
+const INTERNAL_FIELDS = ['hotScore', 'hitsWeek', 'providerId', 'sourceItemId', 'upstreamUpdatedAt', 'updatedAt', 'fact'];
 
 const DRAMA_RULES = [
   [/侯门|王爷|和离|大乾|驸马|千金|世子|江山|大秦|天下|贵妃|皇|穿书|公主/, '古装'],
@@ -185,12 +185,12 @@ export function emitAliasSql(resolved, nowSeconds, outFile) {
   return { file: outFile, rows: seen.size };
 }
 
-/** 单集时长：上游 vod_duration 可能是「12」（分钟）也可能是逐集逗号表；缺省沿用既有口径（单集=电影 5400s，多集=120s）。 */
+/** Only explicit upstream minute values are converted; absent duration stays unknown. */
 export function durationSeconds(rawDuration, episodeNumber, totalEpisodes) {
   const parts = String(rawDuration ?? '').split(/[,，]/).map((value) => Number(value.trim()));
   const single = parts.length === 1 ? parts[0] : parts[episodeNumber - 1];
   if (Number.isFinite(single) && single > 0 && single < 600) return Math.round(single * 60);
-  return totalEpisodes <= 1 ? 5400 : 120;
+  return undefined;
 }
 
 /** §3.2 剧集清单；真实播放地址唯一的栖身之所（公开清单可 CDN 长缓存，私密清单必须由 Worker 准入后 no-store 返回）。 */
@@ -204,7 +204,8 @@ export function buildTitleManifest(record, item, { generatedAt, revision }) {
     episodes: episodes.map((ep) => ({
       episodeNumber: ep.episodeNumber,
       title: ep.title,
-      durationSeconds: durationSeconds(item.vod_duration, ep.episodeNumber, episodes.length),
+      ...(durationSeconds(item.vod_duration, ep.episodeNumber, episodes.length) === undefined ? {} :
+        { durationSeconds: durationSeconds(item.vod_duration, ep.episodeNumber, episodes.length) }),
       lines: ep.lines
     })),
     revision,

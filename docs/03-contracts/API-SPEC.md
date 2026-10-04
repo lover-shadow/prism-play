@@ -28,13 +28,13 @@
 
 ### 2. 剧目列表
 - **`GET /api/catalog`**｜认证：可选 Bearer
-- 查询参数：`channel`（必填）、`category`、`page`（默认 1）、`pageSize`（默认 20，上限 50）
+- 查询参数：`channel`（必填）、`category`、`page`（默认 1）、`pageSize`（公开facts分片为60；私密/真实旧代兼容单独验收，不把公开60误改搜索20条分页）
 - 返回 `{ items: ContentItem[], page, pageSize, total, revision }`；后续页**必须**携带首页面的公开 `revision`，目录已变更时 409 并重新拉快照。仅完整同修订分页可原子提交本地，增量每页也须以持久化游标与数据同事务落盘；断电/进程中断保留上个完整快照与原游标，重复页按 revision 幂等应用；D1 不提供跨请求历史快照。
 - 未同时具备有效 B/Y/S 授权与当次凭据时，请求私密分类返回不含任何私密元数据的 404；不得与通用说明中“不存在”口径冲突。
 
 ### 3. 剧目详情与分集
 - **`GET /api/titles/{titleId}`**｜认证：可选 Bearer + 可选 `X-Private-Session`
-- 返回 `{ item, episodes: EpisodeItem[] }`。
+- 公开返回 TitleAssetResponse（含兼容item、workId及完整episodes[].lines[]），episodeNumber身份为本作局部编号，禁止调用旧全局playback作为兜底。有workFacts时以当前generation投影，缺失/损坏不能回旧公开D1；私密原双准入路径不变。
 - 未同时具备有效 B/Y/S 授权与有效 `X-Private-Session` 的私密剧目、以及不存在或未发布的剧目一律返回 404，不区分差异以防探测；公开剧目或已获双重准入者正常返回详情。
 
 ### 4. 分集播放解析
@@ -148,7 +148,7 @@
 ## 六、 受控代理
 
 - **`GET /proxy/{kind}/{handle}`**
-- 客户端唯一媒体入口。**白名单 + 防 SSRF + 鉴权/短时签名**，禁止任意 URL 转发；真实上游地址仅在服务端使用，永不下发。
+- 海报及旧媒体兼容入口，非新公开客户端唯一媒体入口。**白名单 + 防 SSRF + 鉴权/短时签名**，禁止任意URL转发；新公开详情 `lines[].mediaUrl` 运行时直连例外见§〇，私密安全边界不放宽。
   - `kind`: `img`（缩略海报）或 `media`（HLS 流与分片）；
   - `handle`: 不透明安全资源句柄（如 `content_id` 或短时流 token）。
 - HLS 清单、分片、海报及 Range 请求逐次核对内容 ID 与 D1 当前发布状态；私密请求须与有效 B/Y/S 及当次会话绑定，仅有代理 URL 不得放行，未准入返回不泄露差异的 404 且 `Cache-Control: no-store`。公开海报响应头统一为 `Cache-Control: public, max-age=300` 配合 ETag/版本指纹复用。HLS 主/子清单、分片、密钥 URI、字幕的相对与绝对路径均须重写为保留内容身份的受控 URL；私密 HLS 子请求须经同进程受控转发层逐次附当前会话与 Bearer；若改等效凭据须先更新 OpenAPI 并真机验证，未证实前私密取流保持关闭。支持 Range/206 及正确 Content-Type，不能只保证首个 m3u8 可取。
@@ -197,6 +197,20 @@
 | `CATALOG_CURSOR_EXPIRED` | 410 | `GET /api/catalog/changes` | 客户端增量游标已超出服务端变更日志保留窗口 |
 
 ---
+
+## 八.二、 v2.6修复同步规则（2026-10-04，未验收）
+
+关联正本§10.1及 `D:/DEV/prism-play/docs/04-spec/SPEC-v2.6.3-REPAIR.md`。公开目录、搜索/补全/related候选、按作详情、分享及海报使用同一manifest generation公开事实及flags；搜索不得返回旧anime ID或已不可见作品，完整集表不得截两集。§八旧D1内容入库/公开变更原子写口径仅为旧代兼容描述，新公开代由完整facts产物与manifest发布驱动，私密D1消费者不得整体停用。
+
+本地搜索hydrate完整feed、判fallback前等待init/queued sync并核验revision/count；仅SQLite真不可用可明确降级，联网补充须用户手动。新公开详情允许缓存按作清单（替代§〇“地址仅内存”的公开限制），需随generation重验证，禁止媒体文件离线缓存；私密地址/清单仍仅内存no-store。旧playback仅用于真实旧全局episode ID，不能接本作局部集号。公开60条分片为目标契约，现源码20/50常量未在本文档任务修改，待B2回归。
+
+商业计时按实际播放经过时间累计，seek/position/假duration不计，暂停缓冲不计、倍速不乘媒体位移；云配置阈值/间隔/价格/档位/文案无本地猜测，缺配置关闭提醒，仅自然切集可关闭。作者二维码允许host静态注入旧已确认 `D:/DEV/prism-play/public/images/author-contact.jpg` / `author-reward.jpg`，不新增虚构云QR字段或端点；放大/文件下载及微信手动辅助如实反馈，下载不等于相册保存。旧reward含历史“换长期通行证”文字，不构成当前购买/授权承诺，须附免责声明；价格/档位/提醒仍有效云配置控制。核销原子幂等、撤销、限流、设备绑定及Ed25519/离线边界保持。
+
+内部manifest publicSearch描述 `{schema:1,count,key,bytes,sha256}`，key=`library/search/{sha256}.json`、上限16 MiB，对象 `{schema:1,revision,entries:[{item,aliases,pinyin,tags}]}` 与workFacts同代；验证bytes/hash/revision/count/公开频道总数并在返回前复核事实。此为Worker内部R2读取契约，不新增公网投影路由/客户端字段；现代workFacts代缺/坏投影503，不回旧D1，只有真实无workFacts旧代兼容。上线必须完整同代facts/目录/bundle/search blobs先校验上传，再切manifest pointer、Worker配套，禁止单独部署搜索Worker；旧拒覆盖不算日更成功。provider_s1元数据/空lines不是可播证明，真实线路及生产覆盖待证。
+
+端侧按正本§6.1：local_following与history同prism_local.db含created_at Unix秒，独立收藏不受history500条LRU/清cache/history影响，不新增云sync；观看累计仅Preference `prism.watch_seconds_total` / `prism.watch_seconds_last_nudge` 标量无ID/凭据，private/unknown零计。`/api/user/sync`仍只同步既有公开断点/画像，不扩展收藏或观看累计字段。
+
+私密隔离和CI secrets/备份另批，前缀不是安全边界。本次仅文档同步，已有局部业务模块不代表R26全完成；历史1040通过仅首批report，新全量/云响应复测/浏览器/原生/生产真实CI均待验，不以旧30项矩阵标本轮绿色。
 
 ## 九、 本期不含
 

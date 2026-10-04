@@ -1,14 +1,4 @@
-/**
- * 大视界主视图（SPEC §7 第一行，AC-01 / AC-03 / AC-04；SPEC-APP-REFACTOR A-2 / A-4 / A-5）。
- *
- * 组合根只负责注入依赖：API 客户端、排版偏好读写、打开剧目、续播、历史预览、搜索 Overlay 触发。
- * 本视图不做任何持久化，也不 import 存储/播放/历史/设置视图——跨域能力一律是注入的小接口。
- * 两层导航与搜索入口在 `home-topology.ts`，滚动行为在 `home-scroll.ts`；这里只剩片单与分页。
- *
- * 本波次三条行为变更都有真实机制对应（零假 UI）：**单页 60 部**（`HOME_PAGE_SIZE` 与 Track 2 的 R2 分片
- * 一一对应，60 = 3 个 3.5:3.5:3 混排块 = 20 整行）；**无感加载**（手动【加载更多】按钮已物理拔除，尾部
- * 1px 哨兵 + IntersectionObserver 静默追加）；**分享入口**（海报卡不再有分享按钮，分享收敛播放器内）。
- */
+/** 首页组合根：注入目录/同步/历史能力；拓扑、滚动、重复点击各自独立，不直接访问存储。 */
 
 // @ts-ignore Vite 的 CSS 副作用导入没有环境模块声明（tsconfig 未挂 vite/client），构建期由 Vite 处理。
 import '../styles/home.css';
@@ -22,8 +12,9 @@ import { DEFAULT_CHANNEL_ID, pickDefaultChannel } from '../components/channel-ba
 import { createContinueCard } from '../components/continue-card';
 import { createModeSwitch, createPosterGrid } from '../components/poster-grid';
 import { clearChildren, detailForError, element, renderStateView, stateKindForError, type ViewStateKind } from '../components/state-views';
-import { attachHomeScroll, type HomeScroll } from './home-scroll';
+import { attachHomeScroll, resolveScroller, smoothScrollToTop, type HomeScroll } from './home-scroll';
 import { createHomeTopology } from './home-topology';
+import { createHomeRepeat } from './home-repeat';
 
 /** 单页拉取量：与目录分片契约同值（SPEC-APP-REFACTOR §2.1，`pageSize` 恒为 60）。 */
 export const HOME_PAGE_SIZE = 60;
@@ -39,24 +30,20 @@ export interface HomeApi {
 export interface HomeViewDeps {
   api: HomeApi;
   root: HTMLElement;
-  /**
-   * 顶栏右侧工具槽（由外壳提供，永不被清空）。四模排版切换器挂在这里，随视图构造一次并常驻复用。
-   * 缺省时切换器退回视图内部（单测与旧宿主场景），保证不必依赖外壳也能渲染。
-   */
+  /** 外壳顶栏工具槽，缺省时排版器退回视图内。 */
   headerAccessory?: HTMLElement | null;
   posterMode: () => PosterMode;
   onPosterModeChange: (mode: PosterMode) => void;
   onOpenTitle: (contentId: string) => void;
   onResume: (row: WatchHistoryRow) => void;
   historyPreview: () => Promise<WatchHistoryRow[]>;
-  /**
-   * 每次拓扑落定或用户切换频道后回传当前频道节点，供主宿主挂/摘 FLAG_SECURE（AC-02-4）。
-   * 本视图不碰原生层，也不缓存这个值。
-   */
+  /** 回传当前频道供宿主挂/摘 FLAG_SECURE（AC-02-4）。 */
   onChannelChange?: (channel: ChannelItem | null) => void;
   pageSize?: number;
   /** 打开全屏搜索 Overlay（A-3：搜索不再是 Tab）。未注入即整条搜索栏不渲染，不做只长样子的控件。 */
   onSearch?: () => void;
+  /** main 注入真实目录同步；resolve 必须在新快照提交后。未注入则直接重读 api（本地门面可能仅缓存）。 */
+  syncCatalog?: () => Promise<void>;
 }
 
 export interface HomeView {
@@ -65,14 +52,16 @@ export interface HomeView {
   setPosterMode: (mode: PosterMode) => void;
   /** 触底续载的唯一入口：哨兵与调用方共用同一条路径，不留第二套翻页语义。 */
   loadMore: () => void;
+  /** 宿主离页、打开 Overlay/播放器或其他导航时调用，打断重复序列并废弃在途视图结果。 */
+  interruptNavigation: () => void;
   destroy: () => void;
 }
 
 export function createHomeView(deps: HomeViewDeps): HomeView {
-  let reload: (() => Promise<void>) | null = null;
+  let reload: (() => Promise<void>) | null = null, initial: (() => Promise<void>) | null = null;
   let changeMode: ((mode: PosterMode) => void) | null = null;
   let recheck: (() => void) | null = null;
-  let teardown: (() => void) | null = null;
+  let teardown: (() => void) | null = null, interrupt: (() => void) | null = null;
 
   function build(): void {
     const pageSize = deps.pageSize ?? HOME_PAGE_SIZE;
@@ -88,19 +77,28 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
     /** 网格是否处于可续载态：五态（empty / error / offline / disabled）下哨兵一律不放行。 */
     let gridReady = false, appending = false;
 
+    const repeat = createHomeRepeat({
+      top: () => smoothScrollToTop(resolveScroller(deps.root)), sync: deps.syncCatalog,
+      reload: refreshTopology,
+      invalidate: () => { ++token; gridReady = false; appending = false; },
+      failed: (error) => presentState(stateKindForError(error), { detail: detailForError(error), actionLabel: '重试', onAction: () => void repeat.refresh() })
+    });
+    interrupt = repeat.interrupt;
     const topology = createHomeTopology({
-      channelHost, railHost, onSearch: deps.onSearch,
-      onSelectChannel: (channelId) => { if (channelId !== selectedChannelId) selectChannel(channelId); },
+      channelHost, railHost, onSearch: deps.onSearch, onNavigate: repeat.interrupt,
+      items: () => selectedChannelId ? deps.api.cachedSnapshot?.().items(selectedChannelId) ?? items : [],
+      onOpenTitle: deps.onOpenTitle,
+      onSelectChannel: (channelId) => {
+        if (channelId === selectedChannelId) repeat.click(`channel:${channelId}`); else selectChannel(channelId);
+      },
       onSelectCategory: (category) => {
-        if (category === selectedCategory) return;
-        selectedCategory = category;
-        void loadCatalog(++token, 1);
+        if (category === selectedCategory) { repeat.click(`category:${selectedChannelId}:${category}`); return; }
+        repeat.interrupt(); selectedCategory = category; page = 1; pageRevision = undefined;
+        smoothScrollToTop(resolveScroller(deps.root)); void loadCatalog(++token, 1);
       }
     });
     const searchBar = topology.searchEntry();
 
-    // 频道名与一级频道栏 100% 重复，排版器单占一行又把海报流下压 40px，故这一整行区块头已拔除（§1.7.3）。
-    // 排版切换器优先住外壳顶栏右侧工具槽；无槽位（单测/旧宿主）时退化为视图内独立一行，功能不因此丢失。
     const rows: HTMLElement[] = [sticky];
     if (searchBar !== null) rows.push(searchBar);
     rows.push(continueHost);
@@ -111,9 +109,8 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
     view.append(...rows);
     deps.root.appendChild(view);
 
-    // A-5：海报卡不再有分享入口，网格只留"进详情"这一个动作。
-    const grid = createPosterGrid({ root: gridHost, mode: deps.posterMode, onOpenTitle: deps.onOpenTitle });
-    const card = createContinueCard({ root: continueHost, onResume: deps.onResume });
+    const grid = createPosterGrid({ root: gridHost, mode: deps.posterMode, onOpenTitle: (id) => { repeat.interrupt(); deps.onOpenTitle(id); } });
+    const card = createContinueCard({ root: continueHost, onResume: (row) => { repeat.interrupt(); deps.onResume(row); } });
     const modeSwitch = createModeSwitch({ root: switchHost, mode: deps.posterMode, onChange: setMode });
 
     // A-4 无感加载：尾部哨兵进入触底带即静默追加下一页；A-2 折叠搜索条同一条滚动订阅消费同一个容器。
@@ -126,14 +123,12 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
     });
     recheck = () => scroll.recheck();
 
-    // 混排只重排**展示层**（§1.8.4 / AC-28）：输入是累积集合 `items`，page / revision / 游标 语义一字不动。
-    // 题材归属由片单注入给画像引擎——`WatchHistoryRow` 没有 category 列，端侧不猜题材，查不到即不计分。
     function paintGrid(): void {
       // 题材查表用 Map：排序里每次比较都要取题材，线性 find 会把 2ms 端侧预算整个吃光。
       const genres = new Map(items.map((entry) => [entry.id, entry.category] as const));
       const genreOf: GenreOf = (contentId) => genres.get(contentId);
-      const woven = weave(items, genrePreference(historyRows, Math.floor(Date.now() / 1000), genreOf), { genreOf });
-      grid.render(woven.items, woven.badges);
+      const woven = weave(items, genrePreference(historyRows, Math.floor(Date.now() / 1000), genreOf), { genreOf, preserveAppend: true });
+      grid.render(woven.items, woven.badges); topology.refreshRankings();
     }
 
     function currentChannel(): ChannelItem | null {
@@ -156,6 +151,8 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
     }
 
     function selectChannel(channelId: ChannelId): void {
+      repeat.interrupt(); page = 1; pageRevision = undefined;
+      smoothScrollToTop(resolveScroller(deps.root));
       selectedChannelId = channelId;
       selectedCategory = ALL_CATEGORIES_LABEL;
       paintTopology();
@@ -203,7 +200,9 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
         page = response.page;
         total = response.total;
         pageRevision = response.revision;
-        items = targetPage === 1 ? [...response.items] : [...items, ...response.items];
+        const before = items.length;
+        items = targetPage === 1 ? [...response.items] : [...new Map([...items, ...response.items].map(item => [item.id, item])).values()];
+        if (targetPage > 1 && items.length === before) total = items.length;
         if (items.length === 0) {
           presentState('empty', emptyOptions());
           return;
@@ -273,9 +272,10 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
       }
     }
 
-    reload = refreshTopology;
+    initial = refreshTopology; reload = repeat.refresh;
     changeMode = setMode;
     teardown = () => {
+      repeat.destroy(); interrupt = null;
       topology.destroy(); grid.destroy(); card.destroy(); scroll.destroy();
       clearChildren(deps.root);
       reload = null; changeMode = null; recheck = null; teardown = null;
@@ -286,12 +286,13 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
 
   async function boot(): Promise<void> {
     if (teardown === null) build();
-    await reload?.();
+    await initial?.();
   }
 
   return {
     mount: boot,
-    refresh: boot,
+    refresh: async () => { if (teardown === null) build(); await reload?.(); },
+    interruptNavigation: () => interrupt?.(),
     setPosterMode: (mode) => { if (teardown === null) build(); changeMode?.(mode); },
     loadMore: () => { if (teardown === null) build(); recheck?.(); },
     destroy: () => teardown?.()

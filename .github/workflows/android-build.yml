@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
+    inputs:
+      publish_website:
+        description: '仅在真机验收通过后发布至官网下载入口'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build-android:
@@ -97,7 +103,7 @@ jobs:
           retention-days: 14
 
       - name: 发布最新 APK 至 R2 存储桶供官网下载
-        if: env.CLOUDFLARE_API_TOKEN != ''
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_website == true && env.CLOUDFLARE_API_TOKEN != ''
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

@@ -38,6 +38,8 @@ export interface PrismNativeBridge {
 
   /** AC-02-4: dynamic FLAG_SECURE while 个人探索 is on screen; off on leaving. */
   setSecureScreen(enabled: boolean): Promise<boolean>;
+  /** Window bars + pre-entry orientation policy, never a second fullscreen container. */
+  setImmersiveMode?(enabled: boolean): Promise<boolean>;
   /** AC-10: foreground service that keeps audio alive with the screen off. */
   setKeepScreenOn(enabled: boolean): Promise<void>;
   startBackgroundAudio(title: string, episodeLabel: string): Promise<void>;
@@ -56,26 +58,19 @@ let installed: PrismNativeBridge | null = null;
 let installedSource: BridgeSource = 'web-fallback';
 
 /**
- * Web fallback. Brightness is a compositor overlay because a browser cannot touch the panel; volume
+ * Web fallback. Brightness is unsupported because a browser cannot touch the panel; volume
  * reports `supported: false` rather than lying about the system stream (SPEC AC-06 explicitly scopes
  * the web build to player volume only, and AC-02-4 is Android-only).
  */
 export function createWebFallbackBridge(): PrismNativeBridge {
-  let dimming = 0;
-  const applyDim = (): void => {
-    document.documentElement.style.setProperty('--native-dim', String(dimming));
-  };
+  // Browsers cannot adjust the window backlight; do not substitute a painted mask.
   return {
     secureRead: async (key) => window.localStorage.getItem(`prism.insecure.${key}`),
     secureWrite: async (key, value) => void window.localStorage.setItem(`prism.insecure.${key}`, value),
     secureClear: async (key) => void window.localStorage.removeItem(`prism.insecure.${key}`),
     isKeystoreBacked: async () => false,
-    getBrightness: async () => ({ brightness: 1 - dimming, supported: false }),
-    setBrightness: async (value) => {
-      dimming = Math.min(1, Math.max(0, 1 - value));
-      applyDim();
-      return { brightness: 1 - dimming, supported: false };
-    },
+    getBrightness: async () => ({ brightness: 1, supported: false }),
+    setBrightness: async () => ({ brightness: 1, supported: false }),
     getSystemVolume: async () => ({ volume: 1, supported: false }),
     setSystemVolume: async () => ({ volume: 1, supported: false }),
     setSecureScreen: async () => false,

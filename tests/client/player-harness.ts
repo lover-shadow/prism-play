@@ -59,13 +59,14 @@ export function setup(options: Partial<PrismPlayerOptions> & { native?: boolean 
   const clock = fakeClock(); const frames = fakeFrames();
   const handlers = new Map<string, Array<() => void>>();
   const fire = (event: string) => { (handlers.get(event) ?? []).forEach((handler) => handler()); };
-  const state = { t: 0, vol: 1, playing: false, destroyed: false, sources: [] as string[], toggles: 0 };
+  const state = { t: 0, vol: 1, rate: 1, playing: false, destroyed: false, sources: [] as string[], toggles: 0 };
   // A real element emits play/pause when driven, so the fake does too: the host listens, it never guesses.
   const engine = {
     play: () => { state.playing = true; fire('play'); }, pause: () => { state.playing = false; fire('pause'); },
     playing: () => state.playing, currentTime: () => state.t, duration: () => 100, volume: () => state.vol,
     setCurrentTime: vi.fn((seconds: number) => { state.t = seconds; }),
     setVolume: vi.fn((value: number) => { state.vol = value; }),
+    playbackRate: () => state.rate, setPlaybackRate: (rate: number) => { state.rate = rate; },
     setSource: vi.fn((url: string) => { state.sources.push(url); }),
     toggleControls: vi.fn(() => { state.toggles += 1; }), destroy: vi.fn(() => { state.destroyed = true; }),
     on: (event: string, handler: () => void) => {

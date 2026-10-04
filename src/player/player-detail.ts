@@ -12,6 +12,7 @@ import { createLineAwareCastStreamSource } from './cast-ports';
 export interface PlayerDetailStage {
   body: HTMLElement;
   markEpisode(id: number): void;
+  openCast(): void; dismissOverlay(): boolean; destroy(): void;
 }
 
 export function buildDetailBody(
@@ -22,7 +23,8 @@ export function buildDetailBody(
   onShare?: (ep: EpisodeItem) => void,
   onFullscreen?: () => void,
   loadRelated?: () => Promise<ContentItem[]>,
-  onOpenRelated?: (contentId: string) => void
+  onOpenRelated?: (contentId: string) => void,
+  following?: { store: import('../core/storage/following-store').FollowingStore; report?(message: string): void }
 ): PlayerDetailStage {
   const body = document.createElement('div');
   body.className = 'prism-player-host__body';
@@ -89,11 +91,28 @@ export function buildDetailBody(
   favBtn.type = 'button';
   favBtn.className = 'action-island-item';
   favBtn.innerHTML = `${icon('bookmark', { size: 20 })}<span>追剧</span>`;
-  favBtn.addEventListener('click', () => {
-    favBtn.classList.toggle('active');
-    const favourited = favBtn.classList.contains('active');
-    const label = favBtn.querySelector('span');
-    if (label) label.textContent = favourited ? '已追剧' : '追剧';
+  let disposed = false;
+  favBtn.dataset.action = 'following';
+  favBtn.disabled = true;
+  const publicFollowing = following !== undefined && !isPrivateSubject(info.item);
+  const paintFollowing = (active: boolean) => {
+    favBtn.classList.toggle('active', active);
+    favBtn.setAttribute('aria-pressed', String(active));
+    favBtn.querySelector('span')!.textContent = active ? '已追剧' : '追剧';
+  };
+  if (publicFollowing) void following.store.list().then(rows => {
+    if (disposed) return;
+    paintFollowing(rows.some(row => row.content_id === info.item.id)); favBtn.disabled = false;
+  }).catch(() => { if (!disposed) following.report?.('本机追剧存储不可用，无法读取追剧状态'); });
+  favBtn.addEventListener('click', async () => {
+    if (!publicFollowing || disposed || favBtn.disabled) return;
+    favBtn.disabled = true;
+    try {
+      const committed = await following.store.toggle({ contentId: info.item.id, title: info.item.title,
+        coverUrl: info.item.coverUrl, isPrivate: info.item.isPrivate, channelId: info.item.channelId });
+      if (!disposed) paintFollowing(committed);
+    } catch { if (!disposed) following.report?.('追剧保存失败，保留原状态，请重试'); }
+    finally { if (!disposed) favBtn.disabled = false; }
   });
 
   /**
@@ -234,7 +253,7 @@ export function buildDetailBody(
   const markEpisode = (id: number): void => {
     currentEpisodeId = id;
     // 手机上切集，大屏必须跟到同一集；未在投屏时 syncNow() 自己就是空操作。
-    void castPanel.syncNow();
+    if (castPanel.activeDevice() !== null) void castPanel.syncNow();
     const ep = info.episodes.find((e) => e.episodeId === id);
     epTag.textContent = `第 ${ep?.episodeNumber ?? 1} 集`;
     for (const [epId, btn] of pills.entries()) {
@@ -246,5 +265,7 @@ export function buildDetailBody(
     }
   };
 
-  return { body, markEpisode };
+  return { body, markEpisode, openCast: () => castPanel.open(),
+    dismissOverlay: () => castPanel.isOpen() ? (castPanel.close(), true) : false,
+    destroy: () => { disposed = true; castPanel.destroy(); } };
 }

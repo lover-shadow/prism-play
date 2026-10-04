@@ -53,8 +53,9 @@ const sortKey = (item: ContentItem, kind: RankingKind): number =>
  * 纯函数排序（单测直接喂数据断言，不经过 DOM）：降序 + 以 id 收口同分，保证同输入同输出。
  * 【AI先锋榜】只认 `isAi === true`，缺省或 false 都不入榜——不在这里猜"是不是 AI 做的"。
  */
-export function rankItems(items: readonly ContentItem[], kind: RankingKind, limit: number = RANKING_LIMIT): ContentItem[] {
-  const pool = items.filter((item) => !isPrivateSubject(item) && (kind !== 'ai' || item.isAi === true));
+export function rankItems(items: readonly ContentItem[], kind: RankingKind, limit: number = RANKING_LIMIT, channel?: string): ContentItem[] {
+  const pool = items.filter((item) => !isPrivateSubject(item) && (channel === undefined || item.channelId === channel)
+    && (kind !== 'ai' || item.isAi === true) && sortKey(item, kind) >= 0);
   return [...pool]
     .sort((left, right) => sortKey(right, kind) - sortKey(left, kind) || left.id.localeCompare(right.id))
     .slice(0, limit);
@@ -80,6 +81,8 @@ export interface RankingsRailDeps {
   items: () => readonly ContentItem[];
   onOpenTitle(contentId: string): void;
   limit?: number;
+  /** 首页仅展示当前公开频道热门榜；省略时保留搜索三榜。 */
+  channel?: () => string | null;
 }
 
 export interface RankingsRail {
@@ -95,7 +98,9 @@ export interface RankingsRail {
 function bareBand(className: string, dataEl: string): Band {
   const wrap = make('div', className);
   wrap.dataset.el = dataEl;
-  return { wrap, head: make('div'), body: make('div', 'pv-band-body') };
+  const body = make('div', 'pv-band-body');
+  wrap.append(body);
+  return { wrap, head: make('div'), body };
 }
 
 export function createRankingsRail(deps: RankingsRailDeps): RankingsRail {
@@ -109,7 +114,7 @@ export function createRankingsRail(deps: RankingsRailDeps): RankingsRail {
   tabs.setAttribute('role', 'group');
   tabs.setAttribute('aria-label', '端侧榜单');
   const list = bareBand('srch-rank-list', 'rankings-list');
-  const note = make('p', 'pv-hint', '榜单由本机公开目录直接排序得出，不发起任何网络请求。');
+  const note = make('p', 'pv-hint', '按累计热度或上架时间排序，仅覆盖本机快照已缓存的公开目录；非24小时或全网实时榜。');
 
   const itemsOf = (): ContentItem[] => {
     if (disposed) return [];
@@ -141,12 +146,13 @@ export function createRankingsRail(deps: RankingsRailDeps): RankingsRail {
 
   function paint(): void {
     if (disposed) return;
-    const ranked = rankItems(itemsOf(), current, limit);
+    const channel = deps.channel?.();
+    const ranked = channel === null || channel === 'private' ? [] : rankItems(itemsOf(), current, limit, channel);
     if (ranked.length === 0) {
       list.wrap.dataset.state = 'empty';
-      list.body.replaceChildren(make('p', 'pv-state pv-state-empty', current === 'ai'
-        ? '本机目录暂无 AI 加工标记的剧目：同步到片单后自动点亮。'
-        : '本机公开目录还没有内容：联网拉取片单后榜单自动点亮。'));
+      list.body.replaceChildren(make('p', 'pv-state pv-state-empty', current === 'fresh'
+        ? '本机快照上架时间数据不足。'
+        : '热度数据不足：本机快照暂无可核验的累计热度。'), note);
       return;
     }
     const rows = make('div', 'rank-list');
@@ -174,7 +180,8 @@ export function createRankingsRail(deps: RankingsRailDeps): RankingsRail {
     tab.addEventListener('click', () => select(kind));
     tabs.append(tab);
   }
-  host.append(tabs, list.wrap);
+  if (deps.channel === undefined) host.append(tabs);
+  host.append(list.wrap);
   deps.root.appendChild(host);
   select(current);
 

@@ -7,7 +7,8 @@
  * 2. 搜索条只在注入 `onSearch` 时存在——没有真实 Overlay 可打开的搜索框就是虚假 UI，宁可整条缺席；
  * 3. 折叠动效不在这里：本模块只交出搜索条节点，滚动差量状态机归 `home-scroll.ts`。
  */
-import type { ChannelId, ChannelItem } from '../../edge/src/types/api';
+import type { ChannelId, ChannelItem, ContentItem } from '../../edge/src/types/api';
+import { createRankingsRail } from './rankings-rail';
 import { createCapsuleRail } from '../components/capsule-rail';
 import { createChannelBar } from '../components/channel-bar';
 import { icon } from '../components/icons';
@@ -39,6 +40,9 @@ export interface HomeTopologyDeps {
   onSearch?: () => void;
   onSelectChannel(channelId: ChannelId): void;
   onSelectCategory(category: string): void;
+  items?: () => readonly ContentItem[];
+  onOpenTitle?: (id: string) => void;
+  onNavigate?: () => void;
 }
 
 export interface HomeTopology {
@@ -46,6 +50,7 @@ export interface HomeTopology {
   paint(channels: readonly ChannelItem[], selected: ChannelId | null, category: string): void;
   /** 交给主视图决定它在视图里的落位，同时供折叠滚动消费。 */
   searchEntry(): HTMLElement | null;
+  refreshRankings(): void;
   destroy(): void;
 }
 
@@ -59,11 +64,26 @@ export function createHomeTopology(deps: HomeTopologyDeps): HomeTopology {
       deps.onSelectCategory(category);
     }
   });
-  const entry = deps.onSearch === undefined ? null : createSearchBar(deps.onSearch);
-  let painted: readonly ChannelItem[] | null = null;
+  const entry = deps.onSearch === undefined ? null : createSearchBar(() => { deps.onNavigate?.(); deps.onSearch?.(); });
+  let painted: readonly ChannelItem[] | null = null, selectedId: ChannelId | null = null;
+  const hot = element('button', 'capsule touch-target');
+  hot.type = 'button'; hot.dataset.el = 'channel-hot-entry';
+  hot.innerHTML = `${icon('list', { size: 16 })}<span class="capsule-pill">热门榜</span>`;
+  hot.setAttribute('aria-expanded', 'false');
+  const rankingsHost = element('div'); rankingsHost.hidden = true;
+  const rankings = deps.items && deps.onOpenTitle ? createRankingsRail({
+    root: rankingsHost, items: deps.items, channel: () => selectedId,
+    onOpenTitle: (id) => { deps.onNavigate?.(); deps.onOpenTitle?.(id); }
+  }) : null;
+  hot.addEventListener('click', () => {
+    deps.onNavigate?.(); rankingsHost.hidden = !rankingsHost.hidden;
+    hot.setAttribute('aria-expanded', String(!rankingsHost.hidden)); rankings?.refresh();
+  });
 
   return {
     paint(channels, selected, category) {
+      if (selectedId !== selected) { rankingsHost.hidden = true; hot.setAttribute('aria-expanded', 'false'); }
+      selectedId = selected;
       // 同一份数组只重绘一次整栏，换频道走 `select`：保住横向滚动位置，也省掉四颗按钮的重建。
       if (channels !== painted) {
         bar.render(channels, selected);
@@ -72,9 +92,15 @@ export function createHomeTopology(deps: HomeTopologyDeps): HomeTopology {
         bar.select(selected);
       }
       rail.render(channels.find((channel) => channel.id === selected)?.categories ?? [], category);
+      if (rankings !== null && selected !== null && selected !== 'private') {
+        deps.railHost.querySelector('.capsule-rail')?.prepend(hot);
+        deps.railHost.append(rankingsHost); rankings.refresh();
+      } else { hot.remove(); rankingsHost.remove(); }
     },
+    refreshRankings: () => rankings?.refresh(),
     searchEntry: () => entry,
     destroy() {
+      rankings?.destroy();
       bar.destroy();
       rail.destroy();
     }

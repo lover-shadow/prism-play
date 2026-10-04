@@ -15,6 +15,9 @@
  * holds a private row and the SQL still filters `is_private = 0` plus the four public channels.
  */
 
+import { generationSearch, generationSuggestions } from '../search/generation';
+import { configUnavailableResponse } from '../config/kv-config';
+import { originOf } from '../http/serialize';
 import type { Clock } from '../core/clock';
 import type { Env } from '../types/env';
 import type { SearchSuggestion, SearchSuggestionType, SuggestionsResponse } from '../types/api';
@@ -130,6 +133,9 @@ export async function handleSearchSuggestions(request: Request, env: Env, _clock
   const query = readQueryParameter(searchParams);
   if (!query.ok) return query.response;
 
+  const generation = await generationSearch(env, originOf(request));
+  if (generation === null) return configUnavailableResponse();
+  if (generation !== undefined) return generationSuggestions(env, generation, query.value);
   const suggestions: SearchSuggestion[] = [];
   const seen = new Set<string>();
   const add = (candidate: SearchSuggestion): void => {

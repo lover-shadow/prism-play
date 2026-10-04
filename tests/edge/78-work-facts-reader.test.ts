@@ -55,6 +55,20 @@ describe('public work facts: one verified source for titles/share/poster', () =>
     expect(new Set(await Promise.all(responses.map((r) => r.text()))).size).toBe(1);
     expect(f.calls).toEqual([]);
   });
+  it('compact directory serves the identical title wire and rejects malformed tuples', async () => {
+    const f = await fixture();
+    const before = await (await f.responses())[0].text();
+    const [leaf, pack] = Object.entries(f.manifest.workFacts.packs)[0];
+    const compact = { ...f.manifest, workFacts: { schema: 2, maxBytes: 524288, packs: { [leaf]: [pack.bytes, pack.sha256] } } };
+    expect(validatePublicManifest(compact)).not.toBeNull();
+    await f.env.KV.put('catalog:manifest', JSON.stringify(compact));
+    const responses = await f.responses();
+    expect(responses.map((r) => r.status)).toEqual([200, 200, 200]);
+    expect(await responses[0].text()).toBe(before);
+    for (const tuple of [[0, pack.sha256], [524289, pack.sha256], [pack.bytes, 'bad'], [pack.bytes, pack.sha256, 1]]) {
+      expect(validatePublicManifest({ ...compact, workFacts: { ...compact.workFacts, packs: { [leaf]: tuple } } })).toBeNull();
+    }
+  });
   it('unknown ids are uniformly 404', async () => {
     const f = await fixture();
     expect((await f.responses('unknown')).map((r) => r.status)).toEqual([404, 404, 404]);

@@ -7,10 +7,10 @@ import { describe, expect, it } from 'vitest';
 import { detailOf, settle, setup } from './player-harness';
 
 describe('手势 HUD 与原生通道', () => {
-  it('left drag moves only the element gain and the HUD states the web limit (AC-06)', async () => {
+  it('right drag moves only the element gain and the HUD states the web limit (AC-06)', async () => {
     const h = setup();
     await h.player.load(11); await settle();
-    h.swipe(40, 60, 150); await settle();
+    h.swipe(360, 60, 150); await settle();
     expect(h.calls.systemVolume).toHaveLength(0);
     expect([h.state.vol < 1, h.hud('volume').classList.contains('is-visible')]).toEqual([true, true]);
     expect(h.hud('volume').textContent).toMatch(/音量 \d{1,3}%/);
@@ -19,10 +19,10 @@ describe('手势 HUD 与原生通道', () => {
     expect(h.hud('volume').classList.contains('is-visible')).toBe(false);
   });
 
-  it('right drag asks the bridge for window brightness and shows the amber HUD (AC-07)', async () => {
+  it('left drag asks the bridge for window brightness and shows the amber HUD (AC-07)', async () => {
     const h = setup();
     await h.player.load(11); await settle();
-    h.swipe(360, 180, 96); await settle();
+    h.swipe(40, 180, 96); await settle();
     expect(h.calls.brightness).toHaveLength(1);
     expect([h.hud('brightness').classList.contains('is-visible'), h.hud('volume').classList.contains('is-visible')]).toEqual([true, false]);
     expect(h.hud('brightness').textContent).toMatch(/亮度 \d{1,3}%/);
@@ -32,8 +32,8 @@ describe('手势 HUD 与原生通道', () => {
   it('a native bridge gets one call per animation frame and never touches the element gain', async () => {
     const h = setup({ native: true });
     await h.player.load(11); await settle();
-    h.pointer('pointerdown', 40, 180);
-    for (let y = 172; y > 60; y -= 8) h.pointer('pointermove', 40, y);
+    h.pointer('pointerdown', 360, 180);
+    for (let y = 172; y > 60; y -= 8) h.pointer('pointermove', 360, y);
     expect(h.frames.size()).toBe(1);
     h.frames.run(); await settle();
     expect([h.calls.systemVolume.length, h.state.vol]).toEqual([1, 1]);
@@ -59,7 +59,7 @@ describe('手势 HUD 与原生通道', () => {
     const h = setup();
     await h.player.load(11); await settle();
     h.player.setLocked(true);
-    h.swipe(40, 60, 170);
+    h.swipe(360, 60, 170);
     h.pointer('pointerdown', 320, 100); h.pointer('pointerup', 320, 100); h.clock.advance(400);
     await settle();
     expect([h.state.vol, h.state.toggles, h.player.state().locked]).toEqual([1, 0, true]);
@@ -75,7 +75,7 @@ describe('定时、来电、抽屉与拆除', () => {
     const h = setup();
     await h.player.load(11); await settle();
     h.player.scheduleSleep('timer-15');
-    h.swipe(40, 60, 96); await settle();
+    h.swipe(360, 60, 96); await settle();
     const gain = h.state.vol;
     expect([h.player.state().sleepMode, gain < 1]).toEqual(['timer-15', true]);
     h.clock.advance(15 * 60_000 - 3_000);
@@ -150,7 +150,7 @@ describe('定时、来电、抽屉与拆除', () => {
     expect([h.calls.keepScreenOn.at(-1), h.state.destroyed, h.player.state().phase]).toEqual([false, true, 'destroyed']);
     const writes = h.progress.mock.calls.length;
     h.fire('timeupdate');
-    h.swipe(40, 60, 170); h.frames.run();
+    h.swipe(360, 60, 170); h.frames.run();
     h.calls.listener?.('ringing');
     h.q<HTMLElement>('[data-action="sleep"]')?.click(); await settle();
     expect([h.progress.mock.calls.length, h.calls.brightness.length]).toEqual([writes, 0]);

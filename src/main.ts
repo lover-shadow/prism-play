@@ -1,13 +1,4 @@
-/**
- * 组合根（SPEC §7 第一行）：平台能力装配、四大存储域接线、四个主视图的依赖注入与跨域决策。
- *
- * 三条纪律在本文件落地，而不是分散到视图里：
- * 1. **能力缺席就如实回报**——端侧 SQLite 不可用则【追剧】进入 disabled，未内置验签公钥则离线档位不显示，
- *    绝不返回空集合冒充"没有内容"（AC-15 / AC-18）；
- * 2. **进度落库的路由只写一次**——公开走历史域、个人探索走内存域，判定用 `isPrivateSubject` 唯一咽喉点；
- *    该路由与端云同步同源，已收进 `core/user-sync.ts`（AC-30），本文件只接线、不复制判定；
- * 3. **FLAG_SECURE 只有一个决策点**——私密频道与私密播放任一成立即挂载，两者皆false即解除（AC-02-4）。
- */
+/** 组合根：能力缺席如实回报；断点路由统一由 user-sync 决策；FLAG_SECURE 合并频道与播放状态。 */
 import type { WatchHistoryRow } from './core/storage';
 import type { AppShell, ManagedView, ShellTab } from './app-shell';
 import type { PosterMode } from './core/state/theme';
@@ -28,6 +19,8 @@ import { applyTheme, readPosterMode, readThemePreference, writePosterMode } from
 import { createAppShell } from './app-shell';
 import { createNotice } from './components/notice';
 import { createPlayerHost } from './player-host';
+import { createFollowingStore } from './core/storage/following-store';
+import { createRuntimeServices } from './core/runtime-services';
 import { createShareAction } from './core/share';
 import { createHomeView, type HomeApi, type HomeView } from './views/home-view';
 import { createHistoryView } from './views/history-view';
@@ -67,6 +60,7 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
   const bridge = getBridge();
   const prefs = createPreferenceStore();
   const sqlite = await createHistorySqlite();
+  const following = createFollowingStore({ sqlite, nowSeconds: now });
   const searchIndex = createSearchIndex({ sqlite, nowSeconds: now });
   const storage = createStorageDomains({ sqlite, disk: (await createCacheDisk()) ?? new MemoryCacheDisk(), nowSeconds: now });
   // 冷启动即焚：上一次进程的私密痕迹不该存在于本进程（AC-02-2 每次进入默认关闭）。
@@ -133,9 +127,10 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
   });
 
   const share = createShareAction({ bridge, report });
-
+  const runtime = await createRuntimeServices({ prefs, grant, monetization: () => client.monetization(), report });
   const player = createPlayerHost({
-    mount: app, bridge, api: client,
+    mount: app, bridge, api: client, following, runtime,
+    onRedeem: () => void shell.activate('settings'),
     onProgress: sync.onProgress,
     // §1.9.3 节点 ①：退出播放/关闭播放器/系统 Back 销毁的那一刻就地断点上报（`keepalive` + 待发队列）。
     onExit: (breakpoint) => void sync.reportExit(breakpoint),
@@ -171,6 +166,7 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
     if (tab === 'home') {
       const view = createHomeView({
         api: homeApi,
+        syncCatalog: async () => { const result = await catalog.syncIncremental(); if (result.reason) throw new Error(result.reason); },
         root,
         headerAccessory: shell.headerAccessory(),
         posterMode: () => posterMode,
@@ -187,21 +183,11 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
     if (tab === 'history') {
       const view = createHistoryView({
         api: client,
-        root,
+        root, following,
         history: {
           available: historyAvailable,
           list: () => storage.history.listRecent(),
           clear: async () => void await storage.history.clearHistory()
-        },
-        cache: {
-          measure: async () => {
-            const used = storage.cache.bytesUsed();
-            return { usedBytes: used.catalog + used.posters, limitBytes: CATALOG_CACHE_LIMIT_BYTES + POSTER_CACHE_LIMIT_BYTES };
-          },
-          clearPublicCache: async () => {
-            const freed = await storage.cache.clearCache(); await searchIndex.clear(); // 清缓存即清索引：下次快照落地重建。
-            return { clearedBytes: freed.freedBytes, domains: ['public-cache'] };
-          }
         },
         credentials: identity.credentials,
         onOpenTitle: (contentId) => void player.open(contentId),
@@ -218,6 +204,17 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
       catalogStatus: () => catalog.snapshotState(), checkCatalogUpdate: () => catalog.syncIncremental(),
       prefs,
       bridge,
+      supportAssets: { contact: { url: './images/author-contact.jpg' }, reward: { url: './images/author-reward.jpg' } },
+      cache: {
+        measure: async () => {
+          const used = storage.cache.bytesUsed();
+          return { usedBytes: used.catalog + used.posters, limitBytes: CATALOG_CACHE_LIMIT_BYTES + POSTER_CACHE_LIMIT_BYTES };
+        },
+        clearPublicCache: async () => {
+          const freed = await storage.cache.clearCache(); await searchIndex.clear();
+          return { clearedBytes: freed.freedBytes, domains: ['public-cache'] };
+        }
+      },
       tokens: storage.privateVault.session,
       root,
       tierSource: identity.tierSource,
@@ -263,7 +260,7 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
   const releaseNotifications = bindNotificationActions((action) => player.onNotification(action));
   // §1.9.3 节点 ②：切到后台（`isActive === false`）即静默上报当前断点。监听口与 `back-button.ts` 同款
   // 守卫——非原生宿主根本不注册，Web 构建退化为 no-op，绝不因为缺 `@capacitor/app` 而抛错。
-  const releaseAppState = await sync.observeBackground(() => void sync.reportExit(sync.lastBreakpoint()));
+  const releaseAppState = await sync.observeBackground(() => { player.suspend(); void sync.reportExit(sync.lastBreakpoint()); });
   await shell.activate('home');
   if (started.hadSnapshot === false && storage.cache.snapshotRevision() === 0) {
     report('离线或目录拉取失败：本机尚无公开快照，点播需联网。');
@@ -279,6 +276,7 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
       overlay.destroy();
       // 节点 ① 的上报必须排在同步中枢解散之前，否则"完全退出"这一次永远发不出去。
       player.close();
+      void runtime.destroy();
       sync.dispose();
       shell.destroy();
       client.forgetPrivateSessionLocally();

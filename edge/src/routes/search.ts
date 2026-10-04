@@ -12,6 +12,8 @@
  * de-duplicates by content id across pages, so no snapshot cursor is pretend-implemented here.
  */
 
+import { generationSearch, generationResults } from '../search/generation';
+import { configUnavailableResponse } from '../config/kv-config';
 import type { Clock } from '../core/clock';
 import type { Env } from '../types/env';
 import type { SearchResponse, SearchResult } from '../types/api';
@@ -104,6 +106,9 @@ export async function handleSearch(request: Request, env: Env, _clock: Clock): P
   const tag = (searchParams.get('tag') ?? '').trim();
 
   const filters: StageRequest = { query: query.value, ...(channel.value ? { channel: channel.value } : {}), ...(tag === '' ? {} : { tag }) };
+  const generation = await generationSearch(env, originOf(request));
+  if (generation === null) return configUnavailableResponse();
+  if (generation !== undefined) return generationResults(env, generation, filters, page.value, pageSize.value);
   const ranked = rankCandidates(await planStages(env.DB, filters));
   const window = pageSlice(ranked, page.value, pageSize.value);
 

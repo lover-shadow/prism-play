@@ -11,7 +11,7 @@ import {
   type HistoryReader
 } from '../../src/views/history-view';
 import { ApiError } from '../../src/core/api/client';
-import { POSTER_CACHE_LIMIT_BYTES, PRESERVED_BY_CLEAR_CACHE, type WatchHistoryRow } from '../../src/core/storage/storage-domains';
+import { POSTER_CACHE_LIMIT_BYTES, type WatchHistoryRow } from '../../src/core/storage/storage-domains';
 import type { ContentItem, RelatedResponse } from '../../edge/src/types/api';
 
 /** 断网文案里绝不能出现的「离线可播」类承诺。 */
@@ -86,15 +86,14 @@ const tick = async (): Promise<void> => { await new Promise((resolve) => setTime
 describe('追剧视图：正在追 / 往期完播（AC-03）', () => {
   beforeEach(() => { document.body.replaceChildren(); });
 
-  it('渲染四条带并按秒级断点展示进度与剩余秒数', async () => {
+  it('渲染三条带并按秒级断点展示进度与剩余秒数', async () => {
     const { view, root } = setup({ rows: [rowOf()] });
     await view.mount();
     expect(bandState(root, 'band-resume')).toBe('ready');
-    expect(bandState(root, 'band-cache')).toBe('ready');
-    expect(pick(root, 'cache-metric')?.dataset).toMatchObject({ usedBytes: '29700000', limitBytes: String(POSTER_CACHE_LIMIT_BYTES) });
+    expect(pick(root, 'band-cache')).toBeNull();
     expect(root.textContent).toContain('第 18 集 · 看到 01:42 / 02:15');
     expect(root.textContent).toContain('剩余 33 秒');
-    expect(root.textContent).toContain(formatBytes(POSTER_CACHE_LIMIT_BYTES));
+    expect(formatBytes(POSTER_CACHE_LIMIT_BYTES)).toBe('512.0 MiB');
   });
 
   it('续播按钮与卡片点击都带上原断点回调，完播条目重温时归零', async () => {
@@ -156,37 +155,22 @@ describe('追剧视图：同类好剧召回（AC-18 公开域）', () => {
   });
 });
 
-describe('追剧视图：清理缓存只命中公开缓存域（AC-18 / M-8）', () => {
-  it('清理后凭证与历史域一次都没有被触碰，并如实回报保留域', async () => {
+describe('追剧视图：缓存管理归我的（R26-09）', () => {
+  it('不渲染缓存管理且不调用缓存或凭证删除接口', async () => {
     const { view, root, calls } = setup({ rows: [rowOf()] });
     await view.mount();
-    const listAfterMount = calls.list;
-    click(pick(root, 'clear-cache'));
-    await tick();
-    expect(calls.clearPublicCache).toBe(1);
+    expect(pick(root, 'clear-cache')).toBeNull();
+    expect(pick(root, 'band-cache')).toBeNull();
+    expect(calls.measure).toBe(0);
+    expect(calls.clearPublicCache).toBe(0);
     expect(calls.clearGrant).toBe(0);
     expect(calls.historyClear).toBe(0);
-    expect(calls.list).toBe(listAfterMount);
-    expect(bandState(root, 'band-cache')).toBe('ready');
-    expect(pick(root, 'band-cache')?.textContent).toContain('已清理');
-    expect(root.textContent).toContain(PRESERVED_BY_CLEAR_CACHE.map((domain) => (domain === 'credentials' ? '授权凭证' : '追剧历史')).join('、'));
-    expect(root.textContent).toContain('不受影响');
   });
 
-  it('实现方越界清理保留域时拒绝显示成功', async () => {
-    const { view, root } = setup({ rows: [rowOf()], clearOutcome: outcomeOf(['public-cache', 'credentials']) });
+  it('缓存统计失败不影响追剧带，因为本页不读取缓存', async () => {
+    const { view, root, calls } = setup({ rows: [rowOf()], measureError: new Error('磁盘不可读') });
     await view.mount();
-    click(pick(root, 'clear-cache'));
-    await tick();
-    expect(bandState(root, 'band-cache')).toBe('error');
-    expect(root.textContent).toContain('清理越界');
-    expect(root.textContent).not.toContain('已清理');
-  });
-
-  it('缓存统计失败显示 error，不影响其它带', async () => {
-    const { view, root } = setup({ rows: [rowOf()], measureError: new Error('磁盘不可读') });
-    await view.mount();
-    expect(bandState(root, 'band-cache')).toBe('error');
+    expect(calls.measure).toBe(0);
     expect(bandState(root, 'band-resume')).toBe('ready');
   });
 });

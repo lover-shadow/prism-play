@@ -252,9 +252,10 @@ export function createCatalogCacheService(deps: CatalogCacheDeps): CatalogCacheS
 
   async function hydrate(): Promise<boolean> {
     await cache.hydrate();
-    return snapshotState() !== null;
+    const hadSnapshot = snapshotState() !== null;
+    if (hadSnapshot) feedIndex(revision());
+    return hadSnapshot;
   }
-
   function snapshotState(): SnapshotState | null {
     const items = cache.list().length, channels = channelIds(cache.getChannels()).length;
     if (revision() === 0 && items === 0 && channels === 0) return null;

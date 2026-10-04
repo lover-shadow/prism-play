@@ -31,6 +31,7 @@ export interface PlayerEngine {
   volume(): number; setVolume(value: number): void; setSource(url: string, mimeType?: string): void;
   toggleControls(): void; on(event: MediaEvent, handler: () => void): () => void;
   resize?(): void;
+  playbackRate?(): number; setPlaybackRate?(rate: number): void;
   /**
    * 直连上游之后（A-7），切线与遥测都需要知道这一跳是怎么死的：超时、HTTP 失败还是解码失败。
    * 可选是因为不是每个内核都分得出来——假内核与降级路径没有这个信息，缺席即按 `http_error` 记账。

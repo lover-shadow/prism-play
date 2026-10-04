@@ -147,9 +147,10 @@ export function createLocalSearchApi(deps: LocalSearchApiDeps): SearchApi {
   /** 索引行可能比快照旧：条目已下架就当场丢弃，界面永远不该出现一张点开播不了的结果卡。 */
   interface LocalMatch { result: SearchResult; hit: SearchHit }
   async function resolved(query: string, limit: number): Promise<LocalMatch[]> {
+    const hits = await index.search(query, limit);
     const items = new Map(localItems().map((item) => [item.id, item]));
     const found: LocalMatch[] = [];
-    for (const hit of await index.search(query, limit)) {
+    for (const hit of hits) {
       const item = items.get(hit.contentId);
       if (item === undefined || isPrivateSubject(item)) continue;
       found.push({ result: { item, matchType: hit.matchType }, hit });
@@ -167,8 +168,8 @@ export function createLocalSearchApi(deps: LocalSearchApiDeps): SearchApi {
   return {
     localFirst: true,
     async search(input): Promise<SearchResponse> {
-      if (fallBack()) return await remote?.search(input) ?? { items: [], page: 1 };
       const found = await resolved(normalizeQuery(input.q), input.pageSize ?? SEARCH_RESULT_LIMIT);
+      if (fallBack()) return await remote?.search(input) ?? { items: [], page: 1 };
       return { items: found.map((entry) => entry.result), page: input.page ?? 1 };
     },
     async searchOnline(input): Promise<SearchResponse> {
@@ -176,9 +177,9 @@ export function createLocalSearchApi(deps: LocalSearchApiDeps): SearchApi {
       return await remote.search(input);
     },
     async suggestions(q): Promise<SuggestionsResponse> {
-      if (fallBack()) return await remote?.suggestions(q) ?? { query: q, suggestions: [] };
       const query = normalizeQuery(q);
       const found = await resolved(query, 10);
+      if (fallBack()) return await remote?.suggestions(q) ?? { query: q, suggestions: [] };
       const suggestions: SearchSuggestion[] = [];
       const seen = new Set<string>();
       const push = (text: string, type: SearchSuggestion['type'], contentId?: string): void => {

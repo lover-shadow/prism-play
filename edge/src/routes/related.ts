@@ -13,6 +13,8 @@
  * SPEC §6), so it is bounded by LIMIT and must be re-measured on real Cloudflare D1.
  */
 
+import { generationSearch, generationRelated } from '../search/generation';
+import { configUnavailableResponse } from '../config/kv-config';
 import type { Clock } from '../core/clock';
 import type { Env } from '../types/env';
 import { PUBLIC_CHANNEL_IDS, type RelatedResponse } from '../types/api';
@@ -74,6 +76,9 @@ export async function handleRelated(request: Request, env: Env, _clock: Clock): 
   const titleId = titleIdFromPath(new URL(request.url).pathname);
   if (titleId === null) return notFoundResponse();
 
+  const generation = await generationSearch(env, originOf(request));
+  if (generation === null) return configUnavailableResponse();
+  if (generation !== undefined) return generationRelated(env, generation, titleId);
   const source = await findContentRow(env.DB, titleId);
   const isPublicChannel = source !== null && (PUBLIC_CHANNEL_IDS as readonly string[]).includes(source.channel_id);
   if (source === null || !isPubliclyVisible(source) || !isPublicChannel) {

@@ -11,6 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import {
@@ -19,6 +20,7 @@ import {
 } from './config-sources.mjs';
 import { buildLibraryCatalog, readHarvestMetadata } from './library-catalog.mjs';
 import { buildWorkFacts, buildWorkFactPacks, serializeManifest } from './work-fact-packs.mjs';
+import { buildPublicSearch, readSearchVocabulary } from './public-search-projection.mjs';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(SCRIPT_DIR, '../..');
@@ -40,6 +42,33 @@ function gzipFile(src, dest) {
   return compressed.length;
 }
 
+// Stage all destinations before replacing any; per-file rename is atomic, failures roll back.
+export function syncSeedFiles(entries) {
+  const token = randomUUID();
+  const staged = entries.map(([source, dest]) => ({ source, dest, temp: `${dest}.${token}.tmp`,
+    backup: `${dest}.${token}.bak`, replaced: false, saved: false }));
+  try {
+    for (const entry of staged) {
+      fs.mkdirSync(path.dirname(entry.dest), { recursive: true });
+      fs.copyFileSync(entry.source, entry.temp);
+      if (!fs.readFileSync(entry.source).equals(fs.readFileSync(entry.temp))) throw new Error('Seed staging mismatch');
+    }
+    for (const entry of staged) {
+      if (fs.existsSync(entry.dest)) { fs.copyFileSync(entry.dest, entry.backup); entry.saved = true; }
+      fs.renameSync(entry.temp, entry.dest);
+      entry.replaced = true;
+    }
+  } catch (error) {
+    for (const entry of [...staged].reverse()) if (entry.replaced) {
+      if (entry.saved) fs.renameSync(entry.backup, entry.dest);
+      else fs.rmSync(entry.dest);
+    }
+    throw error;
+  } finally {
+    for (const entry of staged) for (const file of [entry.temp, entry.backup]) fs.rmSync(file, { force: true });
+  }
+}
+
 export async function packageAndPublish(options = {}) {
   const { publish = false, revision = 1, dbPath = DB_PATH,
     outDir = OUT_DIR, harvestDir = path.join(ROOT, 'edge/cache/harvest'), syncSeed = false } = options;
@@ -57,10 +86,13 @@ export async function packageAndPublish(options = {}) {
   const db = new DatabaseSync(inputPath, { readOnly: true });
   let catalog;
   let factPacks;
+  let search;
   try {
-    const metadata = readHarvestMetadata(path.resolve(harvestDir));
+    const metadata = readHarvestMetadata([path.join(ROOT, 'edge/cache/harvest'), path.resolve(harvestDir)]);
     catalog = buildLibraryCatalog(db, metadata, nowSeconds);
-    factPacks = buildWorkFactPacks(buildWorkFacts(db, catalog, metadata));
+    const facts = buildWorkFacts(db, catalog, metadata);
+    factPacks = buildWorkFactPacks(facts);
+    search = buildPublicSearch(facts, revision, readSearchVocabulary(db));
   } finally {
     db.close();
   }
@@ -114,22 +146,11 @@ export async function packageAndPublish(options = {}) {
   console.log(`生成 SQLite 全量数据库包: ${(dbGzSize / (1024 * 1024)).toFixed(2)} MB (library.db.gz)`);
   files.push({ key: 'assets/library.db.gz', file: dbGzPath });
 
-  // 3. 复制种子到 Android 与 Web 构建 assets
-  if (syncSeed) {
-    const publicSeedDir = path.join(ROOT, 'public/seed');
-    fs.mkdirSync(publicSeedDir, { recursive: true });
-    fs.mkdirSync(SEED_DIR, { recursive: true });
-    fs.copyFileSync(bundlePath, path.join(publicSeedDir, 'catalog-bundle.json'));
-    fs.copyFileSync(bundleGzPath, path.join(SEED_DIR, 'catalog-bundle.json.gz'));
-    fs.copyFileSync(inputPath, path.join(SEED_DIR, 'library.db'));
-    console.log(`种子文件已同步至 Android 与 Web 目录`);
-  }
-
   // Facts are internal R2 assets, not public routes. The manifest KV pointer is published last.
   const manifest = { ...buildManifest(revision, manifestChannels, nowSeconds),
-    workFacts: factPacks.workFacts, coverOrigins: factPacks.coverOrigins };
+    workFacts: factPacks.workFacts, coverOrigins: factPacks.coverOrigins, publicSearch: search.publicSearch };
   const manifestValue = serializeManifest(manifest);
-  for (const { key, value } of factPacks.objects) {
+  for (const { key, value } of [...factPacks.objects, search.object]) {
     const file = path.join(ASSETS_DIR, key);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, value, 'utf8');
@@ -142,6 +163,35 @@ export async function packageAndPublish(options = {}) {
     { key: KV_KEYS.manifest, value: manifestValue }
   ];
 
+  // Validate persisted artifacts, hashes and all three public projections before any seed mutation.
+  const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
+  const projected = JSON.parse(search.object.value);
+  const searchItems = new Map(projected.entries.map((entry) => [entry.item.id, entry.item]));
+  const catalogItems = new Map(allItems.map((item) => [item.id, item]));
+  const seen = new Set();
+  for (const [prefix, entry] of Object.entries(factPacks.workFacts.packs)) {
+    const info = factPacks.workFacts.schema === 2
+      ? { bytes: entry[0], sha256: entry[1], key: `library/facts/${entry[1]}.json` } : entry;
+    const bytes = fs.readFileSync(path.join(ASSETS_DIR, info.key));
+    if (bytes.length !== info.bytes || sha(bytes) !== info.sha256) throw new Error('Persisted fact hash mismatch');
+    for (const [id, fact] of Object.entries(JSON.parse(bytes).works)) {
+      if (seen.has(id) || !sha(Buffer.from(id)).startsWith(prefix)) throw new Error('Fact directory mismatch');
+      seen.add(id);
+      const item = catalogItems.get(id), searchItem = searchItems.get(id);
+      if (!item || !searchItem || fact.episodes.length !== item.episodeCount) throw new Error('Public projection count mismatch');
+      for (const [key, value] of Object.entries(item)) {
+        if (JSON.stringify(fact[key]) !== JSON.stringify(value) || JSON.stringify(searchItem[key]) !== JSON.stringify(value)) {
+          throw new Error(`Public projection mismatch: ${id}/${key}`);
+        }
+      }
+    }
+  }
+  const searchBytes = fs.readFileSync(path.join(ASSETS_DIR, search.object.key));
+  if (searchBytes.length !== search.publicSearch.bytes || sha(searchBytes) !== search.publicSearch.sha256 ||
+      seen.size !== allItems.length || searchItems.size !== seen.size || projected.revision !== revision ||
+      !zlib.gunzipSync(fs.readFileSync(bundleGzPath)).equals(fs.readFileSync(bundlePath)) ||
+      !zlib.gunzipSync(fs.readFileSync(dbGzPath)).equals(fs.readFileSync(inputPath))) throw new Error('Final artifact validation failed');
+
   if (publish) {
     const { publishFiles } = await import('./publish.mjs');
     console.log(`\n=== 开始高速推送到 Cloudflare (${files.length} 个 R2 对象 + 2 个 KV 键) ===`);
@@ -151,6 +201,11 @@ export async function packageAndPublish(options = {}) {
     console.log(`[未加 --publish] 本地资产打包完毕，共 ${files.length} 个文件，未触碰云端。`);
   }
 
+  if (syncSeed) {
+    syncSeedFiles([[bundlePath, path.join(ROOT, 'public/seed/catalog-bundle.json')],
+      [bundleGzPath, path.join(SEED_DIR, 'catalog-bundle.json.gz')], [inputPath, path.join(SEED_DIR, 'library.db')]]);
+    console.log('全部验证完成，种子文件已原子替换至 Android 与 Web 目录');
+  }
   return { filesCount: files.length, kvEntries, manifest, report: catalog.report,
     factsReport: factPacks.report, manifestBytes: Buffer.byteLength(manifestValue, 'utf8') };
 }

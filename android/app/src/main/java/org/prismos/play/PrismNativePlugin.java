@@ -100,6 +100,11 @@ public final class PrismNativePlugin extends Plugin {
     }
 
     @PluginMethod
+    public void setImmersiveMode(PluginCall call) {
+        withWindow(call, (host, inner) -> host.toggleImmersive(inner, inner.getBoolean("enabled")));
+    }
+
+    @PluginMethod
     public void getSystemVolume(PluginCall call) { volume(call, null, false); }
 
     @PluginMethod

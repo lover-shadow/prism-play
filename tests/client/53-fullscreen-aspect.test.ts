@@ -235,6 +235,26 @@ describe('AC-21 返回键级联退出', () => {
   });
 });
 
+describe('R26-05 async restoration', () => {
+  it('late landscape lock restores after close, with system bars paired', async () => {
+    let resolve!: (value: boolean) => void;
+    const unlock = vi.fn(async () => true); const bars = vi.fn(async (_enabled: boolean) => true);
+    const bridge = bridged(); bridge.setImmersiveMode = bars;
+    const h = harness({ bridge, orientation: { lock: () => new Promise((done) => { resolve = done; }), unlock } });
+    await h.host.open('c1'); stageVideo(h.mount, 1920, 1080); h.engine.emit('loadedmetadata');
+    h.fullscreenButton()?.click(); await settle(); h.host.close(); resolve(true); await settle();
+    expect(unlock).toHaveBeenCalledTimes(1);
+    expect(bars.mock.calls.map(([value]) => value)).toEqual([true, false]);
+  });
+  it('drawer return precedes fullscreen return', async () => {
+    const h = harness(); await h.host.open('c1'); h.fullscreenButton()?.click();
+    h.mount.querySelector<HTMLButtonElement>('[data-action="list"]')?.click();
+    await dispatchBackButtonForTest(); expect(h.fullscreenOn()).toBe(true);
+    expect(h.mount.querySelector<HTMLElement>('.prism-drawer')?.hidden).toBe(true);
+    await dispatchBackButtonForTest(); expect(h.fullscreenOn()).toBe(false); h.host.close();
+  });
+});
+
 describe('全屏唯一权威的源码级守卫（SPEC §1.2.0 / 铁律 7）', () => {
   it('客户端零 `fullscreenWeb` 调用，零 `.prism-player--fullscreen` 第二权威', () => {
     const player = readSource('src/player/prism-player.ts');

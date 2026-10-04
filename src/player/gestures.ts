@@ -11,9 +11,9 @@
 
 import type { Clock } from './sleep-timer';
 
-/** AC-06 左 0%~48% 音量、AC-07 右 52%~100% 亮度，中间死区什么都不做；AC-08 双击窗口与步进。 */
-export const VOLUME_ZONE_MAX = 0.48;
-export const BRIGHTNESS_ZONE_MIN = 0.52;
+/** R26-03: left brightness, right volume; central reserve and double-tap seek unchanged. */
+export const BRIGHTNESS_ZONE_MAX = 0.48;
+export const VOLUME_ZONE_MIN = 0.52;
 export const DOUBLE_TAP_WINDOW_MS = 300;
 export const SEEK_STEP_SECONDS = 10;
 /** 控件条像素带：其中的点按属于按钮本身，绝不驱动手势（SPEC §10 的 ≥44px 触点即落在此带内）。 */
@@ -66,8 +66,8 @@ export function classifyTouch(input: TouchGeometryInput): TouchClassification {
   if (y < top || y > height - bottom) return { zone: 'control-band', xFraction, deltaRatio: 0 };
   // Dragging up lowers clientY, so the sign flip is what makes "swipe up" mean "more".
   const deltaRatio = clamp(-deltaY / height, -1, 1);
-  if (xFraction < VOLUME_ZONE_MAX) return { zone: 'volume', xFraction, deltaRatio };
-  if (xFraction > BRIGHTNESS_ZONE_MIN) return { zone: 'brightness', xFraction, deltaRatio };
+  if (xFraction < BRIGHTNESS_ZONE_MAX) return { zone: 'brightness', xFraction, deltaRatio };
+  if (xFraction > VOLUME_ZONE_MIN) return { zone: 'volume', xFraction, deltaRatio };
   return { zone: 'dead-band', xFraction, deltaRatio };
 }
 
@@ -120,6 +120,7 @@ export interface GestureController {
   seed(channel: ValueChannel, value: number): void;
   values(): Record<ValueChannel, number>;
   destroy(): void;
+  cancel(): void;
 }
 
 interface GestureSession {
@@ -256,6 +257,7 @@ export function createGestureController(options: GestureControllerOptions): Gest
       session = null;
       if (mine && !travelled && !options.isLocked()) handleTap(event);
     },
+    cancel: () => { session = null; clearSingleTap(); lastTap = null; },
     seed: (channel, value) => void (values[channel] = clamp01(value)),
     values: () => ({ ...values }),
     destroy: () => {
@@ -279,18 +281,19 @@ export function attachGestureLayer(target: HTMLElement, controller: GestureContr
   const down = (event: Event) => void (isPointer(event) && controller.pointerDown(event as PointerEvent));
   const move = (event: Event) => void (isPointer(event) && controller.pointerMove(event as PointerEvent));
   const up = (event: Event) => void (isPointer(event) && controller.pointerUp(event as PointerEvent));
+  const cancel = (event: Event) => { controller.cancel(); up(event); };
 
   target.addEventListener('pointerdown', down);
   moveTarget.addEventListener('pointermove', move);
   moveTarget.addEventListener('pointerup', up);
-  moveTarget.addEventListener('pointercancel', up);
+  moveTarget.addEventListener('pointercancel', cancel);
 
   return {
     destroy: () => {
       target.removeEventListener('pointerdown', down);
       moveTarget.removeEventListener('pointermove', move);
       moveTarget.removeEventListener('pointerup', up);
-      moveTarget.removeEventListener('pointercancel', up);
+      moveTarget.removeEventListener('pointercancel', cancel);
       controller.destroy();
     }
   };

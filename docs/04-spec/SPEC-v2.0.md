@@ -16,7 +16,7 @@
 | 优先级 | 功能编号 | 功能名称 | 验收标准摘要 | RICE 评分 |
 | :---: | :---: | :--- | :--- | :---: |
 | **P0** | F-01 | 云端动态“大视界”频道浏览 | 四个公开频道；私密频道在授权与当次开启均满足前双重隐形 | 12.00 |
-| **P0** | F-02 | ArtPlayer 双滑手势播放器 | 左滑调音量（0–48% 区）、右滑调亮度（52–100% 区）、双击10秒快进退、HLS 起播 | 12.50 |
+| **P0** | F-02 | ArtPlayer 双滑手势播放器 | 左滑调亮度（0–48% 区）、右滑调音量（52–100% 区）、双击10秒快进退、HLS 起播 | 12.50 |
 | **P0** | F-03 | 预制卡密 D1 原子核销与 14 天离线授权 | 条件原子绑定 DeviceID，签发非对称签名 JWT | 10.80 |
 | **P0** | F-04 | 极简分享 H5 (点开即播、播完截流) | `/s/:id` 载入**当前单集**，`ended` 弹出下载引导卡；私密/未知剧目 404 | 10.80 |
 | **P0** | F-05 | Android 原生后台与息屏保活播放 | `ForegroundService` + 通知栏控制卡片，锁屏不中断 | 7.11 |
@@ -119,8 +119,8 @@
 | 存储域 | 承载技术 | 核心数据资产 | 配额上限与淘汰 | 系统备份策略 (`dataExtractionRules`) | 一键清理语义 |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **1. 安全凭证域** | Android Keystore 加密存储 | Ed25519 JWT、设备识别码 `deviceId` | 单记录覆盖 | **严格排除 (Exclude)**：密钥与硬件绑定，迁移无法解密将破坏授权 | 清除缓存**绝不**波及 |
-| **2. 追剧与历史域** | 客户端 SQLite (`prism_local.db` -> `local_watch_history`) | 公开剧目看剧进度（剧名、集数、秒级断点、更新时间） | 最多 500 部剧，按 `updated_at` 降序 LRU 淘汰 | **纳入备份白名单 (Include)**：换机可无感延续追剧进度 | 仅在用户手动点击【清空历史】时清空 |
-| **3. 公开缓存域** | 本地文件系统 (`cache/posters/` + `cache/catalog/r{rev}/`) | 公开频道配置、目录分页快照分块 JSON、缩略海报图片 | 海报上限 128 MiB，目录上限 20 MiB；LRU 淘汰 | **严格排除 (Exclude)**：避免浪费用户云配额，换机联网自动重建 | 点击【清理缓存】立即清空海报与旧快照 |
+| **2. 追剧与历史域** | 客户端 SQLite (`prism_local.db` -> `local_watch_history` / `local_following`) | 公开观看断点 + 独立显式收藏（created_at） | 历史最多500部按updated_at LRU；收藏无此淘汰 | **纳入备份目标 (Include)**：实际换机/覆盖安装恢复待真机证明 | 清空历史只删history，不删收藏；清缓存均不删，收藏仅显式取消/删除 |
+| **3. 公开缓存域** | 本地文件系统 (`cache/posters/` + `cache/catalog/r{rev}/`) | 公开频道配置、目录分页快照分块 JSON、缩略海报图片 | 海报上限 512 MiB，目录上限 20 MiB；LRU 淘汰 | **严格排除 (Exclude)**：避免浪费用户云配额，换机联网自动重建 | 点击【清理缓存】立即清空海报与旧快照 |
 | **4. 私密禁存域** | **RAM 纯内存** (无任何文件/数据库落地) | 个人探索的标题、海报、分集、断点、会话 token | 随进程结束/关闭开关即刻置空由 GC 回收 | **绝无磁盘文件，不参与备份** | 退出即焚 |
 
 #### 本地追剧与历史物理表定义 (`prism_local.db`)：
@@ -138,7 +138,22 @@ CREATE TABLE IF NOT EXISTS local_watch_history (
 );
 CREATE INDEX IF NOT EXISTS idx_watch_history_time ON local_watch_history(updated_at DESC);
 ```
-- **写入闸门硬约束**：播放内核与历史管理服务底层，凡 `is_private = 1` 或 `channel_id = 'private'` 的记录，**物理拦截禁止执行 `INSERT/UPDATE` 进入 `local_watch_history`**。此约束在单元测试中必须提供自动化拦截用例。
+- **写入闸门硬约束**：播放内核与历史管理服务底层，凡 `is_private = 1` 或 `channel_id = 'private'` 的记录，**物理拦截禁止执行 `INSERT/UPDATE` 进入 `local_watch_history` 与 `local_following`**。此约束在单元测试中必须提供自动化拦截用例。
+
+#### 独立公开收藏与观看累计（R26-09/11，2026-10-04）
+
+`D:/DEV/prism-play/src/core/storage/following-store.ts` 与历史共享 `prism_local.db` 连接，由存储宿主统一管理连接；幂等建表，不另建数据库：
+```sql
+CREATE TABLE IF NOT EXISTS local_following (
+    content_id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    cover_url TEXT,
+    created_at INTEGER NOT NULL
+);
+```
+`created_at` 为 Unix 整数秒；收藏是用户显式意图，不由播放历史推导，按 created_at 倒序、content_id 升序稳定排列。仅公开可写，事务提交成功才显示已收藏；写失败必须反馈。历史500条LRU、清空历史及清缓存均不删除收藏，仅显式取消/删除收藏才删除；收藏属于历史安全域的备份目标，覆盖安装/备份恢复仍须真机验证。本轮不新增收藏云同步，不扩展 `/api/user/sync`。
+
+`D:/DEV/prism-play/src/core/watch-time.ts` 在 PreferenceStore 中只存非负有限数值字符串标量：`prism.watch_seconds_total` 与 `prism.watch_seconds_last_nudge`（后者不得大于前者），不含内容/分集ID、凭据或私密时长，不新增SQL表或云同步字段。先读取再接播放事件，损坏/读取失败不覆写旧值；写失败保留待保存状态并可重试。单调时钟仅累计公开实际playing且已有首帧的经过时间，暂停/缓冲/seek/异常/离场停计，恢复需新播放证据，不补未知区间；private/unknown零计。当前Web事件桥在blur/visibility变化停止计时，不宣称原生后台时长已验证；清缓存/历史不清这两个偏好标量。提醒仅有效云配置、未授权用户、ended→自动下一集自然间隙可关闭触发，手选集不触发。
 
 
 ## 7. 页面与视图清单（锁定）
@@ -146,7 +161,7 @@ CREATE INDEX IF NOT EXISTS idx_watch_history_time ON local_watch_history(updated
 | 视图/组件 | 源码路径 | 核心组件职责 | 对应 API |
 | :--- | :--- | :--- | :--- |
 | **大视界主视图** | `src/index.html` + `src/main.ts` | 顶部动态频道栏、二级吸顶横滑胶囊、首屏黄金续播卡、四模海报网格（含 loading/empty/error 态） | `GET /api/channels`, `GET /api/catalog` |
-| **全手势播放视图** | `src/player/prism-player.ts` | ArtPlayer 实例、左滑音量 HUD、右滑亮度 HUD、双击快进退、选集抽屉、睡眠定时（含播完本剧） | `GET /api/episodes/{episodeId}/playback` |
+| **全手势播放视图** | `src/player/prism-player.ts` | ArtPlayer 实例、左滑亮度 HUD、右滑音量 HUD、双击快进退、选集抽屉、睡眠定时（含播完本剧） | `GET /api/episodes/{episodeId}/playback` |
 | **独立设置中心** | `src/views/settings-view.ts` | 日夜双模切换、后台/息屏播放开关、来电自动暂停、卡密兑换、OTA 检测、个人探索开关（条件显现）、本地缓存清理附属功能 | `POST /api/redeem`, `GET /api/version` |
 | **分享点开即播页** | `edge/src/routes/share.ts` | 边缘直出极简 H5，载入当前单集；自动播放被拒时提供手动播放兜底；`ended` 弹出下载截流卡 | `GET /s/:drama_id` |
 | **搜索与结果视图** | `src/views/search-view.ts`（规划路径） | 本地公开热词快显、输入法组合、补全/关键词/语义/同类、筛选/纠错、降级提示与零结果 | `/api/search/suggestions`, `/api/search`, `/api/titles/{titleId}/related` |
@@ -171,8 +186,8 @@ CREATE INDEX IF NOT EXISTS idx_watch_history_time ON local_watch_history(updated
 | **AC-03** | 首屏黄金续播 | While 存在本地观看历史（私密内容除外），首屏顶部必须常驻展示剧名、集数与秒数；When 点击，系统必须从断点起播并记录起播耗时（目标 ≤800ms，须实测） | P0 |
 | **AC-04** | 四模海报切换 | When 用户点击排版切换按钮，系统必须在窄屏（< 768px）3列紧凑/2列大图/4列书架/单列图文间无缝切换并持久化偏好，平板与桌面（≥768px）依据 design-tokens.json 断点网格自动扩展列数 | P1 |
 | **AC-05** | 日夜双模主题 | When 切换深浅主题，背景色必须严格在 `#080A10` 与 `#F5F6FA` 间切换，零硬编码裸色值泄漏 | P1 |
-| **AC-06** | 左滑音量调节 | While 全屏播放，When 在屏幕左侧 `0%~48%` 区域垂直滑动，必须线性调节音量并显示冰蓝音量 HUD；Web 端仅调播放器音量，系统音量须原生 Bridge | P0 |
-| **AC-07** | 右滑亮度调节 | While 全屏播放，When 在屏幕右侧 `52%~100%` 区域垂直滑动，必须调节窗口亮度并显示暖阳亮度 HUD | P0 |
+| **AC-06** | 左滑亮度调节 | While 全屏播放，When 在屏幕左侧 `0%~48%` 区域垂直滑动，必须经原生 Bridge 调节窗口亮度并显示暖阳亮度 HUD；Web 无原生能力时明确受限，不以遮罩冒充硬件亮度 | P0 |
+| **AC-07** | 右滑音量调节 | While 全屏播放，When 在屏幕右侧 `52%~100%` 区域垂直滑动，必须线性调节音量并显示冰蓝音量 HUD；Web 端仅调播放器音量，系统音量须原生 Bridge；中央 `48%~52%` 保留区不触发调节 | P0 |
 | **AC-08** | 双击快进退 | While 播放中，When 双击左半区必须快退 10 秒，双击右半区必须快进 10 秒 | P0 |
 | **AC-09** | 睡眠定时关闭 | When 定时归零前 3 秒，系统必须开始淡出音量并于归零瞬间暂停播放、释放播放句柄；选项含 15/30/60 分钟、播完本集、播完本剧 | P1 |
 | **AC-10** | 后台与息屏播放 | While 开启“后台/息屏播放”，When 锁屏或切回桌面，Android `ForegroundService` 必须保持音频并在通知栏展示剧集标题与控制按钮 | P0 |
@@ -183,10 +198,10 @@ CREATE INDEX IF NOT EXISTS idx_watch_history_time ON local_watch_history(updated
 | **AC-15** | 离线授权可验证 | While 断网，If 本地 Ed25519 JWT 未过期且距最后一次联网校验 ≤14 天，系统必须离线验签并显示档位；已缓存公开目录可浏览，但任何视频点播须提示需要网络，个人探索绝不离线播放。联网撤销无法即时通知离线设备 | P0 |
 | **AC-16** | 词法搜索 | Given 公开与私密/撤片合成样本，When 查询名称/别名/中文单字及双字/拼音缩写/错字，Then 返回标明匹配类型的可见结果；无权及失效条目在补全和结果均不存在；同名异剧分别保留展示 | P0 |
 | **AC-17** | 自动接入与可信归并 | Given 配置来源同名异剧、同剧多源和重试样本，When 增量任务执行，Then 幂等更新、按来源自带分类入库、trusted_work_mappings 跨源归并、同名异剧分立；单条失败最多重试 3 次后隔离；发布/撤片与公开变更记录原子提交 | P0 |
-| **AC-18** | 本地公开缓存 | Given 已缓存的四公开频道，When Android 冷启/断网/恢复/同步中断，Then 先显示公开快照、同修订完整快照原子替换、增量游标与数据同事务更新，失败保留旧版且离线点播提示联网；海报上限 128 MiB、元数据 20 MiB，清缓存不清凭证/续播；个人探索在应用可控磁盘和搜索历史中零记录 | P0 |
+| **AC-18** | 本地公开缓存 | Given 已缓存的四公开频道，When Android 冷启/断网/恢复/同步中断，Then 先显示公开快照、同修订完整快照原子替换、增量游标与数据同事务更新，失败保留旧版且离线点播提示联网；海报上限 512 MiB、元数据 20 MiB，清缓存不清凭证/续播；个人探索在应用可控磁盘和搜索历史中零记录 | P0 |
 | **AC-19** | 竖屏短剧全屏沉浸 | When 9:16 竖屏剧目进入沉浸全屏，系统必须保持竖直握持不强制旋转，以 `object-fit: contain` 零裁切呈现，舞台占满 100% 视口且留白由高斯模糊底片覆盖无纯黑死边；全屏状态的唯一权威为宿主 CSS 状态机，严禁调用 `art.fullscreenWeb` | P0 |
-| **AC-20** | 横屏影视联动全屏 | When 16:9 横屏剧目进入沉浸全屏，系统必须经 `ScreenOrientation.lock` 联动旋转横屏、等比铺满视口宽度，并在退出全屏时 `unlock` 恢复竖屏 | P0 |
-| **AC-21** | 返回键级联退出 | While 播放器处于全屏态，When 按下系统返回键或侧滑手势，系统必须仅退出全屏并恢复详情台（不得关闭播放器）；处于非全屏详情态再次返回时才关闭播放器 | P0 |
+| **AC-20** | 横屏影视联动全屏 | When 16:9 横屏剧目进入沉浸全屏，系统必须经 `ScreenOrientation.lock` 联动旋转横屏、等比铺满视口宽度，原生隐藏状态栏与导航栏，并在退出全屏/关闭/异常路径恢复进入前系统栏与方向策略（释放方向锁，不强制覆盖用户原方向策略） | P0 |
+| **AC-21** | 返回键级联退出 | When 按下系统返回键、侧滑或 Escape，系统必须先关闭最顶选集/倍速/投屏等浮层；无浮层时仅退出全屏并恢复详情台（不得关闭播放器）；无浮层且处于非全屏详情态再次返回时才关闭播放器 | P0 |
 | **AC-22** | 永久签名覆盖安装 | When 任一次构建（本机或 CI）产出 APK，其签名证书 SHA-256 必须与 `GITHUB-DEVOPS-FACTS.md` 基线逐字节一致，使老版本无需卸载即可覆盖安装；密钥库必须位于 `android/app/debug.keystore` 并被 `signingConfigs.debug` 显式绑定 | P0 |
 | **AC-23** | 有效公网分享 | When 用户发起分享，系统必须产出以常量主域 `https://play.prismos.org` 起始的 `/s/:id?ep=N` 链接且文案含剧名与集数，响应中零 `localhost` 残留；原生分享不可用时降级为剪贴板复制并提示 | P0 |
 | **AC-24** | 局域网大屏投屏 | When 用户在操作岛点击【投屏】，系统必须经原生 SSDP 组播发现同网段 DLNA 设备（扫描期间持 `MulticastLock`、结束即释放），选定后推送公网代理流并可遥控暂停与退出；明文 SOAP 控制仅允许发往本机发现结果内的 RFC1918 地址 | P1 |
@@ -203,6 +218,21 @@ CREATE INDEX IF NOT EXISTS idx_watch_history_time ON local_watch_history(updated
 
 
 ## 10. 边界与约束
+
+### 10.1 v2.6 修复正本规则（R26，未验收）
+
+本轮增量以 `D:/DEV/prism-play/docs/04-spec/SPEC-v2.6.3-REPAIR.md` R26-01～12 和 `REPAIR-v2.6.2-PLAN.md` 分批落实，不改变 v2.6.2 tag，不新增 AC 编号。已有 AC-01～30 矩阵不得作为这些修复通过的证明；本地业务修复已局部落地，新全量回归、浏览器、真机与生产日更均待验；历史1040项通过只属于首批代码快照。旧章节中云端公开 D1/代理唯一入口、四主Tab及128 MiB海报口径由三轨 v2 与下列规则取代；私密旧双准入路径和核销安全边界不变。
+
+- **R26-01/02 搜索与事实**：完整公开快照 hydrate 必须发送全量索引 feed，search/suggestions 在判 fallback 前等待 init/queued sync，核验 revision 与实际公开 count；索引未就绪不能冒充零结果或默认联网。目录、搜索/补全/related、详情、分享、海报使用同 generation 公开事实，禁止旧 anime ID 或两集截断、禁止有 workFacts 时回读旧公开 D1。来源覆盖以待证矩阵调查，不能将 provider_m3 部分合集不足推广为全部来源结论。
+- **R26-03～06 播放**：左亮度右音量（AC-06/07已修），正常速度为1（正常）/1.25/1.5/1.75/2/2.5/3/4；长按临时倍率设置可改，松开/取消/失焦/离场恢复原正常倍率。独立选集可操作，返回浮层→全屏→播放器；横屏原生隐藏系统栏且退出恢复。全屏倍速/投屏/选集可达，当前集统一同步至详情、高亮、分享、投屏与续播。
+- **R26-07/08 浏览**：当前频道/子类第一次重复点击滚头，连续第二次真实刷新，切新分类正常加载并重置重复状态，刷新防重入；每个公开频道顶部热门榜按可信同代热度排序，非仅 isHot+ID。无热度不假排名，不将累计榜称24小时实时榜。
+- **R26-09～11 用户状态与提醒**：追剧真实持久化，正在追→同类推荐→完播有独立空间，缓存管理归“我的”；作者二维码可使用旧已确认本地资源 `D:/DEV/prism-play/public/images/author-contact.jpg`（联系）与 `D:/DEV/prism-play/public/images/author-reward.jpg`（自愿赞赏），由host静态注入，不要求虚构云QR字段；放大、文件下载与微信手动识别辅助必须如实反馈，下载不等于保存相册。旧reward图含“截图发微信换长期通行证”历史权益文字，不代表当前购买/授权承诺，须同时展示免责声明；价格、档位和提醒策略仍100%云端。真实累计观看按实际播放经过时间，不用position/seek/假duration，暂停缓冲不计、倍速不乘媒体位移；公开累计按§6.1两个Preference标量保存，private/unknown零计且零落盘。提醒由云配置在自然切集出现、可关闭，缺配置关闭，价格/阈值不猜；核销保持原安全边界。
+- **R26-12 管线**：每日新完整 fact pack/目录/bundle/内部publicSearch/manifest 同代发布，blobs先校验上传，再切manifest指针，并配套Worker；禁止单独部署搜索Worker。内部投影描述为 `{schema:1,count,key,bytes,sha256}`，key=`library/search/{sha256}.json`，上限16 MiB；对象为 `{schema:1,revision,entries:[{item,aliases,pinyin,tags}]}`，仅公开同代事实，hash/bytes/count/频道总数一致且返回前复核workFacts，不新增公网路由或响应字段。现代workFacts代缺失/损坏投影一律503，不能回旧D1；仅真实无workFacts旧代可兼容。provider_s1目录/分集元数据不是可播证明，空lines不得发布；公开player解析候选仍须真实完整线路及健康证据。旧publisher拒覆盖不算日更完成。私密资源真实隔离、CI secrets/备份分别另批，不发布private objects，不自动Git或云上线。
+- **三轨直接冲突收敛**：底栏3键【精选/追剧/我的】，搜索Overlay，分享仅播放器内；公开目录60条/分片（搜索分页不变）；海报512 MiB、目录20 MiB。公开按作详情多线路直连为受控例外，私密双准入/逐资源校验不因此放宽。
+- **状态**：本地seed本轮统计20,163条、“末世”短剧5/AI3仅为seed样本；旧库约70部与另一来源多集、云搜索旧ID/两集、后台来源调查均待复核，不承诺来源数量。
+
+### 10.2 通用边界（未被本轮替代者继续有效）
+
 - 响应式断点（唯一口径，与 `design-tokens.css` 一致）：窄屏 `< 768px`、平板/折叠屏 `768px ~ 1023px`、桌面/电视 `≥ 1024px` 四模网格自适应；
 - 安全区适配：全面启用 CSS `env(safe-area-inset-top)` 与 `env(safe-area-inset-bottom)`；
 - 代码组织红线：单文件 ≤ 300 行（生成契约/迁移文件可说明例外），严禁 Emoji 功能图标，严禁在业务样式硬编码颜色；
@@ -280,6 +310,8 @@ npm test
 ## 13. 变更记录
 | 日期 | 变更内容 | 原因 | 影响范围 |
 | :--- | :--- | :--- | :--- |
+| 2026-10-04（执行事实同步） | 完整读取已新增following-store/watch-time/settings-support及publicSearch generation/manifest/打包日更模块；补同库local_following DDL与created_at、独立收藏清理/无云sync、两项Preference标量/private零计；允许host注入旧已确认contact/reward资源并披露历史权益文字；内部投影同代blobs→pointer+Worker配套、现代缺投影503 | 用户已授权计划与完整修复；本次仅更新文档，不触碰业务/权限/AGENTS/Git写操作；纠正“全部未实现”和虚构云QR前置条件 | 正本、修复SPEC/计划、PRD/UIUX/API-SPEC/OpenAPI；局部实现不等于R26全完成，历史1040通过后新全量及浏览器/原生/生产仍待验 |
+| 2026-10-04（v2.6修复契约） | §10.1关联R26-01～12；纠正F-02/视图/AC-06、07左亮右音，AC-20系统栏恢复、AC-21浮层优先；同步公开60条分片/三Tab/512 MiB及同代搜索，定义倍速、重复分类刷新、频道热榜、持久追剧、二维码与真实观看提醒；创建修复计划及增量SPEC | 用户授权仅写文档；源码冷启搜索接线缺口与seed已只读核实，来源/云响应/真机/日更待证，不改2.6.2 tag、不自动Git/部署 | 正本、PRD、UIUX、API-SPEC、OpenAPI、三轨SPEC；R项全部待实现/待验收，旧30项不作本轮通过证明 |
 | 2026-09-30 | 创立 `D:\DEV\prism-play` 并冻结 v2.0.0 Spec | 品牌升维为《光影Play》，全面采用方案 B (Capacitor 7 + TS + ArtPlayer + Cloudflare) | 全局基线 |
 | 2026-09-30（夜） | 施工前契约收敛：补入 F-05/F-10 与 AC-08~11；认证由 HS256 改 Ed25519；档位统一为 Q/A/B/Y/S 并明确个人探索仅 B/Y/S；卡密上限与异常计数改为可达口径；离线承诺收窄为“授权可验证”；新增内容目录/分集/播放解析/私密会话/设备 ping/受控代理端点；移除本期 AI 端点；断点统一 768px | 历史基线，部分范围已由 2026-10-01 变更修订 | PRD、SPEC、OpenAPI、API-SPEC、ARCHITECTURE、D1 Schema、UIUX、Design Tokens、工程配置 |
 | 2026-10-01 | F-13～15 / AC-16～18：已配置来源 AI 自动加工、混合搜索、公开列表海报本地缓存；Windows 与离线视频后移；私密无权表现统一；单 URL 边缘择源；在线续期返回新 JWT。Workers AI/Vectorize 本期有限引入，套餐/用量未核，免费降级且不自动付费 | 按 Master 一次性选择同步补齐客户端、云端、传输与数据全链 | PRD、UIUX、ARCHITECTURE、ADR-003、OpenAPI、API-SPEC、D1 Schema、SPEC、项目索引、README、wrangler 注释 |

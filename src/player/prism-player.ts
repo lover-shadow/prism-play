@@ -1,13 +1,7 @@
-/**
- * 《光影Play》全手势播放器宿主（SPEC §4 / §7 / AC-06…AC-11 / AC-15 / A-7）。
- * ArtPlayer + hls.js carry the media plumbing; this file owns what ADR-002 says they do not provide: the
- * gesture HUDs (system volume and window brightness reach the OS through `PrismNativeBridge`, so only a
- * device can prove them), double-tap seek, sleep timer, touch lock, episode drawer, call interruption and
- * the honest error states. `PlayerEngine` is injectable — the default factory lazy-imports ArtPlayer and
- * hls.js, tests hand in a fake; overlays, sleep policies, episode bookkeeping and line orchestration live in separate modules.
- */
+/** Player orchestration: injectable media engine, native gestures, overlays and episode state. */
 /// <reference types="vite/client" />
 import './player.css';
+import { createPlaybackRate, type PlaybackPreferences } from './playback-rate';
 import { createArtEngine } from './art-engine';
 import type { EngineFactory, MediaEvent, PlayerEngine } from './engine-seam';
 import { probeStageOrientation, type AspectOrientation } from './aspect';
@@ -28,15 +22,10 @@ import { createGestureHud, createPlayerChrome, createStateOverlay } from './hud'
 import type { PlayerErrorKind } from './hud';
 import { createCallInterruptPolicy, createSleepTimer, SLEEP_CHOICES, SLEEP_LABELS, systemClock } from './sleep-timer';
 import type { Clock, SleepMode } from './sleep-timer';
-
 export type PlayerPhase = 'idle' | 'loading' | 'ready' | 'ended' | 'error' | 'destroyed';
-/**
- * `titleManifest` 缺席（旧云端、或调用方只给了代理链依赖）时整体退回 `playback` 那条路：
- * 清单拿不到不是失败，绝不因为缺一张清单而白屏。
- */
+/** Missing title manifests fall back to the existing playback endpoint. */
 export interface PlayerApi { playback(episodeId: number): Promise<PlaybackInfo>; title(titleId: string): Promise<TitleDetail>; titleManifest?(workId: string): Promise<TitleManifest> }
 export interface PlayerFailure { kind: PlayerErrorKind | 'media' | 'progress-blocked'; message: string }
-
 export interface PrismPlayerOptions {
   root: HTMLElement; bridge: PrismNativeBridge; api: PlayerApi; titleId: string;
   clock?: Clock; engine?: EngineFactory; onProgress?: (row: WatchHistoryRow, context: ProgressContext) => void;
@@ -52,6 +41,11 @@ export interface PrismPlayerOptions {
    * 播放器只**报告**，不据此锁屏或改全屏——方向锁与全屏态都是宿主的权威范围（§1.2.0）。
    */
   onAspect?: (orientation: AspectOrientation | null) => void;
+  playbackPreferences?: PlaybackPreferences;
+  onEpisodeChange?(episode: EpisodeItem): void;
+  /** Host accounting resets before replacing a source; auto-next is distinct from manual selection. */
+  onSourceChange?(): void;
+  onNaturalBoundary?(): Promise<void>;
 }
 export interface PlayerState {
   phase: PlayerPhase; errorKind: PlayerErrorKind | null; episodeId: number | null; contentId: string | null;
@@ -69,11 +63,10 @@ export interface PrismPlayer {
   notifyAudioFocus(focus: 'restored' | 'lost'): void; notifyLeave(): void;
   /** 视口几何变了（进出全屏、转屏）：只让内核重算内部尺寸，不触碰任何全屏通道（SPEC §1.2.0）。 */
   relayout(): void;
+  setPlaybackRate(rate: number): boolean; dismissOverlay(): boolean;
 }
-
 const errorKindOf = (error: unknown): PlayerErrorKind =>
   error instanceof ApiError ? (error.treatedAsMissing ? 'missing' : error.code === 'NETWORK_ERROR' ? 'offline' : 'retryable') : 'retryable';
-
 export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
   const clock = options.clock ?? systemClock;
   const { bridge, api, root } = options;
@@ -92,19 +85,18 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
   const episodeNumber = (): number => detail?.episodes.find((item) => item.episodeId === episodeId)?.episodeNumber ?? 0;
   /** The surface box already excludes both control bands through CSS, so the classifier sees zero bands. */
   const readSurface = (): GestureBounds => { const r = chrome.surface.getBoundingClientRect(); return { width: r.width, height: r.height, top: r.top, left: r.left, topBandPx: 0, bottomBandPx: 0 }; };
-
   root.classList.add('prism-player');
   const backdrop = document.createElement('div'), speedPill = document.createElement('div'), pulse = document.createElement('div');
   backdrop.className = 'prism-player__backdrop';
   if (detail?.item.coverUrl) backdrop.innerHTML = `<img class="prism-player__backdrop-img" src="${detail.item.coverUrl}" alt="" /><div class="prism-player__backdrop-glow"></div>`;
   pulse.className = 'prism-player__pulse'; pulse.innerHTML = icon('play', { size: 24 }); pulse.addEventListener('click', () => { engine?.play(); });
-  speedPill.className = 'prism-player__speed-pill'; speedPill.innerHTML = '<span>▶▶</span><span>2.0X 极速快进</span>';
+  speedPill.className = 'prism-player__speed-pill';
   root.append(backdrop, pulse, speedPill);
   const overlay = createStateOverlay(root);
   const hud = createGestureHud(root, clock);
   const chrome = createPlayerChrome(root, (action) => {
     if (action === 'lock') setLocked(!locked);
-    else if (action === 'list' && detail !== null && episodeId !== null) drawer.open(detail, episodeId);
+    else if (action === 'list' && detail !== null && episodeId !== null) { rate.close(); rate.cancel(); drawer.open(detail, episodeId); }
     else {
       const cycle: SleepMode[] = ['off', ...SLEEP_CHOICES];
       scheduleSleep(cycle[(cycle.indexOf(sleep.mode()) + 1) % cycle.length] ?? 'off');
@@ -128,6 +120,9 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
       if (enabled) ensureBackgroundAudio(); else void bridge.stopBackgroundAudio();
     }
   });
+  const rate = createPlaybackRate({ root, surface: chrome.surface, pill: speedPill, clock, engine: () => engine, locked: () => locked || destroyed,
+    preferences: options.playbackPreferences, onHold: () => gesture.cancel(), onError: (message) => report({ kind: 'media', message }), beforeOpen: () => drawer.close() });
+  chrome.el.append(rate.button);
   const sleep = createSleepTimer(clock, { getVolume: () => engine?.volume() ?? 1, setVolume: (v) => engine?.setVolume(v), stop: () => releaseHandle('sleep') });
   /** 剧集清单（§2.2）的进程内唯一缓存：装成"当前生效的那只"，投屏侧因此不必再造一份 api 客户端重拉清单。 */
   const manifests = installTitleManifestStore(createTitleManifestStore({ api }));
@@ -145,20 +140,17 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
   disposers.push(attachGestureLayer(chrome.surface, gesture).destroy);
   disposers.push(bridge.onCallState((state) => { if (!destroyed) interruption.onCallState(state); }));
   listen(overlay.retryButton, 'click', () => { if (episodeId !== null) void load(episodeId, engine?.currentTime() ?? 0); });
-  render();
-
+  chrome.setVisible(true); render();
   function render(): void {
     const left = sleep.remainingMs();
     const label = SLEEP_LABELS[sleep.mode()];
     chrome.render({ title: detail?.item.title ?? '', locked, sleeping: sleep.mode() !== 'off', sleepLabel: left === null ? label : `${label} · ${Math.ceil(left / 60_000)}` });
   }
-
   function ensureBackgroundAudio(): void {
     if (options.allowBackgroundAudio !== true || backgroundAudioOn) return;
     backgroundAudioOn = true;
     void bridge.startBackgroundAudio(detail?.item.title ?? '', `第 ${episodeNumber()} 集`).catch(() => void (backgroundAudioOn = false));
   }
-
   /** AC-06/07: the number states what really moved; `supported` only says whether the OS moved. */
   async function applyChannel(channel: ValueChannel, value: number): Promise<void> {
     if (channel === 'brightness') {
@@ -176,16 +168,18 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
     if (!applied.supported) engine?.setVolume(value);
     hud.show({ kind: 'volume', value: applied.volume, supported: applied.supported });
   }
-
   async function onEnded(): Promise<void> {
     const episodes = detail?.episodes ?? [];
     const index = Math.max(0, episodes.findIndex((item) => item.episodeId === episodeId));
     progress.emit(true);
     phase = 'ended';
     if (sleep.onEpisodeEnded({ episodeIndex: index, episodeTotal: episodes.length }) === 'stop') releaseHandle('sleep');
-    else if (episodes[index + 1] !== undefined) await load(episodes[index + 1].episodeId, 0);
+    else if (episodes[index + 1] !== undefined) {
+      const mine = token;
+      await options.onNaturalBoundary?.();
+      if (!destroyed && mine === token) await load(episodes[index + 1].episodeId, 0);
+    }
   }
-
   function handleMediaEvent(event: MediaEvent): void {
     if (destroyed || engine === null) return;
     if (event === 'play') { root.classList.add('is-playing'); interruption.noteUserAction(); void bridge.setKeepScreenOn(true); ensureBackgroundAudio(); }
@@ -196,7 +190,6 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
     else if (event === 'loadedmetadata') options.onAspect?.(probeStageOrientation(chrome.stage));
     else void onEnded();
   }
-
   async function ensureEngine(): Promise<PlayerEngine> {
     if (engine !== null) return engine;
     const theme = getComputedStyle(document.documentElement).getPropertyValue('--player-accent').trim();
@@ -214,9 +207,9 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
     gesture.seed('brightness', brightness.brightness);
     return live;
   }
-
   /** AC-09 归零瞬间：暂停并释放播放句柄（hls 实例与 MediaSource 一并解除）。 */
   function releaseHandle(reason: 'sleep' | 'destroy'): void {
+    options.onSourceChange?.();
     const live = engine;
     engine = null;
     direct = null;
@@ -226,9 +219,10 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
     if (backgroundAudioOn) { backgroundAudioOn = false; void bridge.stopBackgroundAudio(); }
     if (reason === 'sleep') phase = 'idle';
   }
-
   async function load(id: number, resumeSeconds = 0): Promise<void> {
     if (destroyed) return;
+    options.onSourceChange?.();
+    rate.cancel(); progress.emit(true);
     token += 1;
     const mine = token;
     episodeId = id; phase = 'loading'; errorKind = null; runner.reset();
@@ -241,22 +235,22 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
     if (outcome.kind === 'surface') applySurface(live, outcome.surface, outcome.resumeSeconds);
     else if (outcome.kind === 'unavailable') refuseWith(outcome.error);
   }
-
   /** 界面只认一种起播形状：直连与代理回退的差别已在 `line-runner` 收敛，这里不再复制第二套口径。 */
   function applySurface(live: PlayerEngine, surface: Surface, resumeSeconds: number): void {
+    options.onSourceChange?.();
     direct = surface.lineIndex; errorKind = null; phase = 'ready';
-    live.setSource(surface.url, surface.mimeType);
+    live.setSource(surface.url, surface.mimeType); rate.reapply();
+    const current = detail?.episodes.find((ep) => ep.episodeId === episodeId);
+    if (current) { options.onEpisodeChange?.(current); if (backgroundAudioOn) void bridge.startBackgroundAudio(detail?.item.title ?? '', `第 ${current.episodeNumber} 集`).catch(() => undefined); }
     if (resumeSeconds > 0) live.setCurrentTime(resumeSeconds);
     overlay.hide(); render(); progress.emit(true);
     if (drawer.isOpen() && episodeId !== null) drawer.refresh(episodeId);
   }
-
   // 私密与未知剧目共用同一份文案与同一套 UI，不泄露任何元信息（AC-02-6 / AC-15）。
   function refuseWith(error: unknown): void {
     phase = 'error'; errorKind = errorKindOf(error); overlay.show(errorKind);
     report({ kind: errorKind, message: msg(error) });
   }
-
   /** A-7.4：直连失败即顺序切下一条（最多两条），全灭才落错误卡；每条失败都就地记进线路遥测（A-8）。 */
   function noteLineFailure(): void {
     if (engine === null) return;
@@ -271,14 +265,13 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
     root.classList.remove('is-playing'); overlay.show('retryable');
     report({ kind: 'media', message: '所有备用线路均不可用' });
   }
-
-  const setLocked = (v: boolean): void => { locked = v; render(); }; const scheduleSleep = (m: SleepMode): void => { sleep.schedule(m); render(); };
-
+  const setLocked = (v: boolean): void => { rate.cancel(); locked = v; render(); }; const scheduleSleep = (m: SleepMode): void => { sleep.schedule(m); render(); };
   return {
     load, play: () => engine?.play(), pause: () => { progress.emit(true); engine?.pause(); },
     setLocked, scheduleSleep, closeDrawer: () => drawer.close(),
-    openDrawer: () => { if (detail !== null && episodeId !== null) drawer.open(detail, episodeId); },
-    notifyAudioFocus: (value) => interruption.audioFocus(value), notifyLeave: () => { interruption.noteUserAction(); progress.emit(true); },
+    openDrawer: () => { rate.close(); rate.cancel(); if (detail !== null && episodeId !== null) drawer.open(detail, episodeId); },
+    setPlaybackRate: rate.set, dismissOverlay: () => rate.close() || (drawer.isOpen() ? (drawer.close(), true) : false),
+    notifyAudioFocus: (value) => { if (value === 'lost') rate.cancel(); interruption.audioFocus(value); }, notifyLeave: () => { rate.cancel(); interruption.noteUserAction(); progress.emit(true); },
     relayout: () => engine?.resize?.(),
     state: (): PlayerState => ({
       phase, errorKind, episodeId, contentId: detail?.item.id ?? null, playing: engine?.playing() ?? false,
@@ -290,7 +283,7 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
     destroy: () => {
       if (destroyed) return;
       destroyed = true; phase = 'destroyed'; token += 1; progress.emit(true);
-      sleep.destroy(); gesture.destroy(); hud.destroy(); drawer.destroy(); overlay.destroy(); chrome.destroy();
+      rate.destroy(); sleep.destroy(); gesture.destroy(); hud.destroy(); drawer.destroy(); overlay.destroy(); chrome.destroy();
       for (const [target, type, handler] of bound) target.removeEventListener(type, handler);
       bound.length = 0;
       for (const dispose of disposers.splice(0)) dispose();

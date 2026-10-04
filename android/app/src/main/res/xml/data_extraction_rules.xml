@@ -27,10 +27,10 @@
   rebuildable from the network; shipping them would only spend the user's quota.
 
   REAL FILE NAMES THIS FILE CLAIMS (integration contract with src/core/storage):
-    databases/prism_local.db ............ @capacitor-community/sqlite, created as
-                                          createConnection("prism_local.db") - the plugin
-                                          passes the name to Context.getDatabasePath()
-                                          verbatim, so no prefix and no suffix are added.
+    databases/prism_localSQLite.db ...... @capacitor-community/sqlite, created as
+                                          createConnection("prism_local.db"): the JS wrapper
+                                          strips .db; Android createConnection appends
+                                          SQLite.db before Context.getDatabasePath().
     shared_prefs/CapacitorStorage.xml ... @capacitor/preferences default group
                                           "CapacitorStorage"; re-grouping via
                                           Preferences.configure({ group }) breaks this rule.
@@ -47,10 +47,10 @@
     <cloud-backup>
         <!-- Domain 2: watch history and resume breakpoints. The side files matter: a
              WAL/journal left out of the archive can restore an older committed state. -->
-        <include domain="database" path="prism_local.db" />
-        <include domain="database" path="prism_local.db-wal" />
-        <include domain="database" path="prism_local.db-shm" />
-        <include domain="database" path="prism_local.db-journal" />
+        <include domain="database" path="prism_localSQLite.db" />
+        <include domain="database" path="prism_localSQLite.db-wal" />
+        <include domain="database" path="prism_localSQLite.db-shm" />
+        <include domain="database" path="prism_localSQLite.db-journal" />
 
         <!-- Domain 2 preferences half: theme, poster mode, background-playback flag,
              as long as they are written through @capacitor/preferences. -->
@@ -78,10 +78,10 @@
          keystore blob must not. Android 12+ reads this section independently of
          cloud-backup, so both are spelled out rather than inherited. -->
     <device-transfer>
-        <include domain="database" path="prism_local.db" />
-        <include domain="database" path="prism_local.db-wal" />
-        <include domain="database" path="prism_local.db-shm" />
-        <include domain="database" path="prism_local.db-journal" />
+        <include domain="database" path="prism_localSQLite.db" />
+        <include domain="database" path="prism_localSQLite.db-wal" />
+        <include domain="database" path="prism_localSQLite.db-shm" />
+        <include domain="database" path="prism_localSQLite.db-journal" />
         <include domain="sharedpref" path="CapacitorStorage.xml" />
 
         <exclude domain="sharedpref" path="prism_credentials_encrypted.xml" />

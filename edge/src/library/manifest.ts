@@ -35,6 +35,8 @@ export interface CatalogManifest {
   channels: Record<string, ChannelInventory>;
   workFacts?: { schema: 1; maxBytes: 524288; packs: Record<string, { key: string; bytes: number; sha256: string }> };
   coverOrigins?: string[];
+  /** Internal, content-addressed public lexical projection; never a client endpoint. */
+  publicSearch?: { schema: 1; count: number; key: string; bytes: number; sha256: string };
 }
 
 function isChannelKey(value: string): boolean {
@@ -67,6 +69,7 @@ function validateChannels(value: unknown): Record<string, ChannelInventory> {
  */
 export function validatePublicManifest(raw: unknown): CatalogManifest | null {
   if (!isRecord(raw)) return null;
+  if (new TextEncoder().encode(JSON.stringify(raw)).byteLength > 65536) return null;
   if (!isCount(raw.revision)) return null;
   if (!isCount(raw.pageSize) || raw.pageSize < 1) return null;
   if (Number(raw.pageSize) !== CATALOG_PAGE_SIZE) return null;
@@ -74,17 +77,31 @@ export function validatePublicManifest(raw: unknown): CatalogManifest | null {
   const manifest: CatalogManifest = { revision: Number(raw.revision), pageSize: CATALOG_PAGE_SIZE, channels: validateChannels(raw.channels) };
   if (raw.workFacts !== undefined) {
     const facts = raw.workFacts;
-    if (!isRecord(facts) || facts.schema !== 1 || facts.maxBytes !== 524288 || !isRecord(facts.packs)) return null;
-    if (new TextEncoder().encode(JSON.stringify(facts)).byteLength >= 65536) return null;
+    if (!isRecord(facts) || ![1, 2].includes(Number(facts.schema)) || facts.maxBytes !== 524288 || !isRecord(facts.packs)) return null;
+    if (facts.schema !== 1 && facts.schema !== 2) return null;
+    const packs: NonNullable<CatalogManifest['workFacts']>['packs'] = {};
     const leaves = Object.keys(facts.packs).sort();
     for (let i = 0; i < leaves.length; i++) {
-      const prefix = leaves[i], pack = facts.packs[prefix];
+      const prefix = leaves[i], entry = facts.packs[prefix];
+      if (facts.schema === 2 && (!Array.isArray(entry) || entry.length !== 2)) return null;
+      const pack = facts.schema === 2 && Array.isArray(entry)
+        ? { bytes: entry[0], sha256: entry[1], key: `library/facts/${entry[1]}.json` } : entry;
       if (!/^[a-f0-9]{2,64}$/.test(prefix) || (i > 0 && prefix.startsWith(leaves[i - 1]))) return null;
       if (!isRecord(pack) || typeof pack.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(pack.sha256)) return null;
       if (pack.key !== `library/facts/${pack.sha256}.json` || !isCount(pack.bytes) || pack.bytes < 1 || pack.bytes > 524288) return null;
+      packs[prefix] = { key: pack.key, bytes: pack.bytes, sha256: pack.sha256 };
     }
-    manifest.workFacts = facts as unknown as NonNullable<CatalogManifest['workFacts']>;
+    // Normalize internally so every existing reader follows the same verified directory.
+    manifest.workFacts = { schema: 1, maxBytes: 524288, packs };
     if (!Array.isArray(raw.coverOrigins)) return null;
+  }
+  if (raw.publicSearch !== undefined) {
+    const search = raw.publicSearch;
+    if (!manifest.workFacts || !isRecord(search) || search.schema !== 1 || !isCount(search.count) ||
+        !isCount(search.bytes) || search.bytes < 1 || search.bytes > 16777216 ||
+        typeof search.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(search.sha256) ||
+        search.key !== `library/search/${search.sha256}.json`) return null;
+    manifest.publicSearch = search as unknown as NonNullable<CatalogManifest['publicSearch']>;
   }
   if (raw.coverOrigins !== undefined) {
     if (!Array.isArray(raw.coverOrigins) || !raw.coverOrigins.every((origin) => {
@@ -104,6 +121,7 @@ export function validatePublicManifest(raw: unknown): CatalogManifest | null {
  */
 export function validatePrivateManifest(raw: unknown): CatalogManifest | null {
   if (!isRecord(raw)) return null;
+  if (new TextEncoder().encode(JSON.stringify(raw)).byteLength > 65536) return null;
   if (!isCount(raw.revision)) return null;
   const pageSize = raw.pageSize;
   if (pageSize !== undefined && (!isCount(pageSize) || pageSize < 1)) return null;

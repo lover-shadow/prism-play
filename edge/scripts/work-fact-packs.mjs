@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { PUBLIC_CHANNEL_IDS } from './config-sources.mjs';
+import { PUBLIC_CHANNEL_IDS, PROVIDERS } from './config-sources.mjs';
+const PRIVATE_PROVIDERS = new Set(PROVIDERS.filter((p) => p.privacy === 'private-all').map((p) => p.id));
 
 export const MAX_PACK_BYTES = 524288;
 export const MAX_MANIFEST_BYTES = 65536;
@@ -111,6 +112,10 @@ export function buildWorkFactPacks(facts) {
   for (const [id, fact] of [...facts].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
     if (id !== fact.workId || fact.isPrivate !== false || fact.enabled !== true ||
         !PUBLIC_CHANNEL_IDS.includes(fact.channelId)) throw new Error(`Invalid public fact: ${id}`);
+    for (const episode of fact.episodes) for (const line of episode.lines) {
+      if (PRIVATE_PROVIDERS.has(line.providerId) || !/^provider_[a-z0-9_]+$/.test(line.providerId)) throw new Error('Private or invalid provider in public fact');
+      targetUrl(line.mediaUrl);
+    }
     if (Object.hasOwn(fact, 'coverTargetUrl')) {
       coverOrigins.add(targetUrl(fact.coverTargetUrl, true).origin);
     }
@@ -144,7 +149,11 @@ export function buildWorkFactPacks(facts) {
     objects.push({ key, value });
   }
   for (const [prefix, entries] of [...buckets].sort()) emit(prefix, entries);
-  return { workFacts: { schema: 1, maxBytes: MAX_PACK_BYTES, packs },
+  // Small inventories retain the legacy format. Compact tuples avoid storing each digest twice.
+  const compact = Buffer.byteLength(JSON.stringify(packs), 'utf8') > 32768;
+  const directory = compact ? Object.fromEntries(Object.entries(packs).map(([prefix, pack]) =>
+    [prefix, [pack.bytes, pack.sha256]])) : packs;
+  return { workFacts: { schema: compact ? 2 : 1, maxBytes: MAX_PACK_BYTES, packs: directory },
     coverOrigins: [...coverOrigins].sort(), objects,
     report: { works: facts.size, packs: objects.length,
       bytes: objects.reduce((sum, object) => sum + Buffer.byteLength(object.value, 'utf8'), 0),

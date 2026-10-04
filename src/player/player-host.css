@@ -30,6 +30,8 @@
 .prism-player-host--fullscreen { overflow: hidden; background: var(--player-bg); }
 .prism-player-host--fullscreen .prism-player-host__bar,
 .prism-player-host--fullscreen .prism-player-host__body { display: none; }
+.prism-player-host--fullscreen .prism-player-host__body:has(.prism-cast:not([hidden])) { display: block; position: fixed; inset: 0; z-index: 220; padding: 0; background: transparent; }
+.prism-player-host--fullscreen .prism-player-host__body:has(.prism-cast:not([hidden])) > :not(.prism-cast) { display: none; }
 /* 舞台即视口。用 `fixed; inset: 0` 而不是 `100vw/100vh`：后者在 Android 地址栏收放时会计入已被遮挡的高度，
    表现为"底部留一条能滚出来的黑缝"——§1.2.2 说的"顶天立地"指的是舞台充满，不是像素铺满。 */
 .prism-player-host--fullscreen .prism-player-host__stage { position: fixed; inset: 0; z-index: 100; flex: none; width: 100%; height: 100%; margin: 0; }

@@ -21,6 +21,7 @@
 import pathlib
 import re
 import sys
+import xml.etree.ElementTree as ET
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP = ROOT / "android" / "app" / "src" / "main"
@@ -172,6 +173,41 @@ def check_color_tokens(problems, checked):
                 problems.append(f"{values.name} 的颜色 {literal} 不在 design-tokens.json 中（原生侧同样只允许一个颜色真相源）")
 
 
+def check_backup_allowlist(problems, checked):
+    """精确白名单：历史库及旁文件 + 默认偏好，其他域不得进入备份。"""
+    history = "prism_localSQLite.db"
+    expected = {("database", history + suffix) for suffix in ("", "-wal", "-shm", "-journal")}
+    expected.add(("sharedpref", "CapacitorStorage.xml"))
+    required_excludes = {
+        ("sharedpref", "prism_credentials_encrypted.xml"),
+        ("sharedpref", "__androidx_security_master_key_.xml"),
+        ("database", "prism_catalog.db"),
+        ("database", "prism_catalog.db-wal"),
+        ("database", "prism_catalog.db-journal"),
+        ("root", "cache"), ("file", "cache"), ("file", "cache/posters"),
+    }
+    for name in ("backup_rules.xml", "data_extraction_rules.xml"):
+        try:
+            root = ET.parse(RES / "xml" / name).getroot()
+        except (OSError, ET.ParseError) as error:
+            problems.append(f"备份规则不可读取 {name}: {error}")
+            continue
+        sections = [root] if name == "backup_rules.xml" else [root.find(tag) for tag in ("cloud-backup", "device-transfer")]
+        for section in sections:
+            if section is None:
+                problems.append(f"{name} 缺少独立备份/迁移策略")
+                continue
+            label = f"{name}:{section.tag}"
+            checked.append(label)
+            includes = [(node.get("domain"), node.get("path")) for node in section.findall("include")]
+            excludes = {(node.get("domain"), node.get("path")) for node in section.findall("exclude")}
+            if set(includes) != expected or len(includes) != len(expected):
+                problems.append(f"{label} 必须仅包含 {history} 及 wal/shm/journal 和 CapacitorStorage.xml，实际为 {includes}")
+            required = required_excludes | ({("root", "code_cache")} if section is not root else set())
+            if not required <= excludes or expected & excludes:
+                problems.append(f"{label} 排除项缺失或误排历史/偏好：{required - excludes}")
+
+
 def main() -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -188,6 +224,7 @@ def main() -> int:
     check_plugin_name(problems, checked)
     check_components_declared(problems, checked)
     check_color_tokens(problems, checked)
+    check_backup_allowlist(problems, checked)
 
     print("【Android 工程静态一致性】清单/资源/R 引用/插件工程/Wrapper/组件声明")
     print("=" * 74)

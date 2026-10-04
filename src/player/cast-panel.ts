@@ -113,13 +113,14 @@ export function createCastPanel(deps: CastPanelDeps): CastPanel {
     if (device === null) return false;
     try {
       const media = await stream(episodeId);
+      if (destroyed || active !== device || deps.isPrivate()) return false;
       await client.cast(device, {
         url: media.url,
         title: episodeLabel(deps.episodes, deps.titleOf(), episodeId),
         mimeType: media.mimeType
       });
-      if (destroyed) return false;
-      relay.arm(media.durationSeconds);
+      if (destroyed || active !== device) { await client.control(device, 'stop').catch(() => undefined); return false; }
+      // Duration is not renderer playback state. Never infer an ended event from wall time.
       return true;
     } catch (error) {
       phase = 'error';
@@ -164,7 +165,7 @@ export function createCastPanel(deps: CastPanelDeps): CastPanel {
       } else {
         // 恢复后按整集时长重新计时：暂停掉的这段时间不该被算进"本集已播完"。
         phase = 'casting';
-        relay.arm(deps.episodes.find((item) => item.episodeId === deps.currentEpisodeId())?.durationSeconds);
+        // Receiver transport/position reporting is unavailable: no timer-based auto-advance.
       }
       message = '';
     } catch (error) {
@@ -259,7 +260,9 @@ export function createCastPanel(deps: CastPanelDeps): CastPanel {
   function destroy(): void {
     destroyed = true;
     relay.cancel();
-    if (phase === 'scanning') void client.stop().catch(() => undefined);
+    const device = active; active = null;
+    if (device !== null) void client.control(device, 'stop').catch(() => undefined);
+    void client.stop().catch(() => undefined);
     view.destroy();
   }
 

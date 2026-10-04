@@ -51,7 +51,7 @@ const frame = (task: () => void): void => {
 
 /** 找到真正的滚动容器：沿祖先链找第一个纵向可滚元素，找不到就交给文档。 */
 export function resolveScroller(node: HTMLElement | null): ScrollHost {
-  let cursor = node?.parentElement ?? null;
+  let cursor = node;
   while (cursor !== null && cursor !== document.documentElement) {
     const overflow = getComputedStyle(cursor).overflowY;
     if (overflow === 'auto' || overflow === 'scroll') return cursor;

@@ -67,6 +67,8 @@ export const createArtEngine: EngineFactory = async ({ container, theme, poster,
     currentTime: () => art.currentTime, setCurrentTime: (s) => void (art.currentTime = s),
     duration: () => art.duration, volume: () => art.video.volume, setVolume: (v) => void (art.video.volume = clamp(v, 0, 1)),
     toggleControls: () => art.controls.toggle(),
+    playbackRate: () => art.video.playbackRate,
+    setPlaybackRate: (rate) => { art.video.playbackRate = rate; },
     setSource: (u, m) => { lastFailure = null; art.type = m === 'video/mp4' ? 'mp4' : 'm3u8'; art.url = u; void art.play().catch(() => {}); },
     failureCode: () => lastFailure,
     on: (event, handler) => {

@@ -15,6 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { INFRA, LOCAL, stateKey } from './config-sources.mjs';
+import { validatePublication } from './publication-guard.mjs';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -145,6 +146,7 @@ export async function publishFiles(files, kvEntries, options) {
     console.log(`${dryRun ? '[dry-run]' : '[未加 --publish]'} 跳过 ${files.length} 个 R2 对象与 ${kvEntries.length} 个 KV 键的上传（未触碰云端）。`);
     return;
   }
+  validatePublication(files, kvEntries, isPrivate);
   const auth = await discoverRestAuth();
   if (auth !== null) {
     console.log(`上传通道：REST 直传（${UPLOAD_POOL} 路并发，${files.length} 个对象）`);

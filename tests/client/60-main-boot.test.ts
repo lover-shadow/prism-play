@@ -129,8 +129,9 @@ describe('组合根：Web 宿主启动', () => {
     expect(resume?.dataset.state).toBe('disabled');
     expect(resume?.querySelectorAll('.pv-row')).toHaveLength(0);
     expect(document.querySelectorAll('.pv-row[data-el="finished-row"]')).toHaveLength(0);
-    // 缓存度量行属另一分区，与历史库可用性无关，必须照常可见（disabled 不是整页空白）。
-    expect(query('[data-el="cache-metric"]')).not.toBeNull();
+    // 缓存度量已迁入【我的】，历史库缺席不得影响该模块。
+    await app?.shell.activate('settings');
+    expect(query('[data-el="cache-usage"]')).not.toBeNull();
   });
 
   it('无内置验签公钥时【个人探索】开关不出现；档位判定 fail-closed', async () => {

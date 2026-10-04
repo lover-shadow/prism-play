@@ -1,0 +1,22 @@
+/* R26-09: bounded watching area; recommendations retain their own usable rail. */
+.hist-view > .pv-band { flex-shrink: 0; min-width: 0; }
+.hist-view [data-el='band-resume'] .pv-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  padding: var(--space-2);
+}
+.hist-view [data-el='band-resume'] .pv-card-thumb {
+  width: var(--space-10);
+  height: var(--space-12);
+}
+.hist-view [data-el='remove-following'] { grid-column: 2 / -1; justify-self: end; }
+.hist-view .hist-expanded {
+  max-height: min(40dvh, calc(var(--space-16) * 4));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.hist-view [data-el='band-related'] .pv-band-body { min-height: calc(var(--space-16) * 2); }
+.hist-view [data-el='related-rail'] { flex-shrink: 0; }
+.hist-view [data-el='following-card'] { flex-wrap: wrap; }
+.hist-view [data-el='following-card'] .pv-row-actions { flex-wrap: wrap; }

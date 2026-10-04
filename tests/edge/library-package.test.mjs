@@ -4,8 +4,40 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { buildLibraryCatalog, sortCandidateSupply, readHarvestMetadata } from '../../edge/scripts/library-catalog.mjs';
-import { packageAndPublish } from '../../edge/scripts/package-and-publish-library.mjs';
+import { packageAndPublish, syncSeedFiles } from '../../edge/scripts/package-and-publish-library.mjs';
 import { publicTargets, makeWorkId, PAGE_SIZE, assertPublicAssetClean } from '../../edge/scripts/config-sources.mjs';
+
+test('merged caches preserve old evidence and new same-work fields win even with older stamps', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'prism-merge-'));
+  try {
+    const target = publicTargets().find((value) => value.forceAi);
+    for (const name of ['old', 'new']) fs.mkdirSync(path.join(dir, name));
+    const file = `t_${target.typeId}_p_1.json`;
+    fs.writeFileSync(path.join(dir, 'old', file), JSON.stringify({ list: [
+      { vod_id: 1, vod_time: 200, vod_hits: 99, vod_class: 'AI' }, { vod_id: 2, vod_hits: 0 }
+    ] }));
+    fs.writeFileSync(path.join(dir, 'new', file), JSON.stringify({ list: [{ vod_id: 1, vod_time: 100, vod_blurb: '新简介' }] }));
+    const merged = readHarvestMetadata([path.join(dir, 'old'), path.join(dir, 'new')]);
+    assert.equal(merged.size, 2);
+    assert.equal(merged.get(makeWorkId(target.channelId, target.provider, 1)).item.vod_hits, 99);
+    assert.equal(merged.get(makeWorkId(target.channelId, target.provider, 1)).item.vod_blurb, '新简介');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('seed staging failure leaves every existing destination unchanged', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'prism-seed-'));
+  try {
+    const source = path.join(dir, 'source'), first = path.join(dir, 'first'), second = path.join(dir, 'second');
+    fs.writeFileSync(source, 'new'); fs.writeFileSync(first, 'old1'); fs.writeFileSync(second, 'old2');
+    assert.throws(() => syncSeedFiles([[source, first], [path.join(dir, 'missing'), second]]));
+    assert.equal(fs.readFileSync(first, 'utf8'), 'old1');
+    assert.equal(fs.readFileSync(second, 'utf8'), 'old2');
+    assert.deepEqual(fs.readdirSync(dir).sort(), ['first', 'second', 'source']);
+    syncSeedFiles([[source, first], [source, second]]);
+    assert.equal(fs.readFileSync(first, 'utf8'), 'new');
+    assert.equal(fs.readFileSync(second, 'utf8'), 'new');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
 
 const now = 1800000000;
 const row = (id, extra = {}) => ({ id, channel_id: 'drama', title: '重生逆袭',
