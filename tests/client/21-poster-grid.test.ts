@@ -271,12 +271,13 @@ describe('样式真相源静态对账（AC-04 / §10 / P0-3）', () => {
     expect(tokensCss).toMatch(/--header-height:\s*52px/);
   });
 
-  it('A-4 紧凑 3 列：gap/padding 收到 6px / 8px，断点倍增只加列数不加间距', () => {
-    expect(tokensCss).toMatch(/--poster-gap-tight:\s*6px/);
+  it('HP-10 统一收紧后的间距真相：密集 4px / 舒适 12px，断点倍增只加列数不加间距', () => {
+    // 口径迁移（HP-10）：旧 AC-A4 钉的是 6px/8px 与内边距 --space-1；断言换值不换含义，仍是"断点只加列数"。
+    expect(tokensCss).toMatch(/--poster-gap-tight:\s*4px/);
+    expect(tokensCss).toMatch(/--poster-gap-wide:\s*12px/);
     const compact = tokensCss.match(/\.grid-posters-compact-3\s*\{([^}]*)\}/)?.[1] ?? '';
     expect(compact).toMatch(/gap:\s*var\(--poster-gap-tight\)/);
-    expect(compact).toMatch(/padding:\s*0 var\(--space-2\)/);
-
+    expect(compact).toMatch(/padding:\s*0 var\(--poster-gap-tight\)/);
     const tablet = tokensCss.slice(tokensCss.indexOf('@media (min-width: 768px)'), tokensCss.indexOf('@media (min-width: 1024px)'));
     const desktop = tokensCss.slice(tokensCss.indexOf('@media (min-width: 1024px)'));
     // 平板/大屏若把 gap 放回 --space-4(16px)，6 列就会被摊成碎图（AC-A4-4）。
@@ -284,7 +285,7 @@ describe('样式真相源静态对账（AC-04 / §10 / P0-3）', () => {
       expect(segment).toMatch(/\.grid-posters-compact-3\s*\{[^}]*gap:\s*var\(--poster-gap-tight\)/);
     }
     // 卡片内边距同步收紧，把宽度还给海报本身。
-    expect(homeCss).toMatch(/\.grid-posters-compact-3 \.poster-open\s*\{[^}]*padding:\s*var\(--space-1\)/);
+    expect(homeCss).toMatch(/\.grid-posters-compact-3 \.poster-open\s*\{[^}]*padding:\s*var\(--poster-pad-card\)/);
   });
 
   it('A-5 分享样式与手动加载按钮都已物理拔除，收起态与哨兵样式同步落地', () => {

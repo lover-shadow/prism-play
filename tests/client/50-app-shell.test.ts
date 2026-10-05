@@ -214,11 +214,13 @@ describe('app-shell 顶栏与底栏骨架（AC-25 / AC-27）', () => {
     expect(h.shell.headerAccessory().hidden).toBe(false);
   });
 
-  it('AC-27 三颗 Tab 等宽住在 .app-tabbar-inner 内容区，栏本体仍可铺满背景', async () => {
+  it('AC-27 三颗 Tab 仍等宽住在 .app-tabbar-inner 这一层（承载面收窄由 HP-09 接管）', async () => {
     const h = harness();
     const inner = h.tabbar.querySelector('.app-tabbar-inner');
     expect(inner).not.toBeNull();
-    // 限宽只能挂在内层：按钮直接挂在 .app-tabbar 上时，缩宽度会把底色与分隔线一起缩掉。
+    // 结构断言原样保留：三枚 Tab 的直接父层必须是 `.app-tabbar-inner`，栏本体只有一个子节点。
+    // 旧注释"限宽只能挂内层，否则底色与分隔线会被缩掉"在 HP-09 后反转了——现在**故意**让底色、
+    // 描边与内容同宽（真机量到的厚底栏就是"只收内容"留下的），口径对账见 `81-hp09-tabbar-carrier`。
     expect(inner?.children).toHaveLength(3);
     expect(h.tabbar.children).toHaveLength(1);
   });
@@ -251,5 +253,18 @@ describe('外壳样式静态对账（AC-25 / AC-26 / AC-27）', () => {
     expect(tokensCss).toMatch(/--capsule-height:\s*28px/);
     expect(tokensCss).toMatch(/--capsule-hit:\s*44px/);
     expect(appCss).not.toMatch(/#[0-9A-Fa-f]{3,8}\b/);
+  });
+
+  it('HP-09 承载区与栏高都从同一组 token 取值，DOM 侧仍只有 .app-tabbar-inner 一个子节点', async () => {
+    const h = harness();
+    expect(h.tabbar.children).toHaveLength(1);
+    const inner = appCss.match(/\.app-tabbar-inner\s*\{([^}]*)\}/)?.[1] ?? '';
+    // 收窄的是"背景 + 边框 + 内容"整块承载面：三者必须同住在一个盒子、同用一组 token。
+    expect(inner).toMatch(/min-height:\s*var\(--tabbar-height\)/);
+    expect(inner).toMatch(/max-width:\s*var\(--tabbar-content-max\)/);
+    expect(inner).toMatch(/background:\s*var\(--surface\)/);
+    expect(tokensCss).toMatch(/--tabbar-height:\s*48px/);
+    // 触区不随密度变化：44px 下限仍写死在按钮盒上。
+    expect(appCss.match(/\.app-tab\s*\{([^}]*)\}/)?.[1] ?? '').toMatch(/min-height:\s*44px/);
   });
 });

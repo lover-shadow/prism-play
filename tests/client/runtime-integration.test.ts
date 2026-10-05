@@ -26,7 +26,7 @@ async function harness(privateContent = false) {
   function hEngineOn(event: string, fn: () => void) { handlers.set(event, fn); return () => handlers.delete(event); }
   function hEngine() { return { play: () => undefined, pause: () => undefined, playing: () => true, currentTime: () => 999, duration: () => 1000, volume: () => 1, setVolume: () => undefined, setCurrentTime: () => undefined, setSource: () => undefined, destroy: () => undefined, toggleControls: () => undefined, playbackRate: () => 1, setPlaybackRate: () => undefined }; }
   await host.open('c1'); await settle();
-  return { host, mount, following, runtime, video, advance: (ms: number) => { now += ms; }, emit: (event: string) => { video.dispatchEvent(new Event(event)); }, ended: () => handlers.get('ended')?.() };
+  return { host, mount, following, runtime, video, advance: (ms: number) => { now += ms; }, emit: (event: string) => { video.dispatchEvent(new Event(event)); }, seam: (event: string) => { handlers.get(event)?.(); }, ended: () => handlers.get('ended')?.() };
 }
 
 describe('real host runtime integration', () => {
@@ -48,7 +48,7 @@ describe('real host runtime integration', () => {
     await h.runtime.destroy();
   });
   it('shows dismissible nudge on natural auto-next only and never stores private time or following', async () => {
-    const h = await harness(); h.emit('playing'); h.emit('loadeddata'); h.advance(2000); h.emit('ended'); h.ended(); await settle();
+    const h = await harness(); h.emit('play'); h.seam('play'); h.seam('playing'); h.emit('playing'); h.emit('loadeddata'); h.advance(2000); h.emit('ended'); h.ended(); await settle();
     expect(h.mount.querySelector('.sponsor-nudge')).not.toBeNull();
     h.mount.querySelector<HTMLButtonElement>('[aria-label="关闭提醒"]')!.click(); await settle();
     expect(h.runtime.watch?.state().lastNudgeSeconds).toBe(2); h.host.close(); await h.runtime.destroy();

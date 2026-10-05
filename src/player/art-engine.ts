@@ -37,39 +37,54 @@ export function classifyMediaError(code: number | undefined): LineFailureCode | 
 export const createArtEngine: EngineFactory = async ({ container, theme, poster, onError }) => {
   const [{ default: Artplayer }, { default: Hls }] = await Promise.all([import('artplayer'), import('hls.js')]);
   let hls: InstanceType<typeof Hls> | null = null;
+  const destroyHls = (): void => {
+    const previous = hls;
+    hls = null;
+    previous?.destroy();
+  };
   /** 本跳的失败原因：每次换源清零，于是上层读到的永远是这一次失败的解释。 */
   let lastFailure: LineFailureCode | null = null;
   const blank = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   const initialPoster = poster || blank;
   const art = new Artplayer({
-    container, url: '', poster: initialPoster, theme, volume: 1, autoplay: true, autoSize: false, isLive: false, lang: 'zh-cn', playsInline: true,
+    container, url: '', poster: initialPoster, theme, volume: 1, autoplay: false, autoSize: false, isLive: false, lang: 'zh-cn', playsInline: true,
     customType: {
       m3u8: (video: HTMLVideoElement, url: string) => {
-        hls?.destroy();
+        destroyHls();
         video.poster = initialPoster; video.playsInline = true;
         video.setAttribute('playsinline', 'true'); video.setAttribute('webkit-playsinline', 'true');
         if (Hls.isSupported()) {
-          hls = new Hls({ lowLatencyMode: false }); hls.loadSource(url); hls.attachMedia(video);
-          hls.on(Hls.Events.MANIFEST_PARSED, () => { void video.play().catch(() => { video.muted = true; void video.play().catch(() => {}); }); });
-          hls.on(Hls.Events.ERROR, (_e, data) => {
-            if (!data.fatal) return;
+          const instance = new Hls({ lowLatencyMode: false });
+          hls = instance;
+          const current = (): boolean => hls === instance;
+          instance.on(Hls.Events.MANIFEST_PARSED, () => {
+            if (!current()) return;
+            void video.play().catch(() => {
+              if (!current()) return;
+              video.muted = true; void video.play().catch(() => {});
+            });
+          });
+          instance.on(Hls.Events.ERROR, (_e, data) => {
+            if (!data.fatal || !current()) return;
             lastFailure = classifyHlsFailure(String(data.details ?? data.type ?? ''));
             // 文案不提域名也不提源站名：界面与日志都不该出现上游品牌（AGENTS.md 二.1）。
             onError('播放中断，正在尝试备用线路', lastFailure);
           });
+          instance.loadSource(url);
+          if (current()) instance.attachMedia(video);
         } else if (video.canPlayType('application/vnd.apple.mpegurl')) { video.src = url; void video.play().catch(() => {}); }
         else { lastFailure = 'decode_error'; onError('当前设备不支持 HLS 播放，需在 Android 端验证', lastFailure); }
       }
     }
   });
   return {
-    play: () => void art.play(), pause: () => art.pause(), playing: () => art.playing,
+    play: () => { void art.play().catch(() => {}); }, pause: () => art.pause(), playing: () => art.playing,
     currentTime: () => art.currentTime, setCurrentTime: (s) => void (art.currentTime = s),
     duration: () => art.duration, volume: () => art.video.volume, setVolume: (v) => void (art.video.volume = clamp(v, 0, 1)),
     toggleControls: () => art.controls.toggle(),
     playbackRate: () => art.video.playbackRate,
     setPlaybackRate: (rate) => { art.video.playbackRate = rate; },
-    setSource: (u, m) => { lastFailure = null; art.type = m === 'video/mp4' ? 'mp4' : 'm3u8'; art.url = u; void art.play().catch(() => {}); },
+    setSource: (u, m) => { destroyHls(); lastFailure = null; art.type = m === 'video/mp4' ? 'mp4' : 'm3u8'; art.url = u; void art.play().catch(() => {}); },
     failureCode: () => lastFailure,
     on: (event, handler) => {
       const name = `video:${event}`;
@@ -82,6 +97,6 @@ export const createArtEngine: EngineFactory = async ({ container, theme, poster,
       return () => art.off(name, wrapped);
     },
     // autoSize() 会按媒体比例缩小容器；舞台尺寸必须由宿主 CSS 保持。
-    resize: () => { art.emit('resize'); }, destroy: () => { hls?.destroy(); art.destroy(); }
+    resize: () => { art.emit('resize'); }, destroy: () => { destroyHls(); art.destroy(); }
   };
 };

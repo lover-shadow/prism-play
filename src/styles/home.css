@@ -99,27 +99,45 @@
 .poster-corner-badge--recommend { color: var(--badge-recommend); }
 .poster-body { display: flex; flex: 1 1 auto; flex-direction: column; gap: 2px; min-width: 0; }
 .poster-title { font-size: var(--text-sm); font-weight: 600; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.poster-tag { font-size: var(--text-2xs); color: var(--meta); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* —— 卡片信息块（HP-11 / HP-12）：主分类 + 副标签同行，元信息另起一行，摘要只给得出真数据时出现 ——
+ * 每一行都是"有依据才产生节点"，所以这里的默认状态是**塌缩**而不是占位：`.poster-facts` /
+ * `.poster-synopsis` 基类一律 display: none，由排版模式逐档放行；没有摘要也没有年份时，
+ * 卡片就只剩标题与分类，信息块自然变矮，不留一块撑高的空白。 */
+.poster-meta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-1); min-width: 0; }
+.poster-tag { min-width: 0; font-size: var(--text-2xs); color: var(--meta); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.poster-subtag { min-width: 0; font-size: var(--text-2xs); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.poster-facts { display: none; align-items: center; flex-wrap: wrap; gap: var(--space-1); min-width: 0; }
+.poster-fact { font-size: var(--text-2xs); color: var(--meta); white-space: nowrap; font-variant-numeric: tabular-nums; }
 /* 简介只在图文列表流出现：紧凑与书架模式塞不下，也不该塞。 */
 .poster-synopsis { display: none; font-size: var(--text-xs); color: var(--fg-2); line-height: var(--leading-snug); }
 
-/* —— A-4 紧凑 3 列的卡片内收：内边距与行距同步收紧，把宽度还给海报本身 ——
- * 只在 compact-3 覆盖，不动 `.poster-*` 基类：四模共用一套卡片内部样式是既有约定（AC-04）。
- * A-5：海报卡右上角分享浮层（旧 `.poster-share`）已物理拔除，卡片只留"进详情"一个动作，
- * 保留左上角微光角标与右下角集数徽章的黄金对角（两条规则都在上面，未移动）。 */
-.grid-posters-compact-3 .poster-open { padding: var(--space-1); gap: 2px; }
+/* —— A-4 + HP-10 密集档的卡片内收：描边、底版与内边距是三条独立的账，一并归零 ——
+ * 旧写法把 `1px 描边 + --surface 底版 + 4px 内边距` 叠在 4px 列间距上，海报四周其实是一圈复合空壳。
+ * 密集档现在撤掉描边与底版（卡片直接坐在页面底色上，海报自身的圆角与底板已经够分隔），
+ * 内边距单独收到 `--poster-pad-card`；标题/图文的可读字号不动，点击单位仍是整卡一颗按钮。 */
+.grid-posters-compact-3 .poster-open { padding: var(--poster-pad-card); gap: var(--poster-pad-card); }
 .grid-posters-compact-3 .poster-body { gap: 1px; }
+.grid-posters-compact-3 .poster-card,
+.grid-posters-bookshelf-4 .poster-card { border: 0; background: transparent; }
+/* 密集档的副标签只许一行截断：三列卡宽约 110px，允许 wrap 就是让信息块自己长到两三行，
+   刚收回来的密度会原额退还给行高。窄屏下溢出部分由 `.poster-subtag` 的省略号收口。 */
+.grid-posters-compact-3 .poster-meta { flex-wrap: nowrap; }
 
-/* 模式三·书架：书脊式微缩，只留海报与一行微字。 */
+/* 模式三·书架：书脊式微缩，只留海报与一行微字（元信息行整块塌掉，不是隐藏后留白）。 */
 .grid-posters-bookshelf-4 .poster-title { font-size: var(--text-2xs); }
 .grid-posters-bookshelf-4 .poster-ep-badge,
-.grid-posters-bookshelf-4 .poster-tag { display: none; }
+.grid-posters-bookshelf-4 .poster-meta { display: none; }
 
-/* 模式四·图文列表流：左海报定宽、右图文弹性、两行截断（UIUX §4.1）。 */
+/* 模式二·大图舒适：主分类 + 副标签 + 有依据的年份/地区/语言，摘要仍不进（一屏 2×3 的观感优先）。 */
+.grid-posters-comfort-2 .poster-facts { display: flex; }
+
+/* 模式四·图文列表流：左海报定宽、右图文弹性，摘要按 `--poster-synopsis-rows` 用满右侧行数是 HP-11 的正解
+   （旧写法写死 2 行，真目录里最长 30 字的短摘要下面是一片空白）。 */
 .grid-posters-list-1 .poster-open { flex-direction: row; align-items: flex-start; gap: var(--space-3); }
 .grid-posters-list-1 .poster-media { flex: 0 0 auto; width: 88px; }
 .grid-posters-list-1 .poster-title { font-size: var(--text-base); }
-.grid-posters-list-1 .poster-synopsis { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.grid-posters-list-1 .poster-facts { display: flex; }
+.grid-posters-list-1 .poster-synopsis { display: -webkit-box; -webkit-line-clamp: var(--poster-synopsis-rows); line-clamp: var(--poster-synopsis-rows); -webkit-box-orient: vertical; overflow: hidden; }
 
 /* —— 骨架屏与 A-4 无感加载（旧【加载更多】按钮已物理拔除，翻页由哨兵触发） —— */
 .poster-card--skeleton { pointer-events: none; }

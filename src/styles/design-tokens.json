@@ -252,11 +252,17 @@
           "tier": "C-extension",
           "description": "已播进度条"
         },
+        "player-chrome-scrim": {
+          "value": "linear-gradient(to bottom, rgba(8, 10, 16, 0.68) 0%, rgba(8, 10, 16, 0) 100%)",
+          "type": "paint",
+          "tier": "C-extension",
+          "description": "HP-08 全屏控制层顶部渐隐遮罩：替掉旧的横贯实心带与下边框。定义在通用 :root 段（与 --badge-* 同理），播放器内部恒为全黑沉浸，故深浅双模同值、结构上不可能漂移"
+        },
         "badge-ai": {
           "value": "#38BDF8",
           "type": "color",
           "tier": "C-extension",
-          "description": "海报角标·AI精品：科技冰蓝。角标底板恒为深色，故深浅双模取同值；复用播放器音量水滴蓝，避免新增色值"
+          "description": "海报角标·Ai剧（HP-10：类型事实，不是质量评价；旧的质量化文案已撤）：科技冰蓝。角标底板恒为深色，故深浅双模取同值；复用播放器音量水滴蓝，避免新增色值"
         },
         "badge-hot": {
           "value": "#E5A93C",
@@ -495,11 +501,17 @@
           "type": "color",
           "tier": "C-extension"
         },
+        "player-chrome-scrim": {
+          "value": "linear-gradient(to bottom, rgba(8, 10, 16, 0.68) 0%, rgba(8, 10, 16, 0) 100%)",
+          "type": "paint",
+          "tier": "C-extension",
+          "description": "HP-08 全屏控制层顶部渐隐遮罩：替掉旧的横贯实心带与下边框。定义在通用 :root 段（与 --badge-* 同理），播放器内部恒为全黑沉浸，故深浅双模同值、结构上不可能漂移"
+        },
         "badge-ai": {
           "value": "#38BDF8",
           "type": "color",
           "tier": "C-extension",
-          "description": "海报角标·AI精品：科技冰蓝。角标底板恒为深色，故深浅双模取同值；复用播放器音量水滴蓝，避免新增色值"
+          "description": "海报角标·Ai剧（HP-10：类型事实，不是质量评价；旧的质量化文案已撤）：科技冰蓝。角标底板恒为深色，故深浅双模取同值；复用播放器音量水滴蓝，避免新增色值"
         },
         "badge-hot": {
           "value": "#E5A93C",
@@ -780,8 +792,9 @@
       "type": "dimension"
     },
     "tabbarHeight": {
-      "value": "56px",
-      "type": "dimension"
+      "value": "48px",
+      "type": "dimension",
+      "description": "HP-09 底部导航承载岛高度（含内边距与 1px 描边）：56px→48px 收的是留白，三枚 Tab 的 44px 触区不变"
     },
     "safeAreaBottom": {
       "value": "env(safe-area-inset-bottom, 0px)",
@@ -808,7 +821,47 @@
     "tabbarContentMax": {
       "value": "360px",
       "type": "dimension",
-      "description": "底部导航栏内容承载区限宽：全面屏上四颗 Tab 收拢到中央拇指黄金手势区，栏底背景与分隔线仍铺满视口"
+      "description": "HP-09 底部导航承载区最大宽度：自本批起同时约束**背景 + 描边 + 圆角 + 内容**（旧口径只收内容、底色仍横贯全屏，真机因此量到一条厚底栏）"
+    },
+    "tabbarInsetX": {
+      "value": "12px",
+      "type": "dimension",
+      "description": "HP-09 底栏承载岛与视口左右边的留白（试验值，须在 360/393/873 真实视口样稿里校准后才定稿）"
+    },
+    "posterGapTight": {
+      "value": "4px",
+      "type": "dimension",
+      "description": "HP-10 密集档（compact-3 / bookshelf-4）横纵间距唯一真相，断点只加列数不换回 --space-2/4；6px→4px 为试验值"
+    },
+    "posterGapWide": {
+      "value": "12px",
+      "type": "dimension",
+      "description": "HP-10 可读优先档（comfort-2 / list-1）横纵间距；comfort-2 由 16px（平板 20px）收到此值"
+    },
+    "posterPadCard": {
+      "value": "2px",
+      "type": "dimension",
+      "description": "HP-10 密集档卡片内边距（旧 --space-1=4px）。描边与底版已在密集模式一并撤掉，三条账分开核：描边 0、底版 0、内边距 2px"
+    },
+    "posterSynopsisRows": {
+      "value": "3",
+      "type": "dimension",
+      "description": "HP-11 图文列表流右侧的摘要行数（旧写死 2 行，短摘要下面留大片空白）"
+    },
+    "playerHit": {
+      "value": "44px",
+      "type": "dimension",
+      "description": "HP-08 全屏控制层按钮的**命中区**下限（与 interaction.touchTargetMin 同源）：视觉收紧凑不得顺手压缩触区"
+    },
+    "playerGlyph": {
+      "value": "24px",
+      "type": "dimension",
+      "description": "HP-08 全屏控制层可见图标尺寸（Lucide 锁定 16/20/24 档之一），与命中区 44px 分账"
+    },
+    "playerChromeHeight": {
+      "value": "48px",
+      "type": "dimension",
+      "description": "HP-08 全屏控制层可视带高（另有 safe-area-inset-top 叠加）。非全屏由 player-host.css 归零，因为画面里没有这条带子"
     },
     "badgePadY": {
       "value": "2px",
@@ -827,10 +880,11 @@
         "desktop": 6
       },
       "gap": {
-        "mobile": "12px",
-        "tablet": "16px",
-        "desktop": "16px"
+        "mobile": "4px",
+        "tablet": "4px",
+        "desktop": "4px"
       },
+      "gapToken": "posterGapTight",
       "isDefault": true
     },
     "comfort2": {
@@ -843,10 +897,11 @@
         "desktop": 4
       },
       "gap": {
-        "mobile": "16px",
-        "tablet": "20px",
-        "desktop": "20px"
+        "mobile": "12px",
+        "tablet": "12px",
+        "desktop": "12px"
       },
+      "gapToken": "posterGapWide",
       "isDefault": false
     },
     "bookshelf4": {
@@ -859,10 +914,11 @@
         "desktop": 8
       },
       "gap": {
-        "mobile": "8px",
-        "tablet": "12px",
-        "desktop": "12px"
+        "mobile": "4px",
+        "tablet": "4px",
+        "desktop": "4px"
       },
+      "gapToken": "posterGapTight",
       "isDefault": false
     },
     "list1": {
@@ -876,9 +932,10 @@
       },
       "gap": {
         "mobile": "12px",
-        "tablet": "16px",
-        "desktop": "16px"
+        "tablet": "12px",
+        "desktop": "12px"
       },
+      "gapToken": "posterGapWide",
       "isDefault": false
     }
   }

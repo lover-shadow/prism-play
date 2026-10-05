@@ -1,4 +1,5 @@
 import type { ContentItem, TitleDetail } from '../../../edge/src/types/api';
+import { PUBLIC_METADATA_FIELDS, sanitizePublicMetadata } from '../../../edge/src/library/metadata-policy.mjs';
 
 /** Client-only identity: episodeNumber is local to a work, NEVER a D1 content_episodes id. */
 const LOCAL_EPISODE_IDS = Symbol('manifest-local-episode-ids');
@@ -40,6 +41,17 @@ export function adaptTitleDetail(value: unknown, workId: string): TitleDetail {
         ? { durationSeconds: entry.durationSeconds } : {})
     };
   });
-  const detail: TitleDetail = { item: item as unknown as ContentItem, episodes };
+  const detail: TitleDetail = { item: sanitizeCard(item), episodes };
   return manifest ? Object.assign(detail, { [LOCAL_EPISODE_IDS]: true as const }) : detail;
+}
+
+/**
+ * HP-11/HP-12：详情卡片上的可选元数据一律过策略源消毒。先删干净这五个键再写回合规值，
+ * 越界或残留 HTML 的原料才会**物理消失**——只 Object.assign 会留下越界原值，那是最坏的假绿。
+ * 纯函数：不改动传入的响应对象；读侧消毒而非抛错，一部剧不能因为一条脏摘要就打不开。
+ */
+function sanitizeCard(item: Record<string, unknown>): ContentItem {
+  const card = { ...item } as Record<string, unknown>;
+  for (const key of PUBLIC_METADATA_FIELDS) delete card[key];
+  return Object.assign(card, sanitizePublicMetadata(item)) as unknown as ContentItem;
 }

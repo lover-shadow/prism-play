@@ -10,6 +10,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { LOCAL, MOVIE_CATEGORY_BY_TYPE, PRIVATE_CHANNEL_ID, TAXONOMY_VERSION, coverHandle, makeWorkId, positiveNumber, toEpochSeconds } from './config-sources.mjs';
+import { cleanPlainText, normalizeSynopsis, publicWorkMetadata } from '../src/library/metadata-policy.mjs';
+import { stripPlatformNames } from '../src/library/platform-lexicon.mjs';
 
 // 与 edge/src/core/constants.ts 同源的权重：热分 = 周点击主导 + 总点击为辅 + 72h 内上新提振。
 const WEEK_WEIGHT = 0.6;
@@ -47,30 +49,23 @@ const RULES_BY_CHANNEL = { drama: DRAMA_RULES, anime: ANIME_RULES, documentary: 
 const FALLBACK_CATEGORY = { drama: '都市', movie: '动作', anime: '热血', documentary: '探索', [PRIVATE_CHANNEL_ID]: '精选' };
 
 /**
- * 文本归一：去标签、去 HTML 实体、**去绝对 URL**。
- * 上游 vod_blurb/vod_content 里实测混着 `http://site.douban.com/…`、`https://www.xxx/PV第101集…`
- * 这类脏文本，直接进分片就是去平台化泄露（公开前缀判据拦下过 5 条），所以在这里就地剥掉。
+ * 文本归一（去标签、去 HTML 实体、去上游 URL、折叠空白）与公开可选元数据的边界
+ * 只有 `edge/src/library/metadata-policy.mjs` 一份口径（HOME-PLAYER-REPAIR §3.3 B0 选定）。
+ * 这里历史上写过一套 stripTags + 30 字截断，那正是「简介被 30 字硬截断」的根因，
+ * 现在整段删除，只保留对策略源的调用；清洗规则改动一律发生在策略源，不在这里复刻。
  */
-function stripTags(value) {
-  return String(value ?? '')
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/https?:\/\/\S*/gi, ' ')
-    .replace(/\bwww\.\S*/gi, ' ')
-    .replace(/&[a-z]+;|&#\d+;/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 export function cleanTitle(raw) {
-  return stripTags(raw).slice(0, 50);
+  return cleanPlainText(raw).slice(0, 50);
 }
 
-/** §3.1 分片内 synopsis 恒为 ≤30 字短文本；空简介省略字段，不写「暂无简介」这类占位空洞文案。 */
+/**
+ * §3.1 分片内 synopsis 的边界是 SYNOPSIS_MAX_CODE_POINTS（240 Unicode 码点），不再是 30 字。
+ * 函数名保留 `shortSynopsis` 只因为四个既有调用点（本文件 / library-catalog / merge-public-library /
+ * public-provider）都在用它；改名会波及 B3 范围外的文件，语义以策略源为准。
+ * 空值与「暂无简介」占位返回 undefined，由调用方省略字段。
+ */
 export function shortSynopsis(raw) {
-  const text = stripTags(raw);
-  if (text === '') return undefined;
-  const characters = [...text];
-  return characters.length <= 30 ? text : `${characters.slice(0, 29).join('')}…`;
+  return normalizeSynopsis(raw, stripPlatformNames);
 }
 
 /** 分类归一：电影优先用上游真实类型（tid 即类型），其余频道走标题特征词，兜底给频道默认值。 */
@@ -127,7 +122,6 @@ export function normalizeWork(target, item, nowSeconds) {
   const title = cleanTitle(item.vod_name);
   const episodes = parseEpisodeLines(item.vod_play_url, target.provider.id);
   const firstPublishedAt = toEpochSeconds(item.vod_time, item.vod_time_add, nowSeconds);
-  const synopsis = shortSynopsis(item.vod_blurb || item.vod_content);
   const record = {
     id: workId,
     channelId: target.channelId,
@@ -143,13 +137,14 @@ export function normalizeWork(target, item, nowSeconds) {
     providerId: target.provider.id,
     sourceItemId: String(item.vod_id),
     upstreamUpdatedAt: toEpochSeconds(item.vod_time, null, nowSeconds),
-    updatedAt: nowSeconds
+    updatedAt: nowSeconds,
+    // HP-11/HP-12：可选公开元数据只在原料给得出可信值时长出来，缺供即无键。
+    ...publicWorkMetadata(target.channelId, item, stripPlatformNames)
   };
   if (/^https?:\/\//i.test(String(item.vod_pic ?? '').trim())) {
     record.coverUrl = coverHandle(workId);
     record.coverVersion = 'v1';
   }
-  if (synopsis !== undefined) record.synopsis = synopsis;
   record.hotScore = computeHotScore(record.hitsWeek, record.hitsTotal, firstPublishedAt, nowSeconds);
   return record;
 }

@@ -20,6 +20,7 @@ import {
   type BadgeKind,
   type GenreOf
 } from '../../src/core/recommendation';
+import { HOME_PAGE_TARGET, HOME_TRACK_TARGETS, createHomeRound } from '../../src/core/home-recommendation';
 
 const item = (id: string, overrides: Partial<ContentItem> = {}): ContentItem => ({
   id, channelId: 'drama', title: `剧目${id}`, category: '都市', isPrivate: false, ...overrides
@@ -208,8 +209,7 @@ describe('AC-28 固化块零重排 / 尾块可重排（§1.8.4 累积集合切�
   });
 });
 
-describe('AC-28 字段缺失降级（§1.8.1）与端侧耗时量级', () => {
-  it('isAi / isHot 全缺且无本地画像：20 条节奏不变，且一个角标都不贴', () => {
+describe('AC-28 字段缺失降级（§1.8.1）与端侧耗时量级', () => {  it('isAi / isHot 全缺且无本地画像：20 条节奏不变，且一个角标都不贴', () => {
     const plain = sequence(45, 'c').map((id) => item(id));
     const result = weave(plain, {}, { genreOf: everyGenre });
 
@@ -240,5 +240,57 @@ describe('AC-28 字段缺失降级（§1.8.1）与端侧耗时量级', () => {
     }
 
     expect(best).toBeLessThan(2);
+  });
+});
+
+/**
+ * HP-05 与 AC-28 的互不污染（计划 §3.2「首页配额只作用于综合首页，也不把 60 改成 20」）。
+ * 本文件继续服务频道目录的旧 7/7/6 口径（`verify_acceptance.py` 的 AC-28 署名断言在此），
+ * 综合首页的 60 作品独占轨配额由 `69-home-quota.test.ts` 验收——两台机器共用候选池，绝不互套常量。
+ */
+describe('HP-05 首页配额与 AC-28 频道目录互不套常量', () => {
+  const pool60 = (): ContentItem[] => sequence(60, 'c').map((id, index) => item(id, {
+    isAi: index < 20 ? true : undefined,
+    isHot: index >= 20 && index < 24 ? true : undefined,
+    channelId: index < 24 ? 'drama' : index < 36 ? 'movie' : index < 42 ? 'documentary' : 'anime'
+  }));
+  const quota = (allocation: readonly { track: string; requested: number }[], track: string): number =>
+    allocation.find((entry) => entry.track === track)?.requested ?? -1;
+
+  it('HP-05 两台机器的目标口径同时成立：60 作品配额页 vs 20 条 7/7/6 块', () => {
+    const round = createHomeRound({ candidates: pool60(), revision: 5, round: 1, coverage: 'full', scores: {} });
+    const woven = weave(pool60(), {}, { genreOf: everyGenre });
+
+    expect(HOME_PAGE_TARGET).toBe(60);
+    expect(WEAVE_BLOCK_SIZE).toBe(20);
+    expect(round.record.pageSize).toBe(60);
+    expect(round.record.pages).toBe(1);
+    expect(woven.blocks).toBe(3);
+    expect(woven.items).toHaveLength(60);
+  });
+
+  it('HP-05 首页配额不写进频道目录：同一 20 条块喂两台机器各按自己的目标走', () => {
+    const block = fullBlock();
+    const woven = weave(block, {}, { genreOf: everyGenre });
+    const round = createHomeRound({ candidates: block, revision: 5, round: 2, coverage: 'full', scores: {} });
+
+    // 旧引擎：块长 20、A 槽 7，逐槽判定与既有 AC-28 用例一字未改。
+    expect(BLOCK_PATTERN).toHaveLength(WEAVE_BLOCK_SIZE);
+    expect(BLOCK_PATTERN.filter((slot) => slot === 'A')).toHaveLength(AI_QUOTA);
+    expect(woven.items.filter((entry) => entry.isAi === true)).toHaveLength(AI_QUOTA);
+    // 新引擎：席位目标仍按 20/4/12/6/18 记账，只是供给不足时如实记缺额，绝不因旧常量变成 7/7/6。
+    expect(quota(round.record.allocation, 'ai')).toBe(20);
+    expect(quota(round.record.allocation, 'preference')).toBe(18);
+    expect(round.record.allocation.reduce((sum, entry) => sum + entry.requested, 0)).toBe(HOME_PAGE_TARGET);
+    expect(round.record.allocation.find((entry) => entry.track === 'ai')?.actual).toBe(AI_QUOTA);
+    expect(round.record.allocation.find((entry) => entry.track === 'ai')?.deviation).toBe(13);
+  });
+
+  it('HP-05 不把 60 改成 20：首页展示单位与频道目录传输分页各自独立', () => {
+    const round = createHomeRound({ candidates: pool60(), revision: 5, round: 3, coverage: 'full', scores: {} });
+    expect(round.page(0).items).toHaveLength(HOME_PAGE_TARGET);
+    expect(round.page(0).items.length).toBeGreaterThan(WEAVE_BLOCK_SIZE);
+    expect(HOME_TRACK_TARGETS.ai).toBe(20);
+    expect(AI_QUOTA).toBe(7);
   });
 });

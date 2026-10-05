@@ -21,6 +21,8 @@ import {
 import { buildLibraryCatalog, readHarvestMetadata } from './library-catalog.mjs';
 import { buildWorkFacts, buildWorkFactPacks, serializeManifest } from './work-fact-packs.mjs';
 import { buildPublicSearch, readSearchVocabulary } from './public-search-projection.mjs';
+import { assertMetadataBounds, CATALOG_DIRECTORY_MAX_BYTES } from '../src/library/metadata-policy.mjs';
+import { containsPlatformName } from '../src/library/platform-lexicon.mjs';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(SCRIPT_DIR, '../..');
@@ -29,10 +31,10 @@ const OUT_DIR = path.join(ROOT, 'edge/cache/library');
 const SEED_DIR = path.join(ROOT, 'android/app/src/main/assets/seed');
 
 const CHANNELS_TOPOLOGY = [
-  { id: 'drama', name: '短剧精选', order: 1, requiresTier: [], categories: ['战神', '逆袭', '都市', '古装', '甜宠', '悬疑'] },
-  { id: 'movie', name: '院线电影', order: 2, requiresTier: [], categories: ['动作', '喜剧', '科幻', '悬疑', '爱情'] },
-  { id: 'anime', name: '热血动漫', order: 3, requiresTier: [], categories: ['热血', '玄幻', '科幻', '治愈', '冒险'] },
-  { id: 'documentary', name: '人文纪录', order: 4, requiresTier: [], categories: ['自然', '历史', '科技', '美食', '探索'] }
+  { id: 'drama', name: '精彩短剧', order: 1, requiresTier: [], categories: ['战神', '逆袭', '都市', '古装', '甜宠', '悬疑'] },
+  { id: 'movie', name: '电影仓库', order: 2, requiresTier: [], categories: ['动作', '喜剧', '科幻', '悬疑', '爱情'] },
+  { id: 'documentary', name: '纪录片', order: 3, requiresTier: [], categories: ['自然', '历史', '科技', '美食', '探索'] },
+  { id: 'anime', name: '动漫', order: 4, requiresTier: [], categories: ['热血', '玄幻', '科幻', '治愈', '冒险'] }
 ];
 
 function gzipFile(src, dest) {
@@ -69,6 +71,25 @@ export function syncSeedFiles(entries) {
   }
 }
 
+/**
+ * §3.1 目录总量守门（HP-11）。新增可选元数据把目录推过端侧快照配额时**拒绝发布并报错**，
+ * 绝不为凑绿灯丢掉条目——丢条目是拿覆盖率换颜色，比超限更坏。
+ * 同时逐条复核策略源边界，越界元数据根本出不了这道门。返回目录实际字节数供打包日志与测试对账。
+ */
+export function assertCatalogDirectoryBudget(channels) {
+  let bytes = 0;
+  for (const items of Object.values(channels)) {
+    for (const item of items) {
+      assertMetadataBounds(item, `catalog item ${item.id}`, containsPlatformName);
+      bytes += Buffer.byteLength(JSON.stringify(item), 'utf8');
+    }
+  }
+  if (bytes > CATALOG_DIRECTORY_MAX_BYTES) {
+    throw new Error(`Catalog directory exceeds the byte budget: ${bytes} > ${CATALOG_DIRECTORY_MAX_BYTES}（拒绝发布，不截断条目）`);
+  }
+  return bytes;
+}
+
 export async function packageAndPublish(options = {}) {
   const { publish = false, revision = 1, dbPath = DB_PATH,
     outDir = OUT_DIR, harvestDir = path.join(ROOT, 'edge/cache/harvest'), syncSeed = false } = options;
@@ -97,6 +118,9 @@ export async function packageAndPublish(options = {}) {
     db.close();
   }
   console.log('真实字段统计:', JSON.stringify(catalog.report));
+  const catalogBytes = assertCatalogDirectoryBudget(catalog.channels);
+  console.log(`公开元数据供给覆盖: ${JSON.stringify(catalog.report.metadataCoverage)}`);
+  console.log(`目录分片合计体积: ${catalogBytes} 字节 (配额 ${CATALOG_DIRECTORY_MAX_BYTES})`);
   fs.mkdirSync(ASSETS_DIR, { recursive: true });
 
   const files = [];
@@ -203,7 +227,7 @@ export async function packageAndPublish(options = {}) {
 
   if (syncSeed) {
     syncSeedFiles([[bundlePath, path.join(ROOT, 'public/seed/catalog-bundle.json')],
-      [bundleGzPath, path.join(SEED_DIR, 'catalog-bundle.json.gz')], [inputPath, path.join(SEED_DIR, 'library.db')]]);
+      [bundleGzPath, path.join(SEED_DIR, 'catalog-bundle.json.gz')]]);
     console.log('全部验证完成，种子文件已原子替换至 Android 与 Web 目录');
   }
   return { filesCount: files.length, kvEntries, manifest, report: catalog.report,

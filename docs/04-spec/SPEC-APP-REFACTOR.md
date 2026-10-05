@@ -55,12 +55,13 @@ npm run verify:acceptance  # 30 项验收矩阵（AC-01~30）
 
 ### 2.1 目录分片（`/api/catalog?channel&category&page&pageSize=60`）
 
-`pageSize` 恒为 **60**，与 R2 分片一一对应（Worker 零拼接直出）。item 字段为 `ContentItem` 超集：
+`pageSize` 恒为 **60**，与 R2 分片一一对应（Worker 零拼接直出）。item字段为`ContentItem`超集，旧缓存可不含新增可选字段：
 ```jsonc
 { "id","channelId","title","category","isPrivate":false,"coverUrl","coverVersion",
-  "synopsis","episodeCount","isAi","isHot","firstPublishedAt","hitsTotal" }
+  "synopsis","episodeCount","isAi","isHot","firstPublishedAt","hitsTotal",
+  "tags?","releaseYear?","region?","language?" }
 ```
-（`firstPublishedAt`/`hitsTotal` 为新增可选字段，供本地榜单排序。）
+摘要最多240 Unicode code points；副标签仅可信受控题材/风格，最多6项、每项最多12 code points；年份仅来源明确四位值，地区/语言最多64 code points。`firstPublishedAt`/`hitsTotal`为可选本地排序字段；不得将搜索词、片名、制作类型或上架日期伪装为展示元数据。
 
 ### 2.2 剧集清单（`/api/titles/{workId}`，打开剧目详情时惰性拉取并本地缓存）
 

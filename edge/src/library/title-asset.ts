@@ -17,6 +17,7 @@ import type { ChannelId, ContentItem } from '../types/api';
 import { CHANNEL_IDS } from '../types/api';
 import type { AssetRejection, AssetVerdict } from './contract';
 import { accept, isCount, isHttpUrl, isNonEmptyText, isRecord, isSafeWorkId, reject } from './contract';
+import { sanitizePublicMetadata } from './metadata-policy.mjs';
 
 export interface EpisodeLine {
   /** Abstract provider code (`provider_m1` style): never a brand name, per AGENTS.md §二.1. */
@@ -48,6 +49,11 @@ export interface TitleAsset {
   isHot?: boolean;
   firstPublishedAt?: number;
   hitsTotal?: number;
+  /** HP-11/HP-12 可选公开元数据，边界与清洗口径来自 metadata-policy（单一策略源）。 */
+  tags?: string[];
+  releaseYear?: number;
+  region?: string;
+  language?: string;
 }
 
 /** §3.2 + the compat `item` projection; the wire shape of `GET /api/titles/{titleId}`. */
@@ -122,12 +128,14 @@ export function parseTitleAsset(raw: string, expectedWorkId: string): AssetVerdi
     hasCover: isNonEmptyText(parsed.coverUrl)
   };
   if (typeof parsed.coverVersion === 'string' && parsed.coverVersion !== '') asset.coverVersion = parsed.coverVersion;
-  if (typeof parsed.synopsis === 'string' && parsed.synopsis !== '') asset.synopsis = parsed.synopsis;
   if (isCount(parsed.episodeCount)) asset.episodeCount = parsed.episodeCount;
   if (isCount(parsed.firstPublishedAt)) asset.firstPublishedAt = parsed.firstPublishedAt;
   if (isCount(parsed.hitsTotal)) asset.hitsTotal = parsed.hitsTotal;
   if (typeof parsed.isAi === 'boolean') asset.isAi = parsed.isAi;
   if (typeof parsed.isHot === 'boolean') asset.isHot = parsed.isHot;
+  // HP-11：可选元数据统一经策略源消毒后才落到卡片。旧 generation 缺这些键时 sanitize 返回空对象，
+  // 解析照样成功——这正是「旧产物仍可读取」的硬要求，越界值则整个消失而不是把整部剧打不开。
+  Object.assign(asset, sanitizePublicMetadata(parsed));
   return accept(asset);
 }
 
@@ -153,6 +161,10 @@ export function itemFromAsset(asset: TitleAsset, coverUrl?: string): ContentItem
   if (asset.isHot === true) item.isHot = true;
   if (asset.firstPublishedAt !== undefined) item.firstPublishedAt = asset.firstPublishedAt;
   if (asset.hitsTotal !== undefined) item.hitsTotal = asset.hitsTotal;
+  if (asset.tags !== undefined) item.tags = asset.tags;
+  if (asset.releaseYear !== undefined) item.releaseYear = asset.releaseYear;
+  if (asset.region !== undefined) item.region = asset.region;
+  if (asset.language !== undefined) item.language = asset.language;
   return item;
 }
 

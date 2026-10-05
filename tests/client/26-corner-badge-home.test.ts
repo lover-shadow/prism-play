@@ -45,7 +45,8 @@ afterEach(() => document.body.replaceChildren());
 describe('AC-29 微光角标 DOM：判定表说什么就贴什么，没说就留白', () => {
   it('AC-29 三种判定各出一颗左上角标，类名与文案由判定唯一决定', () => {
     const { node, grid } = gridHost();
-    const items = [entry('c-1'), entry('c-2', { episodeCount: 8 }), entry('c-3'), entry('c-4')];
+    // HP-10 之后渲染侧还要再核一次依据：`ai` 标只认 `isAi === true`，所以夹具必须给得出这条依据。
+    const items = [entry('c-1', { isAi: true }), entry('c-2', { episodeCount: 8 }), entry('c-3'), entry('c-4')];
     const badges = new Map<string, BadgeKind>([['c-1', 'ai'], ['c-2', 'hot'], ['c-3', 'recommend']]);
 
     grid.render(items, badges);
@@ -58,7 +59,9 @@ describe('AC-29 微光角标 DOM：判定表说什么就贴什么，没说就留
     expect(node.querySelector('[data-content-id="c-2"] .poster-ep-badge')).not.toBeNull();
     expect(node.querySelector('[data-content-id="c-3"] .poster-corner-badge')?.textContent).toBe('推荐');
     expect(node.querySelector('[data-content-id="c-4"] .poster-corner-badge')).toBeNull();
-    expect(CORNER_BADGE_LABEL.ai).toBe('AI精品');
+    // 口径迁移（HP-10）：`AI精品` 把制作类型说成了质量评价，逐字改回类型事实 `Ai剧`；
+    // 本用例的含义不变——文案仍由判定表唯一决定。
+    expect(CORNER_BADGE_LABEL.ai).toBe('Ai剧');
   });
 
   it('AC-29 不传判定表（或判定表为空）时零角标：留白是默认态，不是缺陷', () => {
@@ -73,7 +76,8 @@ describe('AC-29 微光角标 DOM：判定表说什么就贴什么，没说就留
 
   it('角标容器就是海报盒：与右下角集数标同盒对角，不新增第三层包装', () => {
     const { node, grid } = gridHost();
-    grid.render([entry('c-1')], new Map([['c-1', 'ai' as BadgeKind]]));
+    // HP-10 的渲染侧依据：贴 `ai` 标的数据必须真说得出 `isAi === true`。
+    grid.render([entry('c-1', { isAi: true })], new Map([['c-1', 'ai' as BadgeKind]]));
     const media = node.querySelector('.poster-media') as HTMLElement;
 
     expect(media.querySelector('.poster-corner-badge')).not.toBeNull();
@@ -155,15 +159,18 @@ describe('AC-28 首页挂接：网格顺序来自 weave()，分页语义一字�
     return { root, view, settleSecond: () => release?.(reply(catalog(page2, 2, page1.length + page2.length))) };
   }
 
-  it('AI 精品被提到块首槽并带【AI精品】角标，普通条目按判定留白', async () => {
+  it('AC-28 频道目录里 AI 短剧被提到块首槽并带【Ai剧】角标，普通条目按判定留白', async () => {
     seen.length = 0;
     const { root, view } = viewHarness([entry('x-1'), entry('x-2', { isAi: true, category: '战神' })]);
     await view.mount();
+    // HP-04 后启动停在综合首页；本用例证的是频道目录的 weave 口径，先点进真实频道再验。
+    (root.querySelector('[data-channel-id="drama"]') as HTMLButtonElement).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(seen).toContain('/api/catalog?channel=drama&page=1&pageSize=60');
     expect(Array.from(root.querySelectorAll('.poster-card')).map((card) => (card as HTMLElement).dataset.contentId))
       .toEqual(['x-2', 'x-1']);
-    expect(root.querySelector('[data-content-id="x-2"] .poster-corner-badge--ai')?.textContent).toBe('AI精品');
+    expect(root.querySelector('[data-content-id="x-2"] .poster-corner-badge--ai')?.textContent).toBe('Ai剧');
     expect(root.querySelectorAll('.poster-corner-badge').length).toBe(1);
     view.destroy();
   });
@@ -173,6 +180,8 @@ describe('AC-28 首页挂接：网格顺序来自 weave()，分页语义一字�
     const first = Array.from({ length: 20 }, (_, index) => entry(`b-${String(index + 1).padStart(2, '0')}`, { isAi: index < 3 }));
     const { root, view, settleSecond } = viewHarness(first, [entry('b-21'), entry('b-22', { isAi: true })]);
     await view.mount();
+    (root.querySelector('[data-channel-id="drama"]') as HTMLButtonElement).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     // 首屏 20 部落定后，尾部哨兵自己去接第二页——没有任何手动按钮参与。
     const before = Array.from(root.querySelectorAll('.poster-card')).map((card) => (card as HTMLElement).dataset.contentId);
@@ -197,7 +206,8 @@ describe('AC-28 首页挂接：网格顺序来自 weave()，分页语义一字�
     expect(Array.from(root.querySelectorAll('.poster-card')).map((card) => (card as HTMLElement).dataset.contentId))
       .toEqual(['q-1', 'q-2', 'q-3']);
     expect(root.querySelectorAll('.poster-corner-badge').length).toBe(0);
-    expect(root.querySelector('.home-grid-host')?.innerHTML).not.toMatch(/AI精品|热门/);
+    // 新口径与旧口径都不许出现：`Ai剧` 是 HP-10 的类型文案，`AI精品` 是被它替掉的质量措辞。
+    expect(root.querySelector('.home-grid-host')?.innerHTML).not.toMatch(/Ai剧|AI精品|热门/);
     view.destroy();
   });
 });

@@ -173,6 +173,31 @@ describe('缺陷组 4：全屏控件自动隐藏，暂停/缓冲/拖动/浮层�
     expect(rule(playerCss, '.prism-drawer__action')).toMatch(/min-height:\s*44px/);
     expect(playerCss).not.toMatch(/#[0-9A-Fa-f]{3,8}\b/);
   });
+
+  /**
+   * HP-08a（HOME-PLAYER-REPAIR §3 HP-08 / §5.1 HP-08a）：非全屏**画面内**不存在悬浮工具条。
+   *
+   * 上面那条"非全屏详情台不自动收起控件"钉的是收起判据（chrome 的可见类不被计时收掉），它今天仍然成立；
+   * 但真机缺陷是那条带子本身压在画面上。因此这一组钉的是另一件事：宿主样式把画面内 chrome
+   * **物理摘出非全屏**，同时详情侧的操作区（选集轨 + 全部剧集 + 投屏 + 沉浸全屏）一颗不少。
+   * 摘除走宿主 CSS 而不是删组件：全屏还要复用同一个 chrome，`data-action` 出口也必须留在树里。
+   */
+  it('HP-08a 非全屏由宿主把画面内 chrome 物理摘除，详情操作区仍完整', async () => {
+    const h = openHost();
+    await h.host.open('c1'); await settle();
+    const scoped = hostCss.match(
+      /\.prism-player-host:not\(\.prism-player-host--fullscreen\)[^{]*\.prism-player__chrome\s*\{[^}]*display:\s*none/
+    );
+    expect(scoped, '宿主缺"非全屏画面内 chrome 物理缺席"规则').not.toBeNull();
+    // chrome 节点仍在树里（全屏复用），但详情侧四个入口必须独立可达，不靠这条带子。
+    expect(h.q('.prism-player__chrome')).not.toBeNull();
+    for (const label of ['选集播放', '全部 3 集', '投屏', '沉浸全屏']) {
+      expect(h.mount.textContent, `详情侧缺少入口：${label}`).toContain(label);
+    }
+    h.mount.querySelector<HTMLElement>('.view-all-link')!.click();
+    expect(h.q<HTMLElement>('.prism-drawer')?.hidden).toBe(false);
+    h.host.close();
+  });
 });
 
 describe('缺陷组 5：详情状态文案只说数据能证明的事（R26-05）', () => {

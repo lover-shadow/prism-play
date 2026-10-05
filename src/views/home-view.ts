@@ -1,145 +1,182 @@
-/** 首页组合根：注入目录/同步/历史能力；拓扑、滚动、重复点击各自独立，不直接访问存储。 */
+/** 首页组合根：拓扑、滚动、重复点击与两条 feed（综合首页 / 频道目录）各自独立，视图不直接访问存储。 */
 
 // @ts-ignore Vite 的 CSS 副作用导入没有环境模块声明（tsconfig 未挂 vite/client），构建期由 Vite 处理。
 import '../styles/home.css';
 
-import type { CatalogResponse, ChannelId, ChannelItem, ChannelsResponse, ContentItem } from '../../edge/src/types/api';
+import type { ChannelId, ChannelItem, ContentItem } from '../../edge/src/types/api';
 import type { WatchHistoryRow } from '../core/storage/storage-domains';
-import { genrePreference, weave, type GenreOf } from '../core/recommendation';
+import type { HomeRoundRecord } from '../core/home-recommendation';
 import { isPosterMode, type PosterMode } from '../core/state/theme';
 import { ALL_CATEGORIES_LABEL } from '../components/capsule-rail';
-import { DEFAULT_CHANNEL_ID, pickDefaultChannel } from '../components/channel-bar';
+import { pickDefaultChannel } from '../components/channel-bar';
 import { createContinueCard } from '../components/continue-card';
 import { createModeSwitch, createPosterGrid } from '../components/poster-grid';
-import { clearChildren, detailForError, element, renderStateView, stateKindForError, type ViewStateKind } from '../components/state-views';
+import { clearChildren, detailForError, renderStateView, stateKindForError, type ViewStateKind } from '../components/state-views';
+import type { BadgeKind } from '../core/recommendation';
 import { attachHomeScroll, resolveScroller, smoothScrollToTop, type HomeScroll } from './home-scroll';
 import { createHomeTopology } from './home-topology';
-import { createHomeRepeat } from './home-repeat';
+import { createHomeController } from './home-refresh';
+import type { RefreshFeedback } from './home-repeat';
+import { createHomeFeed } from './home-composite';
+import type { DiscoveryReport } from './home-feeds';
+// 视图契约在 `home-contract.ts` 单处定义（§10 红线让路），导入面保持从本文件取。
+import type { HomeView, HomeViewDeps } from './home-contract';
+export type { HomeApi, HomeSnapshot, HomeView, HomeViewDeps } from './home-contract';
+import { createDirectoryFeed } from './home-directory';
+import { createHomeHosts, mountHomeLayout } from './home-layout';
+import { COMPOSITE_HOME_ID } from './home-nav';
 
-/** 单页拉取量：与目录分片契约同值（SPEC-APP-REFACTOR §2.1，`pageSize` 恒为 60）。 */
+/** 单页拉取量：与目录分片契约同值（SPEC-APP-REFACTOR §2.1，`pageSize` 恒为 60），也是首页一个推荐页的展示单位。 */
 export const HOME_PAGE_SIZE = 60;
-
-/** 主视图实际消费的两个端点：组合根注入的是"快照优先"门面（AC-01 / AC-18），视图不该看见它拿不到的端点。 */
-export interface HomeApi {
-  channels(): Promise<ChannelsResponse>;
-  catalog(input: { channel: string; category?: string; page?: number; pageSize?: number; revision?: number }): Promise<CatalogResponse>;
-  /** 可选的本地快照读取门面：0ms 同步读取已持久化的频道与剧目，供启动立刻展示 */
-  cachedSnapshot?(): { channels: ChannelsResponse | null; items(channel: string): ContentItem[] };
-}
-
-export interface HomeViewDeps {
-  api: HomeApi;
-  root: HTMLElement;
-  /** 外壳顶栏工具槽，缺省时排版器退回视图内。 */
-  headerAccessory?: HTMLElement | null;
-  posterMode: () => PosterMode;
-  onPosterModeChange: (mode: PosterMode) => void;
-  onOpenTitle: (contentId: string) => void;
-  onResume: (row: WatchHistoryRow) => void;
-  historyPreview: () => Promise<WatchHistoryRow[]>;
-  /** 回传当前频道供宿主挂/摘 FLAG_SECURE（AC-02-4）。 */
-  onChannelChange?: (channel: ChannelItem | null) => void;
-  pageSize?: number;
-  /** 打开全屏搜索 Overlay（A-3：搜索不再是 Tab）。未注入即整条搜索栏不渲染，不做只长样子的控件。 */
-  onSearch?: () => void;
-  /** main 注入真实目录同步；resolve 必须在新快照提交后。未注入则直接重读 api（本地门面可能仅缓存）。 */
-  syncCatalog?: () => Promise<void>;
-}
-
-export interface HomeView {
-  mount: () => Promise<void>;
-  refresh: () => Promise<void>;
-  setPosterMode: (mode: PosterMode) => void;
-  /** 触底续载的唯一入口：哨兵与调用方共用同一条路径，不留第二套翻页语义。 */
-  loadMore: () => void;
-  /** 宿主离页、打开 Overlay/播放器或其他导航时调用，打断重复序列并废弃在途视图结果。 */
-  interruptNavigation: () => void;
-  destroy: () => void;
-}
 
 export function createHomeView(deps: HomeViewDeps): HomeView {
   let reload: (() => Promise<void>) | null = null, initial: (() => Promise<void>) | null = null;
   let changeMode: ((mode: PosterMode) => void) | null = null;
   let recheck: (() => void) | null = null;
+  let showRecord: (() => HomeRoundRecord | null) | null = null;
+  let syncFeed: (() => Promise<void>) | null = null;
   let teardown: (() => void) | null = null, interrupt: (() => void) | null = null;
 
   function build(): void {
     const pageSize = deps.pageSize ?? HOME_PAGE_SIZE;
-    const view = element('div', 'home-view'), sticky = element('div', 'home-sticky');
-    const channelHost = element('div', 'home-channel-host'), railHost = element('div', 'home-capsule-host');
-    const continueHost = element('div', 'home-continue-host'), switchHost = element('div', 'home-mode-switch');
-    const gridHost = element('div', 'home-grid-host'), moreHost = element('div', 'home-more-host');
-    continueHost.hidden = true;
+    const nowSeconds = deps.nowSeconds ?? ((): number => Math.floor(Date.now() / 1000));
+    const hosts = createHomeHosts();
 
-    let channels: ChannelItem[] = [], items: ContentItem[] = [], historyRows: WatchHistoryRow[] = [];
+    let channels: ChannelItem[] = [], historyRows: WatchHistoryRow[] = [];
     let selectedChannelId: ChannelId | null = null, selectedCategory = ALL_CATEGORIES_LABEL;
-    let page = 1, total = 0, pageRevision: number | undefined, token = 0;
-    /** 网格是否处于可续载态：五态（empty / error / offline / disabled）下哨兵一律不放行。 */
-    let gridReady = false, appending = false;
+    /** HP-04：启动默认停在综合首页；它是纯客户端视图，因此这里只记状态，绝不把它写进任何请求参数。 */
+    let onHome = true, token = 0;
 
-    const repeat = createHomeRepeat({
-      top: () => smoothScrollToTop(resolveScroller(deps.root)), sync: deps.syncCatalog,
-      reload: refreshTopology,
-      invalidate: () => { ++token; gridReady = false; appending = false; },
-      failed: (error) => presentState(stateKindForError(error), { detail: detailForError(error), actionLabel: '重试', onAction: () => void repeat.refresh() })
+    const context = {
+      paint: (items: readonly ContentItem[], badges: ReadonlyMap<string, BadgeKind>) => {
+        grid.render(items, badges);
+        topology.refreshRankings();
+        controller.observePaint(items);                                   // HP-06c：只有此刻挂上去的公开卡片才可能被记为曝光
+      },
+      state: presentState,
+      fail: (error: unknown, retry: () => void): void => presentState(stateKindForError(error), { detail: detailForError(error), actionLabel: '重试', onAction: retry }),
+      skeleton: () => grid.showSkeleton(),
+      pending: (pending: boolean) => scroll.setPending(pending),
+      recheck: () => scroll.recheck(),
+      isCurrent: (at: number) => at === token,
+      exposed: () => controller.exposed()
+    };
+    const retryScope = (): void => { void loadScope(++token, false); };
+    const retryTopology = (): void => { void refreshTopology(); };
+    const directory = createDirectoryFeed({
+      ...context, api: deps.api, pageSize, scope: () => ({ channel: onHome ? null : selectedChannelId, category: selectedCategory }),
+      channels: () => channels, historyRows: () => historyRows, nowSeconds, goFallback: (id) => { if (id !== null) selectChannel(id); },
+      retryScope, retryTopology
     });
-    interrupt = repeat.interrupt;
+    const feed = createHomeFeed({
+      ...context, api: deps.api, pageSize, channels: () => channels, historyRows: () => historyRows, nowSeconds,
+      retryScope, retryTopology, token: () => token,
+      ...(deps.reputationOf === undefined ? {} : { reputationOf: deps.reputationOf })
+    });
+    const active = () => (onHome ? feed : directory);
+    function loadScope(at: number, append: boolean): Promise<void> { return active().load(at, append); }
+
+    /**
+     * HP-06：显式刷新的发现入口＝**先检查可获得的内容更新（云端拓扑＋画像原料），再对本范围候选重选**。
+     * 拓扑读失败只影响"内容更新"这一条：本机快照照常重排（§3.2「更新失败保留上一可用快照」）；
+     * 候选读失败原样抛出——空缓存不许被说成"已更新"。代次变了就直接交出空回执，不回写任何画面。
+     */
+    async function discover(): Promise<DiscoveryReport> {
+      const none: DiscoveryReport = { changed: false, candidates: 0, delivered: 0, exhausted: true };
+      const at = token;
+      try {
+        const response = await deps.api.channels();
+        if (at !== token) return none;
+        channels = [...response.channels];
+        anchorSelection();
+        paintTopology();
+      } catch {
+        if (at !== token) return none;                                       // 拓扑读不到：沿用上一份可用快照
+      }
+      await loadContinue(at);
+      if (at !== token) return none;
+      return active().restart(at);
+    }
+
+    /** HP-06a/b：两条来路都汇到同一条刷新入口；状态条负责文案，视图只在本地也排不出来时补五态。 */
+    function reportFeedback(state: RefreshFeedback): void {
+      controller.feedback(state);
+      deps.onFeedback?.(state);
+      if (state.phase !== 'failed' || active().hasContent()) return;
+      const cause = state.error ?? state.syncError;
+      presentState(cause === undefined ? 'error' : stateKindForError(cause), {
+        detail: detailForError(cause), actionLabel: '重试', onAction: () => { void controller.refresh(); }
+      });
+    }
+
+    interrupt = () => controller.interrupt();
     const topology = createHomeTopology({
-      channelHost, railHost, onSearch: deps.onSearch, onNavigate: repeat.interrupt,
-      items: () => selectedChannelId ? deps.api.cachedSnapshot?.().items(selectedChannelId) ?? items : [],
-      onOpenTitle: deps.onOpenTitle,
+      channelHost: hosts.channelHost, railHost: hosts.railHost, keyScope: deps.root, onSearch: deps.onSearch, onNavigate: () => controller.interrupt(),
+      items: () => directory.rankingsItems(), onOpenTitle: deps.onOpenTitle,
+      onSelectHome: () => { if (onHome) controller.click('home'); else selectHome(); },
       onSelectChannel: (channelId) => {
-        if (channelId === selectedChannelId) repeat.click(`channel:${channelId}`); else selectChannel(channelId);
+        if (channelId === selectedChannelId && !onHome) controller.click(`channel:${channelId}`); else selectChannel(channelId);
       },
       onSelectCategory: (category) => {
-        if (category === selectedCategory) { repeat.click(`category:${selectedChannelId}:${category}`); return; }
-        repeat.interrupt(); selectedCategory = category; page = 1; pageRevision = undefined;
-        smoothScrollToTop(resolveScroller(deps.root)); void loadCatalog(++token, 1);
+        if (category === selectedCategory) { controller.click(`category:${selectedChannelId}:${category}`); return; }
+        // HP-07a：切分类是**新范围加载**，重复点击判定序列随之重置；榜头标题/范围就地同步，开榜状态不清。
+        controller.interrupt(); selectedCategory = category; paintTopology();
+        smoothScrollToTop(resolveScroller(deps.root)); void loadScope(++token, false);
       }
     });
     const searchBar = topology.searchEntry();
+    mountHomeLayout(hosts, searchBar, deps.headerAccessory);
+    deps.root.appendChild(hosts.view);
+    const controller = createHomeController({
+      root: deps.root, slot: hosts.view, insertBefore: hosts.gridHost,
+      top: () => smoothScrollToTop(resolveScroller(deps.root)),
+      scroller: () => resolveScroller(deps.root),
+      discover,
+      invalidate: () => { ++token; active().suspend(); },
+      feedback: reportFeedback,
+      ...(deps.syncCatalog === undefined ? {} : { sync: deps.syncCatalog }),
+      nowMillis: deps.nowMillis ?? ((): number => Date.now()),
+      blocked: () => topology.rankingsOpen(),
+      ...(deps.exposure === undefined ? {} : { exposure: deps.exposure })
+    });
 
-    const rows: HTMLElement[] = [sticky];
-    if (searchBar !== null) rows.push(searchBar);
-    rows.push(continueHost);
-    if (deps.headerAccessory !== null && deps.headerAccessory !== undefined) deps.headerAccessory.replaceChildren(switchHost);
-    else rows.push(switchHost);
-    rows.push(gridHost, moreHost);
-    sticky.append(channelHost, railHost);
-    view.append(...rows);
-    deps.root.appendChild(view);
-
-    const grid = createPosterGrid({ root: gridHost, mode: deps.posterMode, onOpenTitle: (id) => { repeat.interrupt(); deps.onOpenTitle(id); } });
-    const card = createContinueCard({ root: continueHost, onResume: (row) => { repeat.interrupt(); deps.onResume(row); } });
-    const modeSwitch = createModeSwitch({ root: switchHost, mode: deps.posterMode, onChange: setMode });
+    const grid = createPosterGrid({ root: hosts.gridHost, mode: deps.posterMode, onOpenTitle: (id) => { controller.interrupt(); deps.onOpenTitle(id); } });
+    const card = createContinueCard({ root: hosts.continueHost, onResume: (row) => { controller.interrupt(); deps.onResume(row); } });
+    const modeSwitch = createModeSwitch({ root: hosts.switchHost, mode: deps.posterMode, onChange: setMode });
 
     // A-4 无感加载：尾部哨兵进入触底带即静默追加下一页；A-2 折叠搜索条同一条滚动订阅消费同一个容器。
     const scroll: HomeScroll = attachHomeScroll({
-      root: deps.root,
-      searchBar,
-      tail: moreHost,
-      canLoad: () => gridReady && !appending && items.length > 0 && items.length < total,
-      onLoad: () => void loadCatalog(token, page + 1)
+      root: deps.root, searchBar, tail: hosts.moreHost,
+      canLoad: () => active().canLoadMore(),
+      onLoad: () => void loadScope(token, true)
     });
     recheck = () => scroll.recheck();
 
-    function paintGrid(): void {
-      // 题材查表用 Map：排序里每次比较都要取题材，线性 find 会把 2ms 端侧预算整个吃光。
-      const genres = new Map(items.map((entry) => [entry.id, entry.category] as const));
-      const genreOf: GenreOf = (contentId) => genres.get(contentId);
-      const woven = weave(items, genrePreference(historyRows, Math.floor(Date.now() / 1000), genreOf), { genreOf, preserveAppend: true });
-      grid.render(woven.items, woven.badges); topology.refreshRankings();
+    /** 两层导航与 FLAG_SECURE 判定共用这一次落位：切频道、换分类、重同步都只有一条渲染路径。 */
+    function paintTopology(): void {
+      topology.paint(channels, onHome ? COMPOSITE_HOME_ID : selectedChannelId, selectedCategory);
+      deps.onChannelChange?.(currentChannel());
+      modeSwitch.paint();
     }
 
     function currentChannel(): ChannelItem | null {
-      return channels.find((channel) => channel.id === selectedChannelId) ?? null;
+      return onHome ? null : channels.find((channel) => channel.id === selectedChannelId) ?? null;
     }
 
-    /** 两层导航与 FLAG_SECURE 判定共用这一次落位：切频道、换分类、重同步都只有一条渲染路径。 */
-    function paintTopology(): void {
-      topology.paint(channels, selectedChannelId, selectedCategory);
-      deps.onChannelChange?.(currentChannel());
-      modeSwitch.paint();
+    /** HP-04 默认落位：综合首页恒为启动页；已选真实频道时钉住它，云端没下发该频道才回退。 */
+    function anchorSelection(): void {
+      if (onHome) { selectedChannelId = null; selectedCategory = ALL_CATEGORIES_LABEL; return; }
+      const target = channels.find((channel) => channel.id === selectedChannelId) ?? pickDefaultChannel(channels);
+      selectedChannelId = target?.id ?? null;
+      if (!target?.categories.some((label) => label === selectedCategory)) selectedCategory = ALL_CATEGORIES_LABEL;
+    }
+
+    function presentState(kind: ViewStateKind, options: { detail?: string; actionLabel?: string; onAction?: () => void } = {}): void {
+      active().suspend();
+      // 哨兵与状态行留在尾部容器（canLoad 已回 false）：清掉它们等于拆了观察器又得原地重建。
+      scroll.setPending(false);
+      controller.observePaint([]);   // 落五态即摘除观察：不在画面里的东西永远不该被记成曝光
+      grid.replaceWith(renderStateView(kind, options));
     }
 
     function setMode(mode: PosterMode): void {
@@ -151,76 +188,31 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
     }
 
     function selectChannel(channelId: ChannelId): void {
-      repeat.interrupt(); page = 1; pageRevision = undefined;
+      onHome = false; selectedChannelId = channelId; selectedCategory = ALL_CATEGORIES_LABEL;
+      feed.reset();
+      controller.interrupt();
       smoothScrollToTop(resolveScroller(deps.root));
-      selectedChannelId = channelId;
-      selectedCategory = ALL_CATEGORIES_LABEL;
       paintTopology();
-      void loadCatalog(++token, 1);
+      void loadScope(++token, false);
     }
 
-    function presentState(kind: ViewStateKind, options: { detail?: string; actionLabel?: string; onAction?: () => void } = {}): void {
-      gridReady = false;
-      // 哨兵与状态行留在尾部容器（canLoad 已回 false）：清掉它们等于拆了观察器又得原地重建。
-      scroll.setPending(false);
-      grid.replaceWith(renderStateView(kind, options));
+    function selectHome(): void {
+      onHome = true; selectedChannelId = null; selectedCategory = ALL_CATEGORIES_LABEL;
+      directory.reset();
+      controller.interrupt();
+      smoothScrollToTop(resolveScroller(deps.root));
+      paintTopology();
+      void loadScope(++token, false);
     }
 
-    function emptyOptions(): { detail: string; actionLabel?: string; onAction?: () => void } {
-      const fallback = channels.find((channel) => channel.id === DEFAULT_CHANNEL_ID) ?? null;
-      if (fallback === null || selectedChannelId === fallback.id)
-        return { detail: '该视界尚未上架内容，换个频道或稍后再来。', actionLabel: '重新加载', onAction: () => void loadCatalog(++token, 1) };
-      return { detail: '该视界暂无可播放剧目。', actionLabel: `返回${fallback.name}`, onAction: () => selectChannel(fallback.id) };
-    }
-
-    async function loadCatalog(nextToken: number, targetPage: number): Promise<void> {
-      const channel = selectedChannelId;
-      if (channel === null) {
-        presentState('disabled', { detail: '没有可展示的视界频道。', actionLabel: '重新加载', onAction: () => void refreshTopology() });
-        return;
-      }
-      if (targetPage === 1 && items.length === 0) grid.showSkeleton();
-      appending = targetPage > 1;
-      scroll.setPending(appending);
-      const query = {
-        channel,
-        ...(selectedCategory === ALL_CATEGORIES_LABEL ? {} : { category: selectedCategory }),
-        page: targetPage,
-        pageSize,
-        // 翻页才带游标：首页无游标可钉，第二页起把上一页的 revision 交给边缘做快照一致性校验。
-        ...(targetPage > 1 && pageRevision !== undefined ? { revision: pageRevision } : {})
-      };
-
-      let response: CatalogResponse | undefined;
-      try {
-        response = await deps.api.catalog(query);
-        if (nextToken !== token) return;
-        // 页码是否真的推进过：边缘若把同一页原样回给我们，继续追加只会重复堆同一批剧目。
-        const advanced = targetPage === 1 || response.page > page;
-        page = response.page;
-        total = response.total;
-        pageRevision = response.revision;
-        const before = items.length;
-        items = targetPage === 1 ? [...response.items] : [...new Map([...items, ...response.items].map(item => [item.id, item])).values()];
-        if (targetPage > 1 && items.length === before) total = items.length;
-        if (items.length === 0) {
-          presentState('empty', emptyOptions());
-          return;
-        }
-        // 空页或页码未推进就如实收口（把 total 降到已载数）：哨兵从此不再打无意义的请求，也不谎报"还有更多"。
-        if (targetPage > 1 && (response.items.length === 0 || !advanced)) total = items.length;
-        paintGrid();
-        gridReady = true;
-      } catch (error) {
-        if (nextToken !== token) return;
-        presentState(stateKindForError(error), { detail: detailForError(error), actionLabel: '重试', onAction: () => void loadCatalog(++token, 1) });
-      } finally {
-        if (nextToken === token) {
-          appending = false; scroll.setPending(false);
-          // 仅当条数不足单页容量（铺不满一屏）时才主动复查续载；满页由用户滚动触发，绝不自动死循环拉取。
-          if (response !== undefined && response.items.length < pageSize && items.length < total) scroll.recheck();
-        }
-      }
+    /** 本地先显（AC-01）：频道目录读同频道快照；综合首页的候选池由 feed 在同一条读面上取。 */
+    function hydrateFromLocalCache(): boolean {
+      const snapshot = deps.api.cachedSnapshot?.();
+      if (!snapshot?.channels?.channels?.length) return false;
+      channels = [...snapshot.channels.channels];
+      anchorSelection();
+      paintTopology();
+      return !onHome && directory.hydrateLocal();
     }
 
     async function loadContinue(nextToken: number): Promise<void> {
@@ -233,52 +225,43 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
       }
     }
 
-    function hydrateFromLocalCache(): boolean {
-      const snapshot = deps.api.cachedSnapshot?.();
-      if (!snapshot?.channels?.channels?.length) return false;
-      channels = [...snapshot.channels.channels];
-      const target = currentChannel() ?? pickDefaultChannel(channels);
-      selectedChannelId = target?.id ?? null;
-      if (!target?.categories.includes(selectedCategory)) selectedCategory = ALL_CATEGORIES_LABEL;
-      paintTopology();
-      const local = selectedChannelId ? snapshot.items(selectedChannelId) : [];
-      if (local.length === 0) return false;
-      items = local.slice(0, pageSize);
-      total = local.length;
-      paintGrid();
-      gridReady = true;
-      if (local.length < pageSize) scroll.recheck();
-      return true;
-    }
-
     async function refreshTopology(): Promise<void> {
       const nextToken = ++token;
-      if (items.length === 0 && !hydrateFromLocalCache()) grid.showSkeleton();
+      if (!active().hasContent() && !hydrateFromLocalCache()) grid.showSkeleton();
       const continueTask = loadContinue(nextToken);
       try {
         const response = await deps.api.channels();
         if (nextToken !== token) return;
         channels = [...response.channels];
-        const target = currentChannel() ?? pickDefaultChannel(channels);
-        selectedChannelId = target?.id ?? null;
-        if (!target?.categories.some((label) => label === selectedCategory)) selectedCategory = ALL_CATEGORIES_LABEL;
+        anchorSelection();
         paintTopology();
-        await loadCatalog(nextToken, 1);
+        await loadScope(nextToken, false);
       } catch (error) {
         if (nextToken !== token) return;
-        presentState(stateKindForError(error), { detail: detailForError(error), actionLabel: '重试', onAction: () => void refreshTopology() });
+        // §3.2「更新失败保留上一可用快照」：拓扑这一条读面失败只关掉"内容更新"，不该把已经躺在
+        // 本机快照里的片单盖成整页错误。只剩空手（连频道都没有）才落五态。
+        if (channels.length === 0) {
+          presentState(stateKindForError(error), { detail: detailForError(error), actionLabel: '重试', onAction: retryTopology });
+          return;
+        }
+        await loadScope(nextToken, false);
+        if (active().hasContent()) reportFeedback({ phase: 'offline', syncError: error });
       } finally {
         await continueTask;
       }
     }
 
-    initial = refreshTopology; reload = repeat.refresh;
+    initial = refreshTopology; reload = () => controller.refresh();
     changeMode = setMode;
+    showRecord = () => (onHome ? feed.record() : null);
+    syncFeed = () => (onHome ? feed.sync() : Promise.resolve());   // 频道目录范围内背景同步不越权重画首页
     teardown = () => {
-      repeat.destroy(); interrupt = null;
+      controller.destroy(); interrupt = null;
       topology.destroy(); grid.destroy(); card.destroy(); scroll.destroy();
+      directory.reset(); feed.reset();
       clearChildren(deps.root);
       reload = null; changeMode = null; recheck = null; teardown = null;
+      showRecord = null; syncFeed = null;
     };
 
     modeSwitch.paint();
@@ -295,6 +278,8 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
     interruptNavigation: () => interrupt?.(),
     setPosterMode: (mode) => { if (teardown === null) build(); changeMode?.(mode); },
     loadMore: () => { if (teardown === null) build(); recheck?.(); },
+    recommendationRecord: () => { if (teardown === null) build(); return showRecord?.() ?? null; },
+    syncRecommendation: async () => { if (teardown === null) build(); await syncFeed?.(); },
     destroy: () => teardown?.()
   };
 }

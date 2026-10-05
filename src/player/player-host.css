@@ -49,6 +49,22 @@
    `player.css` 在起播后会淡出底片（非全屏态画面本就盖满，留着没必要），这里只在全屏态把它按住。 */
 .prism-player-host--fullscreen .prism-player.is-playing .prism-player__backdrop { opacity: 1; visibility: visible; }
 
+/* ==========================================================================
+   HP-08 非全屏：画面内悬浮控制条物理缺席（§3 HP-08 / §5.1 HP-08a）
+   ==========================================================================
+   真机缺陷不是"带子太厚"而是"带子根本不该在那里"：非全屏那一屏的控制职责已经由详情侧的
+   操作岛（追剧/投屏/分享/沉浸全屏）+ 常驻选集轨 + ArtPlayer 自身的播放/进度条承担，
+   画面里再压一条带子就是两套权威互相挡。
+   • `display: none` 而不是 `opacity: 0`：后者仍然吃掉一次点击，用户会以为画面失灵；
+   • 节点留在树里，`data-action` 出口与 ARIA 状态只有一份真相，进全屏时复用同一只 chrome；
+   • `--prism-chrome-h` 归零把带子原本空切出来的顶部带宽交还手势面（亮度/音量/单击才覆盖整幅画面）；
+   • 这里不碰 `--prism-lower-h`：底部那条带子是给 Artplayer 进度条留的，动它就动了对"基本播放/进度可达"
+     的承诺（HP-08a 的负向项）。
+   全屏是唯一开关，仍由宿主 `isFullscreen` + `.prism-player-host--fullscreen` 一条真相驱动（§1.2.0），
+   不引入 `art.fullscreenWeb`，也不加第二条 `!important` 链。 */
+.prism-player-host:not(.prism-player-host--fullscreen) .prism-player__chrome { display: none; }
+.prism-player-host:not(.prism-player-host--fullscreen) .prism-player { --prism-chrome-h: 0px; }
+
 /* 非全屏剧集详情生态台 (Portrait Media Stage) */
 .prism-player-host__body { flex: 1 1 auto; padding: 14px 16px calc(24px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 16px; background: var(--bg); }
 /* 剧目名片区：类名以 `player-detail.ts` 渲染的那套为准，本文件是唯一权威（旧 `.prism-player-info*`

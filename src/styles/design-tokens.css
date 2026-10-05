@@ -201,8 +201,13 @@
   --container-max-desktop: 1200px;  /* 桌面视口 */
   --header-height: 52px;            /* 吸顶频道栏高度 */
   --subnav-height: 44px;            /* 二级横滑标签栏高度 */
-  --tabbar-height: 56px;            /* 底部导航栏高度 */
-  --tabbar-content-max: 360px;      /* 底部导航内容承载区限宽：收进拇指黄金区，底栏背景仍铺满 */
+  /* HP-09 底部导航：56px→48px 是"承载面"的高度（含内边距与 1px 描边），三枚 Tab 的 44px 触区不变。
+     `--tabbar-content-max` 从 HP-09 起同时约束**背景 + 边框 + 内容**（旧口径只收内容，底色仍横贯全屏，
+     真机量到一条厚底栏就是这个差异的现场证据）；`--tabbar-inset-x` 是岛与屏幕左右边的留白。
+     底部安全区只由 `.app-tabbar` 一处消费，`.app-shell` 不再重复加一次（重复留白＝真机那条死黑带）。 */
+  --tabbar-height: 48px;            /* 底部导航承载岛高度 */
+  --tabbar-content-max: 360px;      /* 底部导航承载区最大宽度；背景与内容一同居中收窄 */
+  --tabbar-inset-x: 12px;           /* 试验值：岛与视口左右边的留白，待真实视口校准 */
   --safe-area-bottom: env(safe-area-inset-bottom, 0px); /* 手机全面屏底部避让 */
 
   /* [A2] 工业级标准物理动效 Transitions & Easing */
@@ -221,18 +226,23 @@
      浅色模式下 --fg 会变成近黑、--accent 变成深琥珀，压在深底上不可读（实测 ≈3.7:1 < 4.5:1）。
      放在通用段而不是两个主题段里各写一遍，就是为了**结构上不可能漂移**。
      色值全部复用既有 token 的取值，不引入新颜色。 */
-  --badge-ai: #38BDF8;            /* AI精品：科技冰蓝（同播放器水滴蓝 --player-vol-accent） */
+  --badge-ai: #38BDF8;            /* Ai剧类型标识，与播放器水滴冰蓝同源；不表示质量评价 */
   --badge-hot: #E5A93C;           /* 热门：院线琥珀金（同 --player-accent） */
   --badge-recommend: #FFFFFF;     /* 推荐：象牙纯白 */
   --badge-bg: rgba(8, 10, 16, 0.75); /* 角标底板：高斯磨砂深底，恒定深色 */
   --badge-pad-y: 2px;             /* 角标垂直内边距（与既有 .poster-ep-badge 同款） */
 
-  /* ---- 紧凑海报与首页吸顶层（SPEC-APP-REFACTOR A-2 / A-4）----
-     `--poster-gap-tight` 是"3 列 = 一屏更多剧目"的物理间距真相源：单页 60 部（正好 3 个混排块、
-     20 整行）要在竖屏平齐铺开，间距必须由单点控制，断点段只允许覆盖列数与外层 padding。
+  /* ---- 紧凑海报与首页吸顶层（SPEC-APP-REFACTOR A-2 / A-4，尺寸口径由 HP-10 收敛）----
+     四模的横纵间距只有两个真相：密集排布（compact-3 / bookshelf-4）走 `--poster-gap-tight`，
+     可读优先排布（comfort-2 / list-1）走 `--poster-gap-wide`。断点**只加列数**，不许再把 gap 换回
+     `--space-4/5`；卡片内边距另有 `--poster-pad-card`，与"描边 + 底版"是三条独立的账（HP-10 要求
+     逐条核查叠加浪费，密集模式下前两者已一并撤掉）。以上均为试验值，最终以真实视口样稿定稿。
      `--home-subnav-height` = 频道行 40px + 胶囊行 --capsule-hit(44px) + 两条 1px 分隔线：
      折叠搜索栏吸顶时必须正好贴在这块吸顶子导航的下沿，否则"下隐"动画会露馅。 */
-  --poster-gap-tight: 6px;
+  --poster-gap-tight: 4px;
+  --poster-gap-wide: 12px;
+  --poster-pad-card: 2px;
+  --poster-synopsis-rows: 3;        /* 图文列表流右侧的信息行数（旧写死 2 行，真机留大片空白） */
   --home-subnav-height: calc(40px + var(--capsule-hit) + 2px);
 
   /* ---- 二级分类胶囊：视觉高度与命中高度分离 ----
@@ -240,6 +250,18 @@
      故命中高度由外层 wrap 的上下 padding 补足至 44px（8 + 28 + 8）。两者必须同时成立。 */
   --capsule-height: 28px;
   --capsule-hit: 44px;
+
+  /* ---- HP-08 全屏限定的紧凑透明控制层 ----
+     `--player-hit` 是控制层按钮的**命中区**下限（与 interaction.touchTargetMin 同源），
+     `--player-glyph` 是画面里真正可见的尺寸（Lucide 锁定 24px）：观感紧凑与触区充足是两条账，
+     收前者不得顺手收后者。`--player-chrome-h` 是控制层的可视带高，非全屏由宿主置 0——
+     那条带子已经从画面里物理摘除，手势面不必再为它让出一条空切。
+     `--player-chrome-scrim` 替掉旧的"横贯实心背景 + 下边框"：只在上沿留一道渐隐，图标仍读得清，
+     画面不再被一条黑带压住。定义在通用段（与 --badge-* 同理），深浅双模结构上不可能漂移。 */
+  --player-hit: 44px;
+  --player-glyph: 24px;
+  --player-chrome-h: 48px;
+  --player-chrome-scrim: linear-gradient(to bottom, rgba(8, 10, 16, 0.68) 0%, rgba(8, 10, 16, 0) 100%);
 }
 
 /* 动效降级处理：偏好减少动画的用户体验保障 */
@@ -256,60 +278,60 @@
    4. 四模海报自适应排版网格类 (Poster Mode Grid Classes)
    ========================================================================== */
 
-/* 模式一：中图紧凑 3 列（默认锁定，单手大拇指极速扫剧；SPEC-APP-REFACTOR A-4）
- * gap/padding 收紧到 6px / 8px：双列一屏只有 2-3 部的稀疏感来自这里，不是来自海报本身。 */
+/* 模式一：中图紧凑 3 列（默认锁定，单手大拇指极速扫剧；SPEC-APP-REFACTOR A-4 + HP-10）
+ * gap 与左右 padding 同用一个 4px 真相源：外留白比列间距还宽时，"更密"的收益还给两侧空气。 */
 .grid-posters-compact-3 {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--poster-gap-tight);
-  padding: 0 var(--space-2);
+  padding: 0 var(--poster-gap-tight);
 }
 
-/* 模式二：大图舒适 2 列 (精美大图赏析，沉浸视觉) */
+/* 模式二：大图舒适 2 列 (精美大图赏析，沉浸视觉)：16px→12px，仍是四模里最松的一档。 */
 .grid-posters-comfort-2 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-4);
-  padding: 0 var(--space-4);
+  gap: var(--poster-gap-wide);
+  padding: 0 var(--space-3);
 }
 
-/* 模式三：微缩书架 4 列 (高密度扫描，海量藏剧迅速定位) */
+/* 模式三：微缩书架 4 列 (高密度扫描，海量藏剧迅速定位)：8px→4px，与模式一同源。 */
 .grid-posters-bookshelf-4 {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--space-2);
-  padding: 0 var(--space-2);
+  gap: var(--poster-gap-tight);
+  padding: 0 var(--poster-gap-tight);
 }
 
 /* 模式四：图文列表流 (单列，左海报 3:4 右图文详情) */
 .grid-posters-list-1 {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--poster-gap-wide);
   padding: 0 var(--space-3);
 }
 
 /* 平板/折叠屏横屏断点响应式倍增 (≥ 768px)
- * 列数倍增时 gap **不跟着放大**（A-4 必做项）：4/6 列下若仍按 --space-4(16px) 摊开，卡片被切成碎图，
- * 密度收益全部还给间距。只让外层 padding 随视口走，列间距恒定收在 --poster-gap-tight。 */
+ * 列数倍增时 gap **不跟着放大**（A-4 必做项 + HP-10）：4/6 列下若仍按 --space-4(16px) 摊开，卡片被切成碎图，
+ * 密度收益全部还给间距。只让外层 padding 随视口走，密集档恒定收在 --poster-gap-tight。 */
 @media (min-width: 768px) {
   .grid-posters-compact-3 {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: var(--poster-gap-tight);
-    padding: 0 var(--space-3);
+    padding: 0 var(--space-2);
   }
   .grid-posters-comfort-2 {
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: var(--space-5);
+    gap: var(--poster-gap-wide);
   }
   .grid-posters-bookshelf-4 {
     grid-template-columns: repeat(6, minmax(0, 1fr));
-    gap: var(--space-2);
+    gap: var(--poster-gap-tight);
   }
   .grid-posters-list-1 {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-4);
+    gap: var(--poster-gap-wide);
   }
 }
 
@@ -318,14 +340,14 @@
   .grid-posters-compact-3 {
     grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: var(--poster-gap-tight);
-    padding: 0 var(--space-4);
+    padding: 0 var(--space-3);
   }
   .grid-posters-comfort-2 {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
   .grid-posters-bookshelf-4 {
     grid-template-columns: repeat(8, minmax(0, 1fr));
-    gap: var(--space-2);
+    gap: var(--poster-gap-tight);
   }
   .grid-posters-list-1 {
     display: grid;

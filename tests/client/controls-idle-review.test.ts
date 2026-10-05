@@ -120,3 +120,31 @@ describe('controls idle review — real-time eligibility and recovery', () => {
     expect(clock.pending()).toHaveLength(0);
   });
 });
+
+/**
+ * HP-08b（HOME-PLAYER-REPAIR §3 HP-08 / §5.1 HP-08b）：收起计时只属于全屏那一屏。
+ *
+ * 旧实现只在"到点那一刻"重新核验全屏资格，于是退出全屏后仍挂着一条挂账计时：
+ * 画面已经回到详情台，计时器却还在跑。HP-08 要求"退出全屏取消残余隐藏计时"，
+ * 所以判据必须提前到**任意媒体事件**——非全屏时清表并交回可见性，而不是等它自己到点。
+ */
+describe('HP-08b 收起计时是全屏限定的，退出全屏不留挂账', () => {
+  it('exiting fullscreen then any media event cancels the pending hide timer', () => {
+    const { clock, state, event } = setup();
+    event('play');
+    expect(clock.pending()).toHaveLength(1);
+    state.fullscreen = false;
+    event('timeupdate');
+    expect(clock.pending()).toHaveLength(0);
+    expect(state.visible).toBe(true);
+  });
+
+  it('outside fullscreen no media event ever arms a hide timer', () => {
+    const { clock, state, event } = setup();
+    state.fullscreen = false;
+    for (const name of ['play', 'playing', 'seeked', 'pause', 'waiting', 'seeking', 'ended', 'error'] as const) event(name);
+    clock.advance(CONTROLS_IDLE_MS * 3);
+    expect(clock.pending()).toHaveLength(0);
+    expect(state.visible).toBe(true);
+  });
+});

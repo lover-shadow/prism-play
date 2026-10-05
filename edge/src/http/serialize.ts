@@ -1,6 +1,8 @@
 import type { ChannelId, ContentItem, EpisodeItem } from '../types/api';
 import type { ContentRow, EpisodeRow } from '../db/content-repo';
 import { buildProxyUrl, issueSignedProxyUrl } from '../core/proxy-signature';
+import { normalizeSynopsis } from '../library/metadata-policy.mjs';
+import { stripPlatformNames } from '../library/platform-lexicon.mjs';
 
 /** Same-origin by construction: rebuilt from the incoming request, never from a stored or sent URL. */
 export function originOf(request: Request): string {
@@ -58,7 +60,10 @@ export function toContentItem(row: ContentRow, context: ItemContext): ContentIte
   }
   const coverVersion = optional(row.cover_version);
   if (coverVersion !== undefined) item.coverVersion = coverVersion;
-  const synopsis = optional(row.synopsis);
+  // HP-11：旧 D1 读面同样必须过策略源的 240 码点边界——历史上这里是裸 `optional(row.synopsis)`，
+  // 一条 500 字的库内摘要就能让 ContentItem 违反 openapi 的 maxLength。年份/地区/语言在
+  // content_items 里没有列（已核 build/library_full.db 实际列集），缺列即缺供，绝不拿别的时间字段冒充。
+  const synopsis = normalizeSynopsis(row.synopsis, stripPlatformNames);
   if (synopsis !== undefined) item.synopsis = synopsis;
   if (row.episode_count !== null) item.episodeCount = Number(row.episode_count);
   // 客观标定字段（0002 扩列）。缺省视为 0，仅在为真时下发，保持与既有 optional 字段一致的"缺席而非假值"口径。

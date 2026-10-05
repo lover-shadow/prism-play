@@ -126,11 +126,15 @@ GitHub Actions (ubuntu-latest, cron 0 19 * * * UTC = 北京 03:00)
       "isPrivate": false,               // 公开分片恒为 false
       "coverUrl": "/proxy/img/…",       // 仅同源代理句柄，绝不含上游地址
       "coverVersion": "v1",
-      "synopsis": "≤30字短简介",         // 分片内恒为短文本；长简介不入分片（体积主凶）
+      "synopsis": "清洗后的真实列表摘要，最多240个Unicode code points；无摘要时省略",
       "episodeCount": 82,
       "isAi": true, "isHot": false,
-      "firstPublishedAt": 1790000000,   // 新增：供端侧【实时新剧榜】本地排序
-      "hitsTotal": 9867                 // 新增：供端侧【总热播榜】本地排序
+      "firstPublishedAt": 1790000000,
+      "hitsTotal": 9867,
+      "tags": ["逆袭", "悬疑"],       // 可选：可信受控展示标签，最多6项，每项最多12 code points
+      "releaseYear": 2024,              // 可选：仅来源明确年份
+      "region": "中国大陆",             // 可选：来源明确，最多64 code points
+      "language": "普通话"              // 可选：来源明确，最多64 code points
     }
   ],
   "page": 1, "pageSize": 60, "total": 820, "revision": 12
@@ -141,7 +145,7 @@ GitHub Actions (ubuntu-latest, cron 0 19 * * * UTC = 北京 03:00)
 
 ### 3.2 公开事实 pack 与剧目投影（按 generation，含播放地址）
 
-新公开事实以 §3.3 manifest 的 `workFacts` 为权威，不再要求每部单独发布 title 对象。pack 为 `{ "schema": 1, "works": { "<workId>": <fact> } }`；fact 包含真实 `coverTargetUrl`、`enabled` / `shareable` / `isPrivate:false` flags、目录字段与完整 `episodes[].lines[]` 多线路。真实封面与播放地址仅由 Worker 按请求投影，不在目录、启动 bundle、分享 HTML 中泄露整个 pack、pack key 或索引。
+新公开事实以 §3.3 manifest 的 `workFacts` 为权威，不再要求每部单独发布 title 对象。pack 为 `{ "schema": 1, "works": { "<workId>": <fact> } }`；fact 包含真实 `coverTargetUrl`、`enabled` / `shareable` / `isPrivate:false` flags、目录字段与完整 `episodes[].lines[]` 多线路。公开目录可选元数据按 API-SPEC / OpenAPI：清洗摘要≤240 Unicode code points；可信受控展示标签最多6项、每项最多12 code points；releaseYear只来自明确年份字段，region/language最多64 code points。新字段须经目录、facts、search、bundle及客户端同代校验；真实封面与播放地址仅由 Worker 按请求投影，不在目录、启动 bundle、分享 HTML 中泄露整个 pack、pack key 或索引。
 
 以下为 `/api/titles/{workId}` 的公开投影示意（另含 `item` 供客户端边界适配），不是 pack 下载接口。无 `workFacts` 的旧 generation 才沿用公开 `library/v{revision}/titles/{workId}.json`；私密原有双准入路径保留，本次不发布 `private/` 对象。
 

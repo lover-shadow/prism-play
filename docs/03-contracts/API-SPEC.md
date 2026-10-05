@@ -24,12 +24,14 @@
 ### 1. 动态频道拓扑
 - **`GET /api/channels`**｜认证：可选 Bearer
 - 返回 `{ version, channels: ChannelItem[] }`。
+- 客户端固定公开导航在综合首页之后显示【精彩短剧】、【电影仓库】、【人文纪录】、【动漫】，分别映射真实 `drama`、`movie`、`documentary`、`anime` ChannelItem；配置下发的 `name` 与这些显示名一致，`categories`仍是各真实频道分类。综合首页为本地跨频道视图，不对应响应节点或新API。
 - **私密剥离规则（硬性）**：必须**同时**满足「有效 B/Y/S 授权」+「有效 `X-Private-Session`」才返回 `private` 节点与二级分类；否则该节点在响应中完全不存在。
 
 ### 2. 剧目列表
 - **`GET /api/catalog`**｜认证：可选 Bearer
 - 查询参数：`channel`（必填）、`category`、`page`（默认 1）、`pageSize`（公开facts分片为60；私密/真实旧代兼容单独验收，不把公开60误改搜索20条分页）
 - 返回 `{ items: ContentItem[], page, pageSize, total, revision }`；后续页**必须**携带首页面的公开 `revision`，目录已变更时 409 并重新拉快照。仅完整同修订分页可原子提交本地，增量每页也须以持久化游标与数据同事务落盘；断电/进程中断保留上个完整快照与原游标，重复页按 revision 幂等应用；D1 不提供跨请求历史快照。
+- `ContentItem`新增可选公开元数据：`synopsis`最多240 Unicode code points；`tags`最多6项、每项1–12 code points，仅可信受控题材/风格；`releaseYear`只用明确四位年份来源；`region`/`language`各最多64 code points。缺值省略，旧缓存仍可读取。公开字段不得携带来源品牌、URL或内部证据标识。
 - 未同时具备有效 B/Y/S 授权与当次凭据时，请求私密分类返回不含任何私密元数据的 404；不得与通用说明中“不存在”口径冲突。
 
 ### 3. 剧目详情与分集

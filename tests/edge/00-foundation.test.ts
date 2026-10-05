@@ -10,8 +10,10 @@ describe('Stage 1 foundation: in-memory D1 stand-in', () => {
       .map((row) => String(row.name));
     const ftsShadow = tables.filter((name) => /_(config|content|data|docsize|idx)$/.test(name));
     // 0001 的 20 张业务表 + 0002 增量迁移新增的 cloud_watch_history 与 cloud_user_profile
-    // + 0003 瘦身的账本补充表 line_health_signals。
-    expect(tables.length - ftsShadow.length).toBe(23);
+    // + 0003 瘦身的账本补充表 line_health_signals
+    // + 0004 运营后台与分析新增的 analytics_daily / analytics_visitors / analytics_visitor_days /
+    //   admin_sessions / admin_login_limits / coupon_batches / admin_audit_logs（additive，不 DROP 旧表）。
+    expect(tables.length - ftsShadow.length).toBe(30);
     expect(ftsShadow.length).toBe(5);
   });
 

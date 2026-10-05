@@ -1,62 +1,25 @@
-/** 播放浮层宿主：退出、续集、存储与运行时接线、通知动作。FLAG_SECURE 仅上报，由组合根合并决策。 */
+/** 播放浮层宿主：即时 loading、打开代次守卫、退出、续集、存储与运行时接线、通知动作。FLAG_SECURE 仅上报，由组合根合并决策。 */
 import { icon } from './components/icons';
-import type { ContentItem, EpisodeItem, RelatedResponse, TitleDetail } from '../edge/src/types/api';
-import type { PrismNativeBridge } from './core/native/bridge';
+import type { ContentItem, EpisodeItem, TitleDetail } from '../edge/src/types/api';
 import type { WatchHistoryRow } from './core/storage/storage-domains';
 import { registerBackHandler } from './core/native/back-button';
-import { createFullscreenPolicy, createOrientationPort, type OrientationPort } from './core/native/orientation';
-import { exitReportOf, type ExitReport } from './core/user-sync';
+import { createFullscreenPolicy, createOrientationPort } from './core/native/orientation';
+import { exitReportOf } from './core/user-sync';
 import { createPlayer } from './player/prism-player';
 import { buildDetailBody, type PlayerDetailStage } from './player/player-detail';
-import type { PlayerApi, PlayerFailure, PrismPlayer } from './player/prism-player';
-import type { EngineFactory } from './player/engine-seam';
+import type { PlayerFailure, PrismPlayer } from './player/prism-player';
 import type { AspectOrientation } from './player/aspect';
-import type { ProgressContext } from './player/progress-reporter';
 import { episodeSheetMode } from './player/episode-sheet';
-import type { NotificationAction } from './core/native/capacitor-bridge';
-import { bindWatchVideo, type RuntimeServices } from './core/runtime-services';
+import { bindWatchVideo } from './core/runtime-services';
 import { createSponsorNudge } from './views/sponsor-nudge';
 import { isPrivateSubject } from './core/storage/storage-domains';
+import { createHostLayer, hostErrorFor, type HostLayer } from './player/host-layer';
+import type { OverlayState } from './player/hud';
+import type { PlayerHost, PlayerHostDeps } from './player/host-contract';
 import './player/player-host.css';
-export interface PlayerHostApi extends PlayerApi {
-  related?(titleId: string): Promise<RelatedResponse>;
-}
-export interface PlayerHostDeps {
-  /** 浮层挂到这里（通常是 `.app-shell`，让 safe-area 与 `--native-dim` 继续生效）。 */
-  mount: HTMLElement;
-  bridge: PrismNativeBridge;
-  api: PlayerHostApi;
-  /** 进度落库路由由组合根提供：私密内容必须进内存域，这条分支不许出现在宿主里重复实现。 */
-  onProgress(row: WatchHistoryRow, context: ProgressContext): void;
-  /** AC-10 权限位：未开启"后台/息屏播放"时播放器不得拉起前台服务。 */
-  allowBackgroundAudio(): boolean;
-  onShare?(item: ContentItem, episode: EpisodeItem): void;
-  /** 私密断点路由失败之类的闸门拒绝原因（播放器已自行渲染其余错误态）。 */
-  onBlocked?(message: string): void;
-  /** 每次私密性落定后回调，由组合根合并频道状态再决定 FLAG_SECURE。 */
-  onPrivacyChange(isPrivate: boolean): void;
-  /** §1.9.3 退出载荷就地定格，交同步中枢判私密与落队列。 */
-  onExit?(report: ExitReport): void;
-  onClose?(): void;
-  titleOf?(): string;
-  /** 播放内核工厂是公开接缝（默认为 ArtPlayer+hls.js）：真机之外的装配与集成测试由此注入替身。 */
-  engine?: EngineFactory;
-  /** AC-20 方向端口：Web 自动降级，注入端口验证锁/解时序，真机验证旋转。 */
-  orientation?: OrientationPort;
-  playbackPreferences?: import('./player/playback-rate').PlaybackPreferences;
-  following?: import('./core/storage/following-store').FollowingStore;
-  runtime?: RuntimeServices;
-  onRedeem?(): void;
-}
-export interface PlayerHost {
-  open(contentId: string, resume?: WatchHistoryRow): Promise<boolean>;
-  close(): void;
-  isOpen(): boolean;
-  playingPrivateContent(): boolean;
-  onNotification(action: NotificationAction): void;
-  suspend(): void;
-  state(): ReturnType<PrismPlayer['state']> | null;
-}
+
+export type { PlayerHost, PlayerHostApi, PlayerHostDeps } from './player/host-contract';
+
 /** 历史优先，缺集回第一集；端云合并后 ID/集数冲突时优先按集数匹配，避免旧 ID 续错集。 */
 function episodeFor(detail: TitleDetail, resume?: WatchHistoryRow): { episode: EpisodeItem; seconds: number } {
   const ordered = [...detail.episodes].sort((a, b) => a.episodeNumber - b.episodeNumber);
@@ -67,8 +30,10 @@ function episodeFor(detail: TitleDetail, resume?: WatchHistoryRow): { episode: E
   const seconds = mine !== null && (episode?.episodeId === mine.last_episode_id || episode?.episodeNumber === mine.last_episode_number) ? mine.position_seconds : 0;
   return { episode, seconds };
 }
+
 export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
-  let layer: HTMLElement | null = null;
+  /** 当前这一层（loading / error / ready 三态同一条记录）：`layer !== null` 就是"界面被挡住"的真相。 */
+  let layer: HostLayer | null = null;
   let player: PrismPlayer | null = null;
   let detail: TitleDetail | null = null;
   let keyup: ((event: KeyboardEvent) => void) | null = null;
@@ -77,6 +42,7 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
   let resizeHandler: (() => void) | null = null;
   let watchVideo: ReturnType<typeof bindWatchVideo> | null = null;
   let nudge: ReturnType<typeof createSponsorNudge> = null;
+  /** 打开代次：`close()` 递增它，用来作废在途的 refresh / 详情 / setScope / load 结果。 */
   let opening = 0;
   const orientation = deps.orientation ?? createOrientationPort();
   /** 全屏唯一权威：本布尔与宿主类；内核不另持全屏通道。 */
@@ -91,7 +57,7 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
   function toggleFullscreen(on?: boolean): void {
     if (layer === null) return;
     isFullscreen = on !== undefined ? on : !isFullscreen;
-    layer.classList.toggle('prism-player-host--fullscreen', isFullscreen);
+    layer.shell.classList.toggle('prism-player-host--fullscreen', isFullscreen);
     // 几何变了就让内核重算尺寸（`autoSize`），它不触碰任何原生全屏容器。
     player?.relayout();
     void syncOrientation();
@@ -102,64 +68,71 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
   const failure = (event: PlayerFailure): void => {
     if (event.kind === 'progress-blocked') deps.onBlocked?.(event.message);
   };
-  function buildLayer(): { shell: HTMLElement; stage: HTMLElement; sheet: HTMLElement } {
-    const shell = document.createElement('div');
-    shell.className = 'prism-player-host';
-    shell.setAttribute('role', 'dialog');
-    shell.setAttribute('aria-modal', 'true');
-    shell.setAttribute('aria-label', '播放');
-    const bar = document.createElement('header');
-    bar.className = 'prism-player-host__bar';
-    const exit = document.createElement('button');
-    exit.type = 'button';
-    exit.className = 'touch-target prism-player-host__exit';
-    exit.dataset.action = 'exit';
-    exit.innerHTML = icon('close', { size: 24 });
-    const label = document.createElement('span');
-    label.className = 'visually-hidden';
-    label.textContent = '退出播放';
-    exit.append(label);
-    const title = document.createElement('span');
-    title.className = 'prism-player-host__title';
-    title.textContent = deps.titleOf?.() ?? '';
-    bar.append(exit, title);
-    const stage = document.createElement('div');
-    stage.className = 'prism-player-host__stage';
-    // 选集面板的正文槽位排在舞台之后：非全屏即视频下方，不覆盖画面（R26-05）。
-    const sheet = document.createElement('div');
-    sheet.className = 'prism-player-host__sheet';
-    shell.append(bar, stage, sheet);
-    exit.addEventListener('click', () => close());
-    return { shell, stage, sheet };
+  /** 返回键与 Escape 共用一条级联：内核还没装起来时，这层唯一的去处就是关掉自己。 */
+  function consumeBack(): boolean {
+    const current = player;
+    if (current === null) { close(); return true; }
+    if (detailBodyRef?.dismissOverlay() || current.dismissOverlay()) return true;
+    if (isFullscreen) {
+      toggleFullscreen(false);
+      return true;
+    }
+    close();
+    return true;
+  }
+  /** 失败必须停在层内给出出口；但代次已被抢走时旧结果一个节点都不许留下（不得复活画面）。 */
+  function refuse(host: HostLayer, mine: number, retry: () => void, kind: OverlayState): false {
+    if (mine !== opening || layer !== host) { host.destroy(); return false; }
+    host.showState(kind);
+    host.onRetry(retry);
+    return false;
+  }
+  /** 旧代次拿到了结果：只拆自己那块（可能早已脱离文档的）节点，绝不改当前层的共享状态。 */
+  function discard(host: HostLayer): false {
+    if (layer === host) close();
+    else host.destroy();
+    return false;
   }
   async function open(contentId: string, resume?: WatchHistoryRow): Promise<boolean> {
     close();
     const mine = opening;
-    await deps.runtime?.refresh();
+    // §3.1：创建与挂载都发生在第一个 await 之前——"点了没反应"就是旧实现的用户面缺陷本体。
+    const host = createHostLayer({ mount: deps.mount, onClose: () => close() });
+    layer = host;
+    host.showState('loading');
+    keyup = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        if (detailBodyRef?.dismissOverlay() || player?.dismissOverlay()) return;
+        if (isFullscreen) toggleFullscreen(false); else close();
+      }
+    };
+    document.addEventListener('keydown', keyup);
+    unregisterBack = registerBackHandler(consumeBack);
+    const retry = (): void => { void open(contentId, resume); };
     // 先取详情：私密与不存在都靠 `api.title` 的 404 收敛，宿主不猜测、不预筛。
     let loaded: TitleDetail;
     try {
+      await deps.runtime?.refresh();
+      // 每一个 await 之后都先核代次：偏好读取一慢就被取消的话，不该再把那次详情请求发出去。
+      if (mine !== opening || layer !== host) return discard(host);
       loaded = await deps.api.title(contentId);
-    } catch {
-      return false;
+    } catch (error) {
+      return refuse(host, mine, retry, hostErrorFor(error));
     }
-    if (player !== null || mine !== opening) return false; // 等待期间被关闭或另一次 open 抢占
-    detail = loaded;
-    const { shell, stage, sheet } = buildLayer();
-    layer = shell;
-    deps.mount.appendChild(shell);
+    if (mine !== opening || layer !== host) return discard(host);
     const target = episodeFor(loaded, resume);
-    if (target.episode === undefined) {
-      close();
-      return false;
-    }
+    // 核验过身份的公开剧目返回空清单：这是"暂无可用播放源"，不是"内容不存在"，两者不得互相冒充。
+    if (target.episode === undefined) return refuse(host, mine, retry, 'retryable');
+    detail = loaded;
+    // 走到这一行才有资格升级：详情身份已核验、且确实有可播集，标题槽此刻才被写入。
+    host.promote(loaded.item.title);
     if (deps.runtime) {
       await deps.runtime.watch?.setScope(isPrivateSubject(loaded.item) ? 'private' : 'public');
-      if (mine !== opening) return false;
-      watchVideo = bindWatchVideo(stage, deps.runtime);
+      if (mine !== opening || layer !== host) return discard(host);
+      watchVideo = bindWatchVideo(host.stage, deps.runtime);
     }
     player = createPlayer({
-      root: stage,
+      root: host.stage,
       engine: deps.engine,
       bridge: deps.bridge,
       api: deps.api,
@@ -175,7 +148,7 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
         nudge = createSponsorNudge({ config: policy,
           onClose: () => { nudge = null; void deps.runtime?.watch?.dismissNudge(); },
           onAction: () => { close(); deps.onRedeem?.(); } });
-        if (nudge) shell.append(nudge.element);
+        if (nudge) layer?.shell.append(nudge.element);
       },
       onEpisodeChange: (ep) => detailBodyRef?.markEpisode(ep.episodeId),
       // AC-02-6：私密与不可分享剧目一律不渲染分享入口，开关位由数据决定而非界面判断。
@@ -185,27 +158,11 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
       // 画幅由播放器嗅探后**上报**，宿主据此决定是否联动方向；播放器自己不锁屏、不进全屏。
       onAspect: (aspect) => { videoAspect = aspect; void syncOrientation(); },
       // 选集面板的三态与控件收起判据都从宿主的既有真相现读，播放器不持有第二份全屏/菜单状态（R26-05）。
-      drawerMount: sheet, sheetMode: () => episodeSheetMode({ fullscreen: isFullscreen, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight }),
+      drawerMount: host.sheet, sheetMode: () => episodeSheetMode({ fullscreen: isFullscreen, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight }),
       fullscreen: () => isFullscreen, overlayOpen: () => detailBodyRef?.castOpen() ?? false,
       onOverlayOpen: () => { detailBodyRef?.closeCast(); }
     });
     deps.onPrivacyChange(loaded.item.isPrivate === true || loaded.item.channelId === 'private');
-    keyup = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        if (detailBodyRef?.dismissOverlay() || player?.dismissOverlay()) return;
-        if (isFullscreen) toggleFullscreen(false); else close();
-      }
-    };
-    document.addEventListener('keydown', keyup);
-    unregisterBack = registerBackHandler(() => {
-      if (detailBodyRef?.dismissOverlay() || player?.dismissOverlay()) return true;
-      if (isFullscreen) {
-        toggleFullscreen(false);
-        return true;
-      }
-      close();
-      return true;
-    });
     resizeHandler = () => {
       const isLandscape = window.innerWidth > window.innerHeight;
       // 转屏时全屏态不自动进出（那是用户的手），但画面矩形与面板模式必须跟着视口重量一次。
@@ -236,13 +193,14 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
       { beforeMenuOpen: () => void player?.dismissOverlay() }
     );
     detailBodyRef = detailBody;
-    shell.append(detailBody.body);
+    host.shell.append(detailBody.body);
     const cast = document.createElement('button'); cast.type = 'button'; cast.className = 'prism-player__button';
     cast.dataset.prismUi = 'cast'; cast.setAttribute('aria-label', '投屏'); cast.innerHTML = icon('cast', { size: 20 });
     cast.addEventListener('click', () => { player?.dismissOverlay(); detailBody.openCast(); });
-    shell.querySelector('.prism-player__chrome')?.append(cast);
+    host.shell.querySelector('.prism-player__chrome')?.append(cast);
     await player.load(target.episode.episodeId, target.seconds > 0 ? target.seconds : undefined);
-    return true;
+    // load 在途期间被关掉/被抢占时如实报 false：调用方不该拿到一个"成功但已经没有层"的结果。
+    return mine === opening && layer === host;
   }
   function close(): void {
     opening++;
@@ -264,13 +222,14 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
     detail = null;
     const host = layer;
     layer = null;
+    // 从未装配过内核的层（loading / error）不是一次"播放退出"：不报断点、也不谎报 onClose。
     if (instance !== null) {
       instance.destroy();
       deps.onPrivacyChange(false);
       if (report !== null) deps.onExit?.(report);
       deps.onClose?.();
     }
-    host?.remove();
+    host?.destroy();
   }
   function step(offset: number): void {
     if (detail === null || player === null) return;
@@ -284,7 +243,7 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
   return {
     open,
     close,
-    isOpen: () => player !== null,
+    isOpen: () => layer !== null,
     suspend: () => watchVideo?.reset('blur'),
     playingPrivateContent: () => player !== null && player.state().isPrivate,
     state: () => player?.state() ?? null,

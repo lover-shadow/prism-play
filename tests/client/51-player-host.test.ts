@@ -4,85 +4,14 @@
  * 手势与定时策略在 `30/31/33` 已各自验过，这里只证"宿主这一层有没有把它接错"。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createPlayerHost } from '../../src/player-host';
-import type { PlayerHostDeps } from '../../src/player-host';
-import type { PlayerEngine } from '../../src/player/engine-seam';
-import type { CallState, PrismNativeBridge } from '../../src/core/native/bridge';
-import type { TitleDetail } from '../../edge/src/types/api';
 import type { WatchHistoryRow } from '../../src/core/storage/storage-domains';
 import { dispatchBackButtonForTest } from '../../src/core/native/back-button';
 import { detailOf, settle } from './player-harness';
+import { host, row } from './player-host-harness';
 import Artplayer from 'artplayer';
 import { createArtEngine } from '../../src/player/art-engine';
 import playerCss from '../../src/player/player.css?raw';
 import hostCss from '../../src/player/player-host.css?raw';
-
-type FakeEngine = PlayerEngine & { sources: string[]; times: number[]; volumes: number[] };
-
-function fakeEngine(): FakeEngine {
-  const handlers = new Map<string, Array<() => void>>();
-  const flags = { isPlaying: false, t: 0, vol: 1, sources: [] as string[], times: [] as number[], volumes: [] as number[] };
-  const emit = (event: string): void => (handlers.get(event) ?? []).forEach((handler) => handler());
-  const engine = {
-    play: () => { flags.isPlaying = true; emit('play'); },
-    pause: () => { flags.isPlaying = false; emit('pause'); },
-    playing: () => flags.isPlaying,
-    currentTime: () => flags.t,
-    duration: () => 100,
-    volume: () => flags.vol,
-    setCurrentTime: (seconds: number) => { flags.t = seconds; flags.times.push(seconds); },
-    setVolume: (value: number) => { flags.vol = value; flags.volumes.push(value); },
-    setSource: (url: string) => { flags.sources.push(url); },
-    toggleControls: () => undefined,
-    destroy: () => undefined,
-    on: (event: string, handler: () => void) => {
-      handlers.set(event, [...(handlers.get(event) ?? []), handler]);
-      return () => handlers.set(event, (handlers.get(event) ?? []).filter((item) => item !== handler));
-    }
-  };
-  return Object.assign(flags, engine) as unknown as FakeEngine;
-}
-
-function host(over: Partial<PlayerHostDeps> & { detail?: TitleDetail; titleError?: unknown } = {}) {
-  const { detail = detailOf(), titleError, ...rest } = over;
-  const mount = document.createElement('div');
-  document.body.replaceChildren(mount);
-  const engine = fakeEngine();
-  const calls = { playback: [] as number[], progress: [] as unknown[][], privacy: [] as boolean[], closed: 0, blocked: [] as string[], background: [] as string[] };
-  const api = {
-    title: vi.fn(async () => { if (titleError !== undefined) throw titleError; return detail; }),
-    playback: vi.fn(async (id: number) => { calls.playback.push(id); return { episodeId: id, url: 'https://play.prismos.org/proxy/m3u8/h1', mimeType: 'application/vnd.m3u8+playlist', durationSeconds: 100 }; })
-  };
-  const bridge = {
-    getSystemVolume: async () => ({ volume: 1, supported: false }),
-    getBrightness: async () => ({ brightness: 1, supported: false }),
-    setSystemVolume: async () => ({ volume: 1, supported: false }),
-    setBrightness: async () => ({ brightness: 1, supported: false }),
-    setKeepScreenOn: async () => undefined,
-    startBackgroundAudio: async (title: string) => { calls.background.push(title); },
-    stopBackgroundAudio: async () => undefined,
-    setSecureScreen: async () => false,
-    onCallState: (_listener: (state: CallState) => void) => () => undefined
-  } as unknown as PrismNativeBridge;
-  const player = createPlayerHost({
-    mount,
-    bridge,
-    api,
-    onProgress: (row, context) => { calls.progress.push([row, context]); },
-    allowBackgroundAudio: () => false,
-    onPrivacyChange: (isPrivate) => { calls.privacy.push(isPrivate); },
-    onClose: () => { calls.closed += 1; },
-    onBlocked: (message) => { calls.blocked.push(message); },
-    engine: async () => engine,
-    ...rest
-  });
-  return { player, mount, engine, calls, api };
-}
-
-const row = (over: Partial<WatchHistoryRow> = {}): WatchHistoryRow => ({
-  content_id: 'c1', title: '测试剧', cover_url: null, last_episode_id: 12, last_episode_number: 2,
-  position_seconds: 42, duration_seconds: 100, total_episodes: 3, updated_at: 10, ...over
-});
 
 describe('player-host 装配', () => {
   beforeEach(() => { document.body.replaceChildren(); });
@@ -110,9 +39,15 @@ describe('player-host 装配', () => {
     expect(foreign.engine.times).not.toContain(88);
   });
 
-  it('详情取不到（404/私密未准入）时不挂浮层，也不留残骸', async () => {
+  // HP-03 迁移：旧的"详情失败即静默、open 返回时就该空"改为"失败停在层内、给出可返回与可重试出口"。
+  // 原断言的含义（不留残骸、不谎报打开）完整保留，只是挪到"用户从层内退出之后"这一时点来证。
+  it('详情取不到（404/私密未准入）时不谎报打开，退出层后不留残骸', async () => {
     const h = host({ titleError: new Error('missing') });
     expect(await h.player.open('nope')).toBe(false);
+    expect(h.player.state()).toBeNull();
+    expect(h.calls.closed).toBe(0); // 从未起播的失败层不该被记成一次播放退出
+    expect(h.player.isOpen()).toBe(true); // 层还在，且必须带出口（HP-03b 的细则在 67-host-loading）
+    h.player.close();
     expect(h.mount.querySelector('.prism-player-host')).toBeNull();
     expect(h.player.isOpen()).toBe(false);
   });

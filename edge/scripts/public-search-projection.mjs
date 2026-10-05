@@ -1,10 +1,19 @@
 import { createHash } from 'node:crypto';
 import { pinyin } from 'pinyin-pro';
 import { PUBLIC_CHANNEL_IDS, assertPublicAssetClean } from './config-sources.mjs';
+import { PUBLIC_METADATA_FIELDS, assertMetadataBounds } from '../src/library/metadata-policy.mjs';
+import { containsPlatformName } from '../src/library/platform-lexicon.mjs';
 
 export const MAX_SEARCH_BYTES = 16777216;
+/**
+ * 投影字段 = 目录 ContentItem 的公开面。HP-11/HP-12 的可选元数据由 `PUBLIC_METADATA_FIELDS`
+ * 单点提供，这里不再手抄字段名——目录给了就投，目录没给就整个缺键，旧 generation 因此仍可解析。
+ * 注意 `entry.tags`（检索词表，含 category 与别名）与 `item.tags`（展示副标签）是两回事：
+ * 前者服务命中，后者才是观众看到的题材，二者互不冒充。
+ */
 const FIELDS = ['id', 'title', 'channelId', 'category', 'isPrivate', 'enabled', 'shareable',
-  'coverUrl', 'coverVersion', 'synopsis', 'episodeCount', 'isAi', 'isHot', 'firstPublishedAt', 'hitsTotal'];
+  'coverUrl', 'coverVersion', 'episodeCount', 'isAi', 'isHot', 'firstPublishedAt', 'hitsTotal',
+  ...PUBLIC_METADATA_FIELDS];
 const unique = (values) => [...new Set(values.filter((v) => typeof v === 'string' && v.trim()))].sort();
 
 /** One projection built from the very same facts, bounded independently of episode payloads. */
@@ -15,6 +24,7 @@ export function buildPublicSearch(facts, revision, vocabulary = new Map()) {
         !PUBLIC_CHANNEL_IDS.includes(fact.channelId) || !Array.isArray(fact.episodes) ||
         fact.episodeCount !== fact.episodes.length) throw new Error('Invalid public search fact');
     const item = Object.fromEntries(FIELDS.filter((key) => fact[key] !== undefined).map((key) => [key, fact[key]]));
+    assertMetadataBounds(item, `public search item ${id}`, containsPlatformName);
     const terms = vocabulary.get(id) ?? {};
     const names = [item.title, ...(terms.aliases ?? [])];
     const pronunciation = names.flatMap((name) => [

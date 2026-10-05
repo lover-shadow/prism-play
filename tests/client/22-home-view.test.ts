@@ -1,40 +1,50 @@
 // @vitest-environment jsdom
-/** 大视界主视图装配测试：AC-01 拓扑驱动默认高亮、AC-02-3 私密缺席、AC-04 排版持久化、SPEC §7 五态。续播卡与 A-2/A-4 生命周期见 27-home-lifecycle。 */
+/** 大视界主视图装配测试：AC-01 拓扑驱动（默认定位口径已由 HP-04 综合首页取代）、AC-02-3 私密缺席、AC-04 排版持久化、SPEC §7 五态。续播卡与 A-2/A-4 生命周期见 27-home-lifecycle。 */
 
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  catalog, channel, content, flush, gridClass, harness, reply, seen, TOPOLOGY, resetHomeFixtures
+  catalog, channel, content, enterChannel, flush, gridClass, harness, reply, seen, TOPOLOGY, resetHomeFixtures
 } from './home-view-harness';
+import { COMPOSITE_HOME_ID } from '../../src/views/home-nav';
 
 afterEach(resetHomeFixtures);
 
-describe('home-view 挂载与默认高亮（AC-01）', () => {
-  it('首屏拉云端拓扑，四公开频道齐备且默认高亮短剧精选', async () => {
+describe('home-view 挂载与拓扑驱动（AC-01 / HP-04）', () => {
+  it('HP-04 首屏拉云端拓扑：首页在最前，四公开频道按 order 齐备且名称逐字采用云端', async () => {
     const h = harness();
     await h.view.mount();
 
     expect(seen[0]).toBe('/api/channels');
-    expect(Array.from(h.root.querySelectorAll('.channel-tab')).map((tab) => tab.textContent))
-      .toEqual(['短剧精选', '院线电影', '热血动漫', '人文纪录']);
-    expect(h.root.querySelectorAll('.channel-tab[aria-current="true"]').length).toBe(1);
+    expect(Array.from(h.root.querySelectorAll<HTMLElement>('.channel-tab')).map((tab) => tab.textContent))
+      .toEqual(['首页', '短剧精选', '院线电影', '热血动漫', '人文纪录']);
+    expect(Array.from(h.root.querySelectorAll<HTMLElement>('.channel-tab')).map((tab) => tab.dataset.navId))
+      .toEqual([COMPOSITE_HOME_ID, 'drama', 'movie', 'anime', 'documentary']);
+    // AC-01 的"默认高亮短剧精选"已被 HP-04 迁移为"默认停在综合首页"；频道目录仍可按真实身份高亮。
+    expect(h.root.querySelector<HTMLElement>('.channel-tab[aria-current="true"]')?.dataset.navId).toBe(COMPOSITE_HOME_ID);
+    await enterChannel(h.root, 'drama');
     expect(h.root.querySelector<HTMLElement>('.channel-tab[aria-current="true"]')?.dataset.channelId).toBe('drama');
     // AC-25：区块头被物理拔除——频道名与一级频道栏 100% 重复，那一行还白吃 40px 高度。
     expect(h.root.querySelector('.home-section-header')).toBeNull();
     expect(h.root.querySelector('.home-section-title')).toBeNull();
   });
 
-  it('云端未下发短剧精选时高亮 order 最小项，绝不造假频道', async () => {
+  it('HP-04 云端未下发短剧精选时不造假频道节点，频道目录落位退化为 order 最小项', async () => {
     const h = harness((url) =>
       url.startsWith('/api/channels')
         ? reply({ version: 1, channels: [channel('anime', '热血动漫', 3), channel('movie', '院线电影', 2)] })
         : reply(catalog([content('a-1')])));
     await h.view.mount();
+    expect(Array.from(h.root.querySelectorAll<HTMLElement>('.channel-tab[data-channel-id]')).map((tab) => tab.dataset.channelId))
+      .toEqual(['movie', 'anime']);
+    expect(h.root.querySelectorAll('.channel-tab[data-channel-id="drama"]')).toHaveLength(0);
+    await enterChannel(h.root, 'movie');
     expect(h.root.querySelector<HTMLElement>('.channel-tab[aria-current="true"]')?.dataset.channelId).toBe('movie');
   });
 
   it('未下发 private 时整棵 DOM 物理隐形：零节点、零字样、零二级分类', async () => {
     const h = harness();
     await h.view.mount();
+    await enterChannel(h.root, 'drama');
 
     expect(h.root.querySelectorAll('[data-channel-id="private"]').length).toBe(0);
     expect(h.root.innerHTML.toLowerCase()).not.toContain('private');
@@ -69,6 +79,7 @@ describe('home-view 挂载与默认高亮（AC-01）', () => {
   it('选中的二级分类才作为 category 下发，「全部」不带参数', async () => {
     const h = harness();
     await h.view.mount();
+    await enterChannel(h.root, 'drama');
     const pill = Array.from(h.root.querySelectorAll<HTMLButtonElement>('.capsule')).find((entry) => entry.textContent === '战神');
     (pill as HTMLButtonElement).click();
     await flush();

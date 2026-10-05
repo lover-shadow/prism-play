@@ -15,6 +15,9 @@ export interface ProgressContext extends WriteGuardSubject {
   episodeId: number;
   episodeNumber: number;
   episodeTotal: number;
+  /** HP-01: a report may be committed only for the episode whose loaded media source produced the reading. */
+  sourceEpisodeId: number;
+  hasLoadedSource: boolean;
 }
 
 export interface ProgressReporter {
@@ -28,6 +31,8 @@ export function createProgressReporter(input: {
   intervalMs?: number;
   detail(): TitleDetail | null;
   episodeId(): number | null;
+  sourceEpisodeId(): number | null;
+  hasBoundSource(): boolean;
   position(): number;
   duration(): number;
   onProgress?(row: WatchHistoryRow, context: ProgressContext): void;
@@ -45,19 +50,23 @@ export function createProgressReporter(input: {
     emit: (force = false) => {
       const item = input.detail()?.item;
       const episodeId = input.episodeId();
-      if (item === undefined || episodeId === null || (!force && !due())) return false;
+      const sourceEpisodeId = input.sourceEpisodeId();
+      if (item === undefined || episodeId === null || !input.hasBoundSource() || sourceEpisodeId !== episodeId || (!force && !due())) return false;
       const position = input.position();
-      const duration = input.duration() || position;
+      const reportedDuration = input.duration();
+      // HP-01: no media duration is an unknown duration, not evidence that the position is the end.
+      const duration = Number.isFinite(reportedDuration) && reportedDuration > 0 ? reportedDuration : 0;
+      const knownDuration = duration > 0;
       const episodes = input.detail()?.episodes ?? [];
       const number = episodes.find((episode) => episode.episodeId === episodeId)?.episodeNumber ?? 0;
       lastAt = input.clock.now();
       const row: WatchHistoryRow = {
         content_id: item.id, title: item.title, cover_url: item.coverUrl ?? null, last_episode_id: episodeId,
-        last_episode_number: number, position_seconds: Math.round(position), duration_seconds: Math.round(duration),
+        last_episode_number: number, position_seconds: Math.round(position), duration_seconds: knownDuration ? Math.round(duration) : 0,
         total_episodes: episodes.length, updated_at: Math.round(lastAt / 1_000)
       };
       try {
-        input.onProgress?.(row, { ...privacy(), episodeId, episodeNumber: number, episodeTotal: episodes.length });
+        input.onProgress?.(row, { ...privacy(), episodeId, episodeNumber: number, episodeTotal: episodes.length, sourceEpisodeId: episodeId, hasLoadedSource: input.hasBoundSource() });
       } catch (error) {
         // The sink's refusal is the AC-02 zero-disk boundary: surface it, never retry it, never write here.
         input.onBlocked?.(error instanceof Error ? error.message : String(error));

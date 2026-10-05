@@ -36,7 +36,7 @@ body {
   height: 100%;
   /* The notch is handled here, not in JS: overlaysWebView must be on in capacitor.config.ts. */
   padding-top: env(safe-area-inset-top, 0px);
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  /* HP-09：底部安全区只由 `.app-tabbar` 一处计算。这里再加一次就是真机量到的"底栏下面还有一截死黑"。 */
 }
 
 .app-header {
@@ -83,25 +83,37 @@ body {
   display: none;
 }
 
-/* 底栏：背景与分隔线铺满视口，**内容**收进中央 `--tabbar-content-max`（SPEC §1.7.4 / AC-27）。
- * 限宽必须挂在内层容器而不是 `.app-tabbar` 本身——挂上去会把底色和上边框一起缩成 360px，
- * 屏幕上会出现一条断开的悬浮条。 */
+/*
+ * HP-09 底栏：承载面（背景 + 描边 + 圆角）与内容**一起**收窄居中，不再各画两套宽度。
+ *
+ * AC-27 的旧写法是"背景与分隔线铺满视口，只把内容限宽 360px"，真机因此量到一条横贯全屏的厚底栏；
+ * HP-09 判的是"背景承载区跟着内容一起收"，所以 `--tabbar-content-max` 现在同时约束底色、边框与三枚
+ * Tab。栏本体退成一层定位容器：只负责居中、左右留白与**唯一**的底部安全区。
+ *
+ * 结构上它是 `.app-shell` 网格的第三行而不是 `position: fixed` 的浮层——列表最后一项因此不可能被它盖住；
+ * `align-items: flex-end` + 底部零内边距让图标与文字适当靠下，不再垂直居中悬在一条高带子里。
+ * 三枚 Tab 的 44px 触区（`.app-tab` / `.app-tabbar button`）一字未动：收窄的是留白，不是手指的落点。
+ */
 .app-tabbar {
-  min-height: var(--tabbar-height);
+  display: flex;
+  justify-content: center;
+  padding-inline: var(--tabbar-inset-x);
   padding-bottom: var(--safe-area-bottom);
-  background: var(--surface);
-  border-top: 1px solid var(--border);
 }
 
 .app-tabbar-inner {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-around;
   gap: var(--space-2);
   max-width: var(--tabbar-content-max);
   min-height: var(--tabbar-height);
   margin: 0 auto;
   width: 100%;
+  padding: var(--space-1) var(--space-2) 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 
 .app-tabbar button {

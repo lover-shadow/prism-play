@@ -20,7 +20,7 @@
 import type { ContentItem } from '../../edge/src/types/api';
 import { isPrivateSubject, type WatchHistoryRow } from './storage/storage-domains';
 
-/** 编织块 = 20 条 = 7 AI + 7 热门 + 6 探索：35%×20 = 7、30%×20 = 6，整数整除零余数（§1.8.4）。 */
+/** 历史推荐块按7/7/6混排；综合首页配额由HP-05的60作品候选页替代。 */
 export const WEAVE_BLOCK_SIZE = 20;
 export const AI_QUOTA = 7;
 export const HOT_QUOTA = 7;

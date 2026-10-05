@@ -2,7 +2,7 @@
 /** home-view 续播卡与生命周期：AC-03 断点回传、历史域故障隔离、refresh 保态、A-2 搜索条、A-4 无感加载。拓扑/五态见 22-home-view。 */
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { catalog, content, defaultResponder, flush, harness, historyRow, reply, seen, TOPOLOGY, resetHomeFixtures } from './home-view-harness';
+import { catalog, content, defaultResponder, enterChannel, flush, harness, historyRow, reply, seen, TOPOLOGY, resetHomeFixtures } from './home-view-harness';
 
 afterEach(resetHomeFixtures);
 
@@ -70,6 +70,7 @@ describe('home-view 续播卡与生命周期', () => {
           ? reply(catalog([content('c-9')], 2, 2, 77))
           : reply(catalog([content('c-1')], 1, 2, 77)));
     await h.view.mount();
+    await enterChannel(h.root, 'drama');
     // 旧的那颗【加载更多】按钮不再存在于 DOM；尾部只有一枚 1px 哨兵（+ 一条 aria-live 状态行）。
     expect(h.root.querySelector('.home-more-btn')).toBeNull();
     expect(h.root.querySelector('.home-sentinel')).not.toBeNull();

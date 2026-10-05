@@ -219,7 +219,7 @@ export function createStateOverlay(root: HTMLElement): StateOverlay {
 }
 
 /* ==========================================================================
-   播放器控件条：解锁 / 定时 / 选集 三个入口（触摸锁必须始终有出口）
+   播放器控制带（HP-08：只在全屏出现，图标 + 无障碍名称，不留常驻文字胶囊）
    ========================================================================== */
 
 export type ChromeAction = 'lock' | 'sleep' | 'list';
@@ -234,6 +234,12 @@ export interface PlayerChrome {
   destroy(): void;
 }
 
+/**
+ * 状态名不进画面：`已锁定/已解锁` 这类整条文字正是 HP-08 撤掉的"常驻大状态胶囊"。
+ * 同一信息改由 **Lucide 图标（lock / unlock，24px 可见）+ aria-label + aria-pressed** 三处承担，
+ * 屏幕阅读器与操作反馈都还读得到，画面里只剩图标。倍速那颗是唯一的文字控件——它同时是倍速菜单的
+ * 选中值，由 `playback-rate.ts` 自己维护，不在这条带子上再造第二个状态真相源。
+ */
 export function createPlayerChrome(root: HTMLElement, onAction: (action: ChromeAction) => void): PlayerChrome {
   const mk = (tag: string, className: string, attributes: Record<string, string> = {}): HTMLElement => {
     const element = document.createElement(tag);
@@ -246,10 +252,10 @@ export function createPlayerChrome(root: HTMLElement, onAction: (action: ChromeA
   const el = mk('div', 'prism-player__chrome');
   el.dataset['prismUi'] = 'chrome';
   const title = mk('span', 'prism-player__chrome-title');
-  const sleepButton = mk('button', 'prism-player__pill', { type: 'button', 'data-action': 'sleep', 'aria-label': '睡眠定时' });
-  const lockButton = mk('button', 'prism-player__pill', { type: 'button', 'data-action': 'lock' });
-  const listButton = mk('button', 'prism-player__button', { type: 'button', 'data-action': 'list', 'aria-label': '打开选集' });
-  listButton.innerHTML = icon('list', { size: 24, label: '选集' });
+  const sleepButton = mk('button', 'prism-player__button', { type: 'button', 'data-action': 'sleep' });
+  const lockButton = mk('button', 'prism-player__button', { type: 'button', 'data-action': 'lock' });
+  const listButton = mk('button', 'prism-player__button', { type: 'button', 'data-action': 'list' });
+  listButton.innerHTML = icon('list', { size: 24 });
   el.append(title, sleepButton, lockButton, listButton);
   root.append(stage, surface, el);
 
@@ -260,16 +266,26 @@ export function createPlayerChrome(root: HTMLElement, onAction: (action: ChromeA
   };
   el.addEventListener('click', click);
 
+  /** 图标随状态换形（锁定 / 解锁），可见的只有 24px 图形，文字一律进可访问性名称。 */
+  const paint = (button: HTMLElement, name: IconName, label: string): void => {
+    if (button.dataset['glyph'] !== name) {
+      button.innerHTML = icon(name, { size: 24 });
+      button.dataset['glyph'] = name;
+    }
+    button.setAttribute('aria-label', label);
+  };
+
   return {
     stage,
     surface,
     el,
     render: (input) => {
       title.textContent = input.title;
-      sleepButton.textContent = input.sleepLabel;
+      paint(sleepButton, 'timer', `睡眠定时：${input.sleepLabel}`);
       sleepButton.setAttribute('aria-pressed', String(input.sleeping));
-      lockButton.textContent = input.locked ? '已锁定' : '已解锁';
+      paint(lockButton, input.locked ? 'lock' : 'unlock', input.locked ? '手势已锁定，点击解锁' : '锁定手势');
       lockButton.setAttribute('aria-pressed', String(input.locked));
+      paint(listButton, 'list', '打开选集');
     },
     setVisible: (visible) => void el.classList.toggle('is-visible', visible),
     destroy: () => {

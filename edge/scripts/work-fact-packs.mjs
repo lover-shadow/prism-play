@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import { PUBLIC_CHANNEL_IDS, PROVIDERS } from './config-sources.mjs';
+import { assertMetadataBounds } from '../src/library/metadata-policy.mjs';
+import { containsPlatformName } from '../src/library/platform-lexicon.mjs';
 const PRIVATE_PROVIDERS = new Set(PROVIDERS.filter((p) => p.privacy === 'private-all').map((p) => p.id));
 
 export const MAX_PACK_BYTES = 524288;
@@ -112,6 +114,8 @@ export function buildWorkFactPacks(facts) {
   for (const [id, fact] of [...facts].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
     if (id !== fact.workId || fact.isPrivate !== false || fact.enabled !== true ||
         !PUBLIC_CHANNEL_IDS.includes(fact.channelId)) throw new Error(`Invalid public fact: ${id}`);
+    // HP-11/HP-12：越界元数据在这里就拒，不给它进 R2 之后由 Worker 原样吐出去的机会。
+    assertMetadataBounds(fact, `public fact ${id}`, containsPlatformName);
     for (const episode of fact.episodes) for (const line of episode.lines) {
       if (PRIVATE_PROVIDERS.has(line.providerId) || !/^provider_[a-z0-9_]+$/.test(line.providerId)) throw new Error('Private or invalid provider in public fact');
       targetUrl(line.mediaUrl);

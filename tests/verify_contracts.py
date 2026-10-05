@@ -102,9 +102,23 @@ def check_sqlite_schema():
 
     # 诚实校验业务表与 FTS 影子表 (消除 R-7 虚假表数)
     # 0002 新增 cloud_watch_history 与 cloud_user_profile 两张同步表；
-    # 0003 瘦身迁移新增线路健康遥测账本 line_health_signals（内容大表标记 DEPRECATED 但不物理 DROP）。
-    assert len(business_tables) == 23, f"业务表数量不符: 期望 23, 实际 {len(business_tables)}: {business_tables}"
+    # 0003 瘦身迁移新增线路健康遥测账本 line_health_signals（内容大表标记 DEPRECATED 但不物理 DROP）；
+    # 0004 运营后台与分析 additive 新增 analytics_daily / analytics_visitors / analytics_visitor_days /
+    #   admin_sessions / admin_login_limits / coupon_batches / admin_audit_logs 七张表（同样不 DROP 旧表）。
+    assert len(business_tables) == 30, f"业务表数量不符: 期望 30, 实际 {len(business_tables)}: {business_tables}"
     assert len(fts_shadow) == 5, f"FTS5 影子表数量不符: 期望 5, 实际 {len(fts_shadow)}: {fts_shadow}"
+
+    # 0004 运营后台与分析表必须实际落地，而不只是让表数凑够 (计划 §2.4)
+    admin_tables = {
+        "analytics_daily", "analytics_visitors", "analytics_visitor_days",
+        "admin_sessions", "admin_login_limits", "coupon_batches", "admin_audit_logs",
+    }
+    assert admin_tables.issubset(set(business_tables)), f"缺少运营后台/分析表: {admin_tables - set(business_tables)}"
+    # card_coupons 的分发标记为 additive，旧行默认 UNKNOWN，须人工确认库存后方可分发。
+    coupon_dispatch_cols = {"dispatch_status", "dispatch_note", "dispatched_at", "dispatch_request_id", "batch_id"}
+    coupon_cols = {r[1] for r in conn.execute("PRAGMA table_info(card_coupons)").fetchall()}
+    missing_coupon_cols = coupon_dispatch_cols - coupon_cols
+    assert not missing_coupon_cols, f"card_coupons 缺少分发列: {missing_coupon_cols}"
 
     # 验证多端同步表存在且幂等主键成立 (SPEC §2.1)
     sync_tables = {"cloud_watch_history", "cloud_user_profile"}
@@ -226,7 +240,7 @@ if __name__ == "__main__":
         check_design_tokens()
         print("\n==================================================")
         print("  【阶段 0：施工前契约复核门禁 (Gate G0)】通过检验！")
-        print("   (覆盖 22 API / 23 业务表 / 13 功能 / 30 AC 验收)")
+        print("   (覆盖 22 API / 30 业务表 / 13 功能 / 30 AC 验收)")
         print("==================================================")
     except Exception as e:
         print(f"\n[FAILED] 契约复核未通过: {e}", file=sys.stderr)

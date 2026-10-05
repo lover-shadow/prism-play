@@ -34,6 +34,15 @@ export const flush = async (): Promise<void> => {
   await new Promise((resolve) => setTimeout(resolve, 0));
 };
 export const gridClass = (root: HTMLElement): string => (root.querySelector('.home-poster-grid') as HTMLElement | null)?.className ?? '';
+/** HP-04：启动默认停在综合首页，要看频道目录语义就得先点进真实频道（这一步不发任何伪频道请求）。 */
+export const enterChannel = async (root: HTMLElement, id: ChannelId): Promise<void> => {
+  (root.querySelector(`[data-channel-id="${id}"]`) as HTMLButtonElement).click();
+  await flush();
+};
+export const navIds = (root: HTMLElement): string[] =>
+  Array.from(root.querySelectorAll<HTMLElement>('.channel-tab')).map((tab) => tab.dataset.navId ?? '');
+export const currentNav = (root: HTMLElement): string | undefined =>
+  root.querySelector<HTMLElement>('.channel-tab[aria-current="true"]')?.dataset.navId;
 export const resetHomeFixtures = (): void => {
   document.body.replaceChildren();
   seen.length = 0;

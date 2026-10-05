@@ -38,6 +38,24 @@ const fact = (id, extra = {}) => ({ id, workId: id, title: '标题', channelId: 
   episodes: [{ episodeNumber: 1, lines: [{ providerId: 'provider_m1', mediaUrl: 'https://media.example/1' }] }],
   generatedAt: 0, ...extra });
 
+/**
+ * HP-11 之后，`synopsis` 是 240 码点硬边界，不能再拿来当体积杠杆——那样造出来的 fact
+ * 本身就是一条非法公开资产，会被策略源判据拒掉。这里改用**契约内**的杠杆撑字节数：
+ * 集数做粗调（每集边际恒定），第一集标题做 1 字节细调，所以能命中精确边界。
+ */
+function bulkyFact(id, targetBytes) {
+  const lines = [{ providerId: 'provider_m1', mediaUrl: 'https://media.example/1.m3u8' }];
+  const episode = (n) => ({ episodeNumber: n, title: '', lines });
+  const size = (count) => Buffer.byteLength(JSON.stringify({ schema: 1, works: {
+    [id]: { ...fact(id), episodes: Array.from({ length: count }, (_, i) => episode(i + 1)) } } }), 'utf8');
+  const marginal = size(2) - size(1);
+  let count = 1 + Math.max(0, Math.floor((targetBytes - size(1)) / marginal));
+  while (size(count) > targetBytes) count -= 1;
+  const episodes = Array.from({ length: count }, (_, i) => episode(i + 1));
+  episodes[0].title = 'x'.repeat(targetBytes - size(count));
+  return { ...fact(id), episodes };
+}
+
 test('one sorted JOIN merges lines, preserves catalog fields and uses raw cover before proxy DB cover', () => {
   const { db, catalog, metadata } = fixture();
   try {
@@ -160,7 +178,7 @@ test('recursive hash nibble splitting is deterministic, byte accurate and conten
     const id = `作品_${i}`;
     if (digest(id).startsWith('ab')) ids.push(id);
   }
-  const facts = new Map(ids.map((id) => [id, fact(id, { synopsis: '中'.repeat(60000) })]));
+  const facts = new Map(ids.map((id) => [id, bulkyFact(id, 180000)]));
   const result = buildWorkFactPacks(facts);
   assert.ok(result.objects.length > 1);
   assert.deepEqual(buildWorkFactPacks(new Map([...facts].reverse())), result);
@@ -185,7 +203,7 @@ test('recursive hash nibble splitting is deterministic, byte accurate and conten
 test('large route inventory uses compact directory without dropping any facts or raising caps', () => {
   const facts = new Map(Array.from({ length: 1000 }, (_, i) => {
     const id = `drama_m_${i}`;
-    return [id, fact(id, { synopsis: 'x'.repeat(130000) })];
+    return [id, bulkyFact(id, 130000)];
   }));
   const result = buildWorkFactPacks(facts);
   assert.equal(result.workFacts.schema, 2);
@@ -202,14 +220,16 @@ test('large route inventory uses compact directory without dropping any facts or
 });
 
 test('exact final UTF-8 boundary passes and oversized single work fails', () => {
-  const value = fact('a', { synopsis: '' });
-  const overhead = Buffer.byteLength(JSON.stringify({ schema: 1, works: { a: value } }), 'utf8');
-  value.synopsis = 'x'.repeat(MAX_PACK_BYTES - overhead);
+  const value = bulkyFact('a', MAX_PACK_BYTES);
   assert.equal(buildWorkFactPacks(new Map([['a', value]])).report.maxPackBytes, MAX_PACK_BYTES);
-  value.synopsis += '中';
+  value.episodes[0].title += '中';
   assert.throws(() => buildWorkFactPacks(new Map([['a', value]])), /Oversized single work/);
   assert.equal(Buffer.byteLength(serializeManifest({ value: 'x'.repeat(65524) })), 65536);
   assert.throws(() => serializeManifest({ value: '中'.repeat(65536) }), /64 KiB/);
+  assert.throws(() => buildWorkFactPacks(new Map([['a', fact('a', { synopsis: '长'.repeat(241) })]])),
+    /公开元数据判据失败/);
+  assert.equal(buildWorkFactPacks(new Map([['a', fact('a', { synopsis: '长'.repeat(240), tags: ['剧情'] })]]))
+    .report.works, 1);
 });
 
 test('offline publisher persists facts and manifest, and orders manifest KV pointer last', async () => {

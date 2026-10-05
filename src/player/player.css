@@ -8,8 +8,9 @@
  */
 
 .prism-player {
-  /* 几何常量（非颜色）：控件条与底部控制带决定手势面剩余的区域。 */
-  --prism-chrome-h: calc(var(--space-12) + env(safe-area-inset-top, 0px));
+  /* 几何常量（非颜色）：控件条与底部控制带决定手势面剩余的区域。
+     `--player-chrome-h` 只在**全屏**那一屏成立——非全屏由 `player-host.css` 把它归零（HP-08：画面里没有悬浮条）。 */
+  --prism-chrome-h: calc(var(--player-chrome-h) + env(safe-area-inset-top, 0px));
   --prism-lower-h: var(--space-16);
   /* 层叠令牌（宿主唯一权威）：媒体子树整体只占 `--prism-z-media` 这一层，
      artplayer 内部那些 z10/z20 出不了 `__stage` 的 stacking context，因此压不到宿主 chrome 之上。 */
@@ -26,13 +27,15 @@
 /* 手势接收面：位于视频之上、控件之下；上下控制带由布局本身排除，因此 classifyTouch 看到的带宽为 0。 */
 .prism-player__body { position: absolute; inset: var(--prism-chrome-h) 0 var(--prism-lower-h); z-index: var(--prism-z-gesture); background: transparent; touch-action: none; }
 
-/* 独立顶部控制带：宽度只跟舞台，窄竖屏内容矩形不能挤压五个入口。
-   标题先收窄；按钮固定 44px，长定时/倍速文案省略，完整名称仍由 aria-label 提供。 */
+/* 独立顶部控制带（HP-08：只在**全屏**出现）：宽度只跟舞台，窄竖屏内容矩形不能挤压五个入口。
+   标题先收窄；按钮固定 44px，长定时/倍速文案省略，完整名称仍由 aria-label 提供。
+   背景撤掉"横贯实心带 + 下边框"，只留上沿一道渐隐遮罩（`--player-chrome-scrim`）——
+   图标压在任意画面上仍读得清，但画面不再被一条黑带盖住。非全屏时宿主直接把这条带子请出画面。 */
 .prism-player__chrome {
   position: absolute; top: 0; inset-inline: 0; width: auto; box-sizing: border-box;
   z-index: var(--prism-z-chrome); display: flex; align-items: center; gap: var(--space-2);
   min-height: var(--prism-chrome-h); padding: env(safe-area-inset-top, 0px) max(var(--space-3), env(safe-area-inset-right, 0px)) 0 max(var(--space-3), env(safe-area-inset-left, 0px));
-  background: var(--surface-overlay); border-bottom: 1px solid var(--player-hud-border);
+  background: var(--player-chrome-scrim);
   opacity: 0; pointer-events: none; transform: translateY(-100%);
   transition: transform var(--duration-normal) var(--ease-out), opacity var(--duration-normal) var(--ease-out);
 }
@@ -53,6 +56,16 @@
 .prism-player__button { width: 44px; padding: 0; }
 .prism-player__pill:hover, .prism-player__button:hover { color: var(--player-accent); border-color: var(--player-accent); }
 .prism-player__pill[aria-pressed='true'] { color: var(--player-accent); border-color: var(--player-accent); }
+
+/* HP-08 紧凑透明控制层：控制带里的键只留可见图标，底色与描边一起撤掉。
+   两条账分开记——**命中区** = `--player-hit`(44px，SPEC §10 硬下限，按钮盒本身)，
+   **可见尺寸** = `--player-glyph`(24px 图标)。观感变紧凑不等于触区跟着缩，这一条必须真机量。
+   倍速那颗是唯一保留文字的控件（它同时是倍速菜单的选中值），同样不再画实心胶囊底。 */
+.prism-player__chrome .prism-player__button { min-width: var(--player-hit); min-height: var(--player-hit); background: transparent; border-color: transparent; }
+.prism-player__chrome .prism-player__button svg { width: var(--player-glyph); height: var(--player-glyph); }
+.prism-player__chrome .prism-player__pill { min-height: var(--player-hit); background: transparent; border-color: transparent; padding: 0 var(--space-2); }
+.prism-player__chrome .prism-player__button:hover, .prism-player__chrome .prism-player__pill:hover,
+.prism-player__chrome [aria-pressed='true'] { color: var(--player-accent); border-color: transparent; }
 
 /* ==========================================================================
    手势 HUD：音量（水滴冰蓝 --player-vol-accent）与亮度（暖阳金芒 --player-bri-accent）

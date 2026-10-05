@@ -54,10 +54,50 @@ describe('R26 player repair', () => {
 
   it('current episode callback follows actual ready state, metadata never advances episodes', async () => {
     const change = vi.fn(); const h = setup({ onEpisodeChange: change });
-    await h.player.load(11); h.fire('loadedmetadata'); await settle();
+    await h.player.load(11); h.fire('loadedmetadata'); h.fire('play'); h.fire('playing'); await settle();
     expect(change.mock.calls.map(([ep]) => ep.episodeId)).toEqual([11]);
     h.fire('ended'); await settle();
     expect(change.mock.calls.map(([ep]) => ep.episodeId)).toEqual([11, 12]);
+    h.player.destroy();
+  });
+
+  it.each(['playing', 'seeked', 'waiting', 'seeking', 'pause', 'timeupdate', 'loadedmetadata'] as const)
+  ('HP-01: %s never uses the old ended fallback to advance an episode', async (event) => {
+    const h = setup(); await h.player.load(11); h.fire('playing'); await settle();
+    h.fire(event); await settle();
+    expect(h.player.state().episodeId).toBe(11);
+    h.player.destroy();
+  });
+
+  it('HP-01: only a valid ended advances once, including after natural pause', async () => {
+    const boundary = vi.fn(async () => undefined); const h = setup({ onNaturalBoundary: boundary });
+    await h.player.load(11); h.fire('play'); h.fire('ended'); await settle();
+    expect(h.player.state().episodeId).toBe(12); expect(boundary).toHaveBeenCalledTimes(1);
+    h.fire('ended'); await settle(); expect(h.player.state().episodeId).toBe(12);
+    h.player.destroy();
+  });
+
+  it('HP-01: a replaced media source cannot commit its old position to the new episode', async () => {
+    const h = setup(); await h.player.load(11); h.state.t = 80;
+    const before = h.progress.mock.calls.length;
+    h.player.pause();
+    expect(h.progress.mock.calls.slice(before).every(([, context]) => (context as { sourceEpisodeId: number }).sourceEpisodeId === 11)).toBe(true);
+    expect(h.progress.mock.calls.at(-1)?.[0]).toMatchObject({ last_episode_id: 11, position_seconds: 80 });
+    h.state.t = 0;
+    await h.player.load(12); h.player.pause();
+    expect(h.progress.mock.calls.at(-1)?.[0]).toMatchObject({ last_episode_id: 12, position_seconds: 0 });
+    h.player.destroy();
+  });
+
+  it('HP-01: unknown duration is not inferred from position or marked complete', async () => {
+    const h = setup(); h.state.duration = 0; await h.player.load(11); h.state.t = 80; h.clock.advance(6_000); h.fire('timeupdate');
+    expect(h.progress.mock.calls.at(-1)?.[0]).toMatchObject({ position_seconds: 80, duration_seconds: 0 });
+    h.player.destroy();
+  });
+
+  it('HP-01: an error is never interpreted as a natural episode boundary', async () => {
+    const h = setup(); await h.player.load(11); h.fire('error'); await settle();
+    expect(h.player.state()).toMatchObject({ episodeId: 11, phase: 'error' });
     h.player.destroy();
   });
 });

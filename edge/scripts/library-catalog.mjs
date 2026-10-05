@@ -5,8 +5,10 @@ import {
 } from './config-sources.mjs';
 import {
   deriveCategory, isAiFlag, assignHotFlags, toCatalogItem, sortForSharding,
-  cleanTitle, shortSynopsis
+  cleanTitle
 } from './compute-hotscore.mjs';
+import { normalizeSynopsis, publicWorkMetadata } from '../src/library/metadata-policy.mjs';
+import { stripPlatformNames } from '../src/library/platform-lexicon.mjs';
 
 /** Legacy cache filenames identify a type, not a provider: only accept unambiguous targets. */
 export function readHarvestMetadata(directory) {
@@ -69,11 +71,15 @@ export function buildLibraryCatalog(db, metadata, nowSeconds) {
   const report = { total: 0, ai: 0, hot: 0, metadataMatched: 0,
     missingHitsTotal: 0, missingHitsWeek: 0, missingFirstPublishedAt: 0,
     positiveHitsTotal: 0, positiveHitsWeek: 0, hotRecomputed: 0 };
+  /** HP-11/HP-12 真实供给覆盖：按频道记「字段真的长出来了」的部数，不是界面夹具数量。 */
+  const coverage = Object.fromEntries(PUBLIC_CHANNEL_IDS.map((channelId) =>
+    [channelId, { total: 0, synopsis: 0, releaseYear: 0, region: 0, language: 0, tags: 0 }]));
   const records = rows.filter((row) => PUBLIC_CHANNEL_IDS.includes(row.channel_id)).map((row) => {
     const evidence = metadata.get(row.id);
     const raw = evidence?.item;
     const channelId = evidence?.target.channelId ?? row.channel_id;
     const title = cleanTitle(row.title);
+    if (!title) throw new Error(`Public work has no usable title: ${row.id}`);
     const record = {
       id: row.id, channelId, title,
       category: deriveCategory(channelId, title, evidence?.target.typeId, raw?.type_name ?? row.category),
@@ -83,8 +89,17 @@ export function buildLibraryCatalog(db, metadata, nowSeconds) {
       isAi: row.is_ai === 1 || isAiFlag(evidence?.target.forceAi, title, raw?.vod_class),
       isHot: row.is_hot === 1
     };
-    const synopsis = shortSynopsis(raw ? (raw.vod_blurb || raw.vod_content) : row.synopsis);
-    if (synopsis && synopsis !== '暂无简介') record.synopsis = synopsis;
+    // 有离线采集原料时按 §3.3 的原料口径归一；只有库行时仅保留已有的清洗摘要——
+    // content_items 根本没有 year/area/lang/tag 列，缺列就是缺供，绝不拿上架时间或片名补一个假值。
+    const supplied = raw
+      ? publicWorkMetadata(channelId, raw, stripPlatformNames)
+      : Object.fromEntries([['synopsis', normalizeSynopsis(row.synopsis, stripPlatformNames)]].filter(([, value]) => value !== undefined));
+    Object.assign(record, supplied);
+    const tally = coverage[channelId];
+    tally.total += 1;
+    for (const key of ['synopsis', 'releaseYear', 'region', 'language', 'tags']) {
+      if (record[key] !== undefined) tally[key] += 1;
+    }
     // No now/created_at fallback: upstream timestamps are evidence, packaging time is not.
     const published = raw
       ? toEpochSeconds(raw.vod_time, raw.vod_time_add, undefined)
@@ -121,6 +136,7 @@ export function buildLibraryCatalog(db, metadata, nowSeconds) {
   report.total = records.length;
   report.ai = records.filter((record) => record.isAi).length;
   report.hot = records.filter((record) => record.isHot).length;
+  report.metadataCoverage = coverage;
   const channels = Object.fromEntries(PUBLIC_CHANNEL_IDS.map((channelId) => [channelId,
     sortCandidateSupply(records.filter((record) => record.channelId === channelId)).map(toCatalogItem)]));
   return { channels, report };

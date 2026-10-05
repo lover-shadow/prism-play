@@ -195,3 +195,14 @@ describe('A-8 失败分类：内核能给多少就记多少，给不出就保守
     expect(classifyMediaError(undefined)).toBeNull();
   });
 });
+
+describe('HP-01 ended and source isolation', () => {
+  it('a valid play, seek recovery, and ended sequence advances only one episode', async () => {
+    const h = wired(); await h.player.load(11);
+    h.player.play(); h.fire('seeked'); h.fire('timeupdate'); h.fire('ended'); await settle();
+    expect(h.player.state().episodeId).toBe(12);
+    h.fire('playing'); h.fire('ended'); await settle();
+    expect(h.player.state().episodeId).toBe(12);
+    h.player.destroy();
+  });
+});

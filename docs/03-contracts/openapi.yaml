@@ -61,7 +61,8 @@ components:
           example: drama
         name:
           type: string
-          example: 短剧精选
+          description: 客户端固定公开导航标签：drama=精彩短剧、movie=电影仓库、documentary=人文纪录、anime=动漫；首页是本地视图，不作为ChannelItem下发
+          example: 精彩短剧
         order:
           type: integer
           example: 1
@@ -105,6 +106,30 @@ components:
           example: https://play.prismos.org/proxy/img/d_8f31c2
         synopsis:
           type: string
+          maxLength: 240
+          description: 可选的清洗后真实摘要，最多240个Unicode code points；无摘要时省略
+        tags:
+          type: array
+          maxItems: 6
+          uniqueItems: true
+          description: 可选的可信受控题材/风格展示标签；不得用搜索词、标题或制作类型推断
+          items:
+            type: string
+            minLength: 1
+            maxLength: 12
+        releaseYear:
+          type: integer
+          minimum: 1000
+          maximum: 9999
+          description: 可选的来源明确年份；不得以发布日期、上架时间或采集时间推导
+        region:
+          type: string
+          maxLength: 64
+          description: 可选的来源明确地区
+        language:
+          type: string
+          maxLength: 64
+          description: 可选的来源明确语言
         episodeCount:
           type: integer
           example: 68

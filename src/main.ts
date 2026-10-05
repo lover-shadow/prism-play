@@ -96,7 +96,8 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
       return { ...page, items: posters.items(items) };
     },
     cachedSnapshot: () => ({
-      channels: storage.cache.getChannels(),
+      // `state` 是候选覆盖度与修订的唯一事实来源：综合首页据此如实记 full/partial，不夸口成全库（HP-05）。
+      channels: storage.cache.getChannels(), state: () => catalog.snapshotState(),
       items: (channel: string) => posters.items(storage.cache.list(channel).filter((entry) => !isPrivateSubject(entry)))
     })
   };
@@ -166,6 +167,7 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
     if (tab === 'home') {
       const view = createHomeView({
         api: homeApi,
+        nowSeconds: now,
         syncCatalog: async () => { const result = await catalog.syncIncremental(); if (result.reason) throw new Error(result.reason); },
         root,
         headerAccessory: shell.headerAccessory(),
@@ -256,7 +258,7 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
   // 快照优先（AC-01）：bootstrap 内部会先 hydrate 再后台同步；同步成功即刷新离线校验时点（AC-15）。
   const started = await catalog.bootstrap();
   if (started.outcome !== null && started.outcome.offline === false) await grant.recordOnlineCheck(now());
-  catalog.onSynced((outcome) => { if (homeView !== null && outcome.appliedEntries > 0) void homeView.refresh(); });
+  catalog.onSynced((outcome) => { if (homeView !== null && outcome.appliedEntries > 0) void homeView.syncRecommendation(); }); // HP-06b：后台推进只走背景同步入口，新的发现轮次只由用户显式刷新开启
   const releaseNotifications = bindNotificationActions((action) => player.onNotification(action));
   // §1.9.3 节点 ②：切到后台（`isActive === false`）即静默上报当前断点。监听口与 `back-button.ts` 同款
   // 守卫——非原生宿主根本不注册，Web 构建退化为 no-op，绝不因为缺 `@capacitor/app` 而抛错。

@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { boot } from '../../src/main';
 import type { PrismApp } from '../../src/main';
 import type { PrismNativeBridge } from '../../src/core/native/bridge';
+import { COMPOSITE_HOME_ID } from '../../src/views/home-nav';
 
 const CHANNELS = {
   version: 7,
@@ -91,7 +92,7 @@ describe('组合根：Web 宿主启动', () => {
     expect(probe.requests).toEqual([]);
   });
 
-  it('首屏装配三主 Tab 与云端下发的频道名，海报逐字采用响应内容', async () => {
+  it('HP-04 首屏装配三主 Tab 与云端下发的频道名，海报逐字采用响应内容', async () => {
     const { app } = await start();
     expect(app).not.toBeNull();
     expect(document.querySelectorAll('.app-tab')).toHaveLength(3);
@@ -99,8 +100,10 @@ describe('组合根：Web 宿主启动', () => {
     expect(document.querySelector('.app-tab[data-tab="search"]')).toBeNull();
     expect(document.querySelector('.home-search-bar')).not.toBeNull();
     expect([...document.querySelectorAll('.channel-tab')].map((node) => node.textContent))
-      .toEqual(['短剧精选', '院线电影', '热血动漫', '人文纪录']);
-    expect(query('.channel-tab[aria-current="true"]')?.getAttribute('data-channel-id')).toBe('drama');
+      .toEqual(['首页', '短剧精选', '院线电影', '热血动漫', '人文纪录']);
+    // AC-01 的"默认高亮 drama"由 HP-04 迁移为"启动停在综合首页"；首页是本地身份，不带 data-channel-id。
+    expect(query('.channel-tab[aria-current="true"]')?.getAttribute('data-nav-id')).toBe(COMPOSITE_HOME_ID);
+    expect(query('.channel-tab[aria-current="true"]')?.hasAttribute('data-channel-id')).toBe(false);
     expect(document.body.textContent).toContain('凤逆天下');
     expect(query<HTMLElement>('.home-poster-grid')?.dataset.state).toBe('ready');
   });

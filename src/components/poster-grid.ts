@@ -19,12 +19,21 @@ import type { IconName } from './icons';
 export const POSTER_GRID_BASE_CLASS = 'home-poster-grid';
 export const DEFAULT_SKELETON_COUNT = 12;
 
-/** 左上角微光角标文案（§1.8.5 / AC-29）：文字本身就是依据，不借任何图形符号（P0-1 零 Emoji）。 */
+/** 左上角微光角标文案（§1.8.5 / AC-29，口径由 HP-10 判回类型事实）：文字本身就是依据，不借任何图形符号（P0-1 零 Emoji）。 */
 export const CORNER_BADGE_LABEL: Readonly<Record<BadgeKind, string>> = {
-  ai: 'AI精品',
+  ai: 'Ai剧',
   hot: '热门',
   recommend: '推荐'
 };
+
+/**
+ * HP-10：`ai` 角标的**渲染侧依据**。判定表（`recommendation.ts`）负责"这颗贴什么"，渲染侧再核一次
+ * "数据是否真的说了它是 AI"——`isAi !== true` 就留白。缺依据不是缺样式，缺依据也不能贴标；
+ * 而 `Ai剧` 只陈述制作类型：旧文案把类型说成了质量评价，已按 HP-10 撤掉，不得在任何界面重新出现。
+ */
+export function cornerBadgeVisible(item: ContentItem, kind: BadgeKind): boolean {
+  return kind !== 'ai' || item.isAi === true;
+}
 
 /** 角标类名唯一生成点：判定权在 `recommendation.ts`，本组件只负责把它翻译成 tokens 样式，绝不自行定性。 */
 export function cornerBadgeClass(kind: BadgeKind): string {
@@ -169,8 +178,62 @@ export function createPosterGrid(deps: PosterGridDeps): PosterGrid {
       box.appendChild(element('span', 'poster-ep-badge', episodeBadgeText(item.episodeCount)));
     }
     // 左上角微光角标与右下角 `.poster-ep-badge` 形成黄金对角呼应；后者的位置是既有权威，不得移动（§1.8.5）。
-    if (badge !== undefined) box.appendChild(element('span', cornerBadgeClass(badge), CORNER_BADGE_LABEL[badge]));
+    if (badge !== undefined && cornerBadgeVisible(item, badge)) {
+      box.appendChild(element('span', cornerBadgeClass(badge), CORNER_BADGE_LABEL[badge]));
+    }
     return box;
+  }
+
+  /**
+   * HP-12 副标签：只把"字段真的供出来了"的条目变成节点。空数组是**假值形态的缺席**
+   * （`metadata-policy` 在写侧就拒绝它），读侧同样一枚都不渲染；去重、上限与词表口径不在这里复制第二份。
+   */
+  function subTags(item: ContentItem): string[] {
+    return Array.isArray(item.tags) ? item.tags.filter((tag) => typeof tag === 'string' && tag.trim() !== '') : [];
+  }
+
+  /** HP-11 元信息：年份/地区/语言逐个判在不在，缺一个就少一条，绝不补位也绝不写成"未知"。 */
+  function metaFacts(item: ContentItem): string[] {
+    const facts: string[] = [];
+    const year = item.releaseYear;
+    if (typeof year === 'number' && Number.isSafeInteger(year) && year > 0) facts.push(String(year));
+    for (const value of [item.region, item.language]) {
+      const text = typeof value === 'string' ? value.trim() : '';
+      if (text !== '') facts.push(text);
+    }
+    return facts;
+  }
+
+  /**
+   * 卡片信息块（HP-11 / HP-12）：**有则展示、无则压缩**。
+   * 主分类 `category` 仍是筛选口径那一条，副标签 `tags` 与它并存各占自己的节点；
+   * 摘要原样落进安全文本节点（读侧已按 `metadata-policy` 消毒并限长，界面不再做第二次截断，
+   * 也不再复制长度／条数／年份区间这类边界数字——那是第二份口径）；一条信息都没有时就只剩标题——
+   * 不编兜底文案，也不留一块撑高的空槽。全部经 `element()` 的 textContent 写出，原料里的 HTML 只是文字。
+   */
+  function infoBlock(item: ContentItem): HTMLElement {
+    const body = element('span', 'poster-body');
+    body.appendChild(element('span', 'poster-title', item.title));
+
+    const category = typeof item.category === 'string' ? item.category.trim() : '';
+    const tags = subTags(item);
+    if (category !== '' || tags.length > 0) {
+      const meta = element('span', 'poster-meta');
+      if (category !== '') meta.appendChild(element('span', 'poster-tag', category));
+      for (const tag of tags) meta.appendChild(element('span', 'poster-subtag', tag));
+      body.appendChild(meta);
+    }
+
+    const facts = metaFacts(item);
+    if (facts.length > 0) {
+      const row = element('span', 'poster-facts');
+      for (const fact of facts) row.appendChild(element('span', 'poster-fact', fact));
+      body.appendChild(row);
+    }
+
+    const synopsis = typeof item.synopsis === 'string' ? item.synopsis : '';
+    if (synopsis.trim() !== '') body.appendChild(element('span', 'poster-synopsis', synopsis));
+    return body;
   }
 
   function card(item: ContentItem, badge?: BadgeKind): HTMLElement {
@@ -181,16 +244,7 @@ export function createPosterGrid(deps: PosterGridDeps): PosterGrid {
     open.type = 'button';
     open.setAttribute('aria-label', `《${item.title}》`);
     open.appendChild(media(item, badge));
-
-    const body = element('span', 'poster-body');
-    body.appendChild(element('span', 'poster-title', item.title));
-    if (typeof item.category === 'string' && item.category !== '') {
-      body.appendChild(element('span', 'poster-tag', item.category));
-    }
-    if (typeof item.synopsis === 'string' && item.synopsis !== '') {
-      body.appendChild(element('span', 'poster-synopsis', item.synopsis));
-    }
-    open.appendChild(body);
+    open.appendChild(infoBlock(item));
     open.addEventListener('click', () => deps.onOpenTitle(item.id));
     box.appendChild(open);
 

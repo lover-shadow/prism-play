@@ -30,8 +30,8 @@ android {
         // API 33 POST_NOTIFICATIONS prompt apply to us; both are handled in PlaybackService
         // and PrismNativePlugin, and both are device-checklist items, not assumed behaviour.
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 21603
-        versionName "2.6.3"
+        versionCode 21604
+        versionName "2.6.4"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
