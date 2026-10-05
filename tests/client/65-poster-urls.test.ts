@@ -6,6 +6,8 @@ import { boot, type PrismApp } from '../../src/main';
 import { PrismApiClient } from '../../src/core/api/client';
 import { createCatalogCacheService } from '../../src/core/catalog-cache';
 import { createPosterUrls } from '../../src/core/poster-urls';
+import { createHistoryView } from '../../src/views/history-view';
+import { buildDetailBody } from '../../src/player/player-detail';
 import { MemoryCacheDisk, PublicCache } from '../../src/core/storage/public-cache';
 
 // 只替代 SQLite 检索能力；结果 DTO 仍由真实 localItems 读面解析。
@@ -96,6 +98,66 @@ describe('Capacitor 首页与搜索读取边界', () => {
       return json({ changes: [], nextRevision: 7, hasMore: false });
     } });
     await assertHomeAndSearch();
+  });
+});
+
+describe('related 推荐边界与真实展示（原生 origin）', () => {
+  const secret = { ...item('/proxy/img/secret?exp=123&sig=s'), id: 'secret', channelId: 'private' as const, isPrivate: false };
+  const response = { items: [item(), secret, { ...item(), id: 'flagged', isPrivate: true }] };
+  const client = () => new PrismApiClient({ baseUrl: BASE, fetchImpl: async () => json(response) });
+
+  it.each(['/proxy/img/a', `${BASE}/proxy/img/a`, 'https://localhost/proxy/img/a'])('合法封面 %s 在 related 边界统一到 API，私密条目不进入推荐', async (raw) => {
+    const source = { ...response, items: [{ ...item(raw) }, secret, { ...item(), id: 'flagged', isPrivate: true }] };
+    const api = new PrismApiClient({ baseUrl: BASE, fetchImpl: async () => json(source) });
+    const result = await api.related('seed');
+    expect(result.items.map(entry => entry.id)).toEqual(['a']);
+    expect(result.items[0]?.coverUrl).toBe(`${BASE}/proxy/img/a`);
+    expect(source.items[0]?.coverUrl).toBe(raw);
+  });
+
+  it.each(['https://evil.example/proxy/img/a', '//evil.example/proxy/img/a', '/proxy/media/a', '/proxy/img/%2f', 'javascript:alert(1)'])('恶意封面 %s 在边界拒绝', async (raw) => {
+    const api = new PrismApiClient({ baseUrl: BASE, fetchImpl: async () => json({ items: [item(raw)] }) });
+    expect((await api.related('seed')).items[0]?.coverUrl).toBeUndefined();
+  });
+
+  it('Web 同源配置仍指向页面 origin', async () => {
+    const api = new PrismApiClient({ fetchImpl: async () => json({ items: [item()] }) });
+    expect((await api.related('seed')).items[0]?.coverUrl).toBe('https://localhost/proxy/img/a');
+  });
+
+  it.each(['history', 'player'])('%s related 的实际 img 指向 API；error 移除破图并呈现既有图标', async (surface) => {
+    expect(location.origin).toBe('https://localhost');
+    const api = client();
+    let cleanup: () => void;
+    let root: HTMLElement;
+    if (surface === 'history') {
+      root = document.createElement('div');
+      const view = createHistoryView({ api, root,
+        history: { list: async () => [{ content_id: 'seed', title: '种子剧', cover_url: null, last_episode_id: 1,
+          last_episode_number: 1, position_seconds: 1, duration_seconds: 100, total_episodes: 2, updated_at: 1 }], clear: async () => undefined },
+        credentials: { readGrant: async () => null, clearGrant: async () => undefined },
+        onOpenTitle: () => undefined, onResume: () => undefined });
+      await view.mount(); cleanup = () => view.destroy();
+    } else {
+      const stage = buildDetailBody({ item: { ...item(), id: 'seed' }, episodes: [{ episodeId: 1, episodeNumber: 1 }] },
+        1, () => undefined, () => undefined, undefined, undefined, async () => (await api.related('seed')).items);
+      root = stage.body; cleanup = () => stage.destroy();
+    }
+    try {
+      await vi.waitFor(() => {
+        const images = root.querySelectorAll<HTMLImageElement>('[data-el="related-card"] img, .related-card img');
+        expect(images).toHaveLength(1);
+        expect(images[0]?.src).toBe(`${BASE}/proxy/img/a`);
+      });
+      expect(root.innerHTML).not.toContain('secret');
+      expect(root.innerHTML).not.toContain('flagged');
+      const image = root.querySelector<HTMLImageElement>('[data-el="related-card"] img, .related-card img')!;
+      const cover = image.parentElement!;
+      image.dispatchEvent(new Event('error'));
+      expect(cover.querySelector('img')).toBeNull();
+      expect(cover.querySelector('svg')).not.toBeNull();
+      if (surface === 'player') expect(cover.querySelector('.related-tag')?.textContent).toBe('全1集');
+    } finally { cleanup(); }
   });
 });
 

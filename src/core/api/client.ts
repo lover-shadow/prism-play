@@ -19,6 +19,8 @@ import type {
   VersionResponse
 } from '../../../edge/src/types/api';
 import { logger } from '../diagnostics';
+import { createPosterUrls } from '../poster-urls';
+import { isPrivateSubject } from '../storage/storage-domains';
 import { adaptTitleDetail } from './title-detail';
 
 /**
@@ -164,8 +166,10 @@ export class PrismApiClient {
     return this.get(`/api/titles/${encodeURIComponent(workId)}`);
   }
 
-  related(titleId: string): Promise<RelatedResponse> {
-    return this.get(`/api/titles/${encodeURIComponent(titleId)}/related`);
+  async related(titleId: string): Promise<RelatedResponse> {
+    const response = await this.get<RelatedResponse>(`/api/titles/${encodeURIComponent(titleId)}/related`);
+    // 推荐是公开读取面；与首页共用受控代理入口，原生页面 origin 不是 API origin。
+    return { ...response, items: createPosterUrls(this.baseUrl).items(response.items.filter((item) => !isPrivateSubject(item))) };
   }
 
   playback(episodeId: number): Promise<PlaybackInfo> {

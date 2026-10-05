@@ -96,7 +96,7 @@ export function createPlaybackRate(options: {
   bind(options.surface, 'pointerleave', cancel); bind(window, 'blur', cancel);
   bind(document, 'visibilitychange', () => { if (document.hidden) cancel(); });
   return {
-    button, set, cancel, close, normal: () => normal,
+    button, set, cancel, close, isOpen: () => !sheet.hidden, normal: () => normal,
     reapply: () => { if (normal !== 1 || options.engine()?.setPlaybackRate) apply(normal); },
     destroy: () => { cancel(); for (const [target, name, fn] of bound) target.removeEventListener(name, fn); sheet.remove(); button.remove(); }
   };

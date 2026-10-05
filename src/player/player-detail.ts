@@ -1,18 +1,54 @@
 /**
- * 竖屏非全屏剧集详情生态台 (Portrait Media Stage)
- * 包含：剧名标题与分类胶囊、折叠简介、核心操作工具岛（追剧/投屏/分享/全屏）、常驻选集横滑轨、同类好剧推荐流。
+ * 竖屏非全屏剧集详情生态台 (Portrait Media Stage)：剧名与状态胶囊、可折叠简介、核心操作工具岛
+ * （追剧/投屏/分享/沉浸全屏）、常驻选集横滑轨、同类好剧推荐流。
+ *
+ * 文案判据全部外置到 `detail-facts.ts`（集数/分类/合集/简介各归各的字段），本文件只管渲染与交互；
+ * 没有简介就整块不渲染——兜底空话与一个点了没内容的展开控件都是假 UI。
  */
 
 import type { ContentItem, EpisodeItem, TitleDetail } from '../../edge/src/types/api';
 import { icon } from '../components/icons';
 import { isPrivateSubject } from '../core/storage/storage-domains';
+import { coverInto } from '../components/poster-cover';
 import { createCastPanel } from './cast-panel';
 import { createLineAwareCastStreamSource } from './cast-ports';
+import { episodeAriaLabel, episodeBadge } from './episode-sheet';
+import { SYNOPSIS_CLAMP_CHARS, episodeCountLabel, episodeTagOf, statusPillLabels, synopsisOf } from './detail-facts';
 
 export interface PlayerDetailStage {
   body: HTMLElement;
   markEpisode(id: number): void;
-  openCast(): void; dismissOverlay(): boolean; destroy(): void;
+  openCast(): void; closeCast(): void; castOpen(): boolean;
+  dismissOverlay(): boolean; destroy(): void;
+}
+
+function pill(text: string, accent = false): HTMLElement {
+  const node = document.createElement('span');
+  node.className = accent ? 'meta-pill accent' : 'meta-pill';
+  node.textContent = text;
+  return node;
+}
+
+/**
+ * 图标直接作为 `<svg>` 落进宿主元素，不套 `<span>`：`.action-island-item` 的标签 span 与
+ * 追剧态回写（`querySelector('span')`）都按"按钮里唯一的 span 就是文案"来判定，多包一层
+ * 就会让文案写进图标壳里，观感是图标旁边再冒出一个词。
+ */
+function withIcon<T extends HTMLElement>(host: T, name: Parameters<typeof icon>[0], size: 16 | 20 | 24): T {
+  const scratch = document.createElement('div');
+  scratch.innerHTML = icon(name, { size });
+  host.append(...Array.from(scratch.childNodes));
+  return host;
+}
+
+function islandButton(name: Parameters<typeof icon>[0], label: string): HTMLButtonElement {
+  const button = withIcon(document.createElement('button'), name, 20);
+  button.type = 'button';
+  button.className = 'action-island-item';
+  const text = document.createElement('span');
+  text.textContent = label;
+  button.append(text);
+  return button;
 }
 
 export function buildDetailBody(
@@ -24,7 +60,9 @@ export function buildDetailBody(
   onFullscreen?: () => void,
   loadRelated?: () => Promise<ContentItem[]>,
   onOpenRelated?: (contentId: string) => void,
-  following?: { store: import('../core/storage/following-store').FollowingStore; report?(message: string): void }
+  following?: { store: import('../core/storage/following-store').FollowingStore; report?(message: string): void },
+  /** 菜单互斥的宿主接缝：详情台的投屏一开，选集/倍速由宿主收掉（R26-05）。 */
+  menus?: { beforeMenuOpen?(): void }
 ): PlayerDetailStage {
   const body = document.createElement('div');
   body.className = 'prism-player-host__body';
@@ -32,65 +70,54 @@ export function buildDetailBody(
   // 1. 剧目名片区
   const infoCard = document.createElement('div');
   infoCard.className = 'detail-header-card';
-
   const titleRow = document.createElement('div');
   titleRow.className = 'detail-title-row';
   const titleEl = document.createElement('h2');
   titleEl.className = 'detail-main-title';
   titleEl.textContent = info.item.title;
-
-  const currentEp = info.episodes.find((e) => e.episodeId === currentEpisodeId) ?? info.episodes[0];
-  const epTag = document.createElement('span');
-  epTag.className = 'meta-pill accent';
-  epTag.textContent = `第 ${currentEp?.episodeNumber ?? 1} 集`;
+  const epTag = pill(episodeTagOf(info, currentEpisodeId), true);
   titleRow.append(titleEl, epTag);
 
   const metaRow = document.createElement('div');
   metaRow.className = 'detail-meta-pill-row';
-  const epCount = info.episodes.length || info.item.episodeCount || 0;
-  const countPill = document.createElement('span');
-  countPill.className = 'meta-pill';
-  countPill.textContent = `全 ${epCount} 集`;
+  const count = episodeCountLabel(info);
+  for (const label of statusPillLabels(info)) metaRow.append(pill(label));
 
-  const catPill = document.createElement('span');
-  catPill.className = 'meta-pill';
-  catPill.textContent = info.item.category || '精选';
-
-  const statusPill = document.createElement('span');
-  statusPill.className = 'meta-pill';
-  statusPill.textContent = epCount > 0 ? '全集已上线' : '连载中';
-  metaRow.append(countPill, catPill, statusPill);
-
-  // 2. 折叠简介
-  const synopsisBox = document.createElement('div');
-  synopsisBox.className = 'detail-synopsis-box';
-  const synopsisText = document.createElement('p');
-  synopsisText.className = 'detail-synopsis-text';
-  synopsisText.textContent = info.item.synopsis || '暂无详细剧目简介，敬请沉浸观赏精彩剧情。';
-
-  const toggleHint = document.createElement('div');
-  toggleHint.className = 'synopsis-toggle-hint';
-  toggleHint.innerHTML = '<span>展开完整简介</span><span style="font-size:10px; margin-left:2px;">▼</span>';
-
-  synopsisBox.append(synopsisText, toggleHint);
-  synopsisBox.addEventListener('click', () => {
-    const isExpanded = synopsisBox.classList.toggle('is-expanded');
-    const span = toggleHint.querySelector('span');
-    if (span) span.textContent = isExpanded ? '收起完整简介' : '展开完整简介';
-    const arrow = toggleHint.querySelectorAll('span')[1];
-    if (arrow) arrow.textContent = isExpanded ? '▲' : '▼';
-  });
-
-  infoCard.append(titleRow, metaRow, synopsisBox);
+  // 2. 简介：有就显示，长才折叠，没有就整块缺席（不渲染展开控件，也不编一句兜底文案）。
+  infoCard.append(titleRow, metaRow);
+  const synopsis = synopsisOf(info);
+  if (synopsis !== null) {
+    const synopsisBox = document.createElement('div');
+    synopsisBox.className = 'detail-synopsis-box';
+    const synopsisText = document.createElement('p');
+    synopsisText.className = 'detail-synopsis-text';
+    synopsisText.textContent = synopsis;
+    synopsisBox.append(synopsisText);
+    if (synopsis.length > SYNOPSIS_CLAMP_CHARS) {
+      synopsisText.classList.add('is-collapsed');
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'synopsis-toggle';
+      const toggleLabel = document.createElement('span');
+      toggleLabel.textContent = '展开完整简介';
+      toggle.append(toggleLabel);
+      withIcon(toggle, 'chevronRight', 16);
+      toggle.addEventListener('click', () => {
+        const expanded = synopsisText.classList.contains('is-collapsed');
+        synopsisText.classList.toggle('is-collapsed', !expanded);
+        toggle.classList.toggle('is-expanded', expanded);
+        toggleLabel.textContent = expanded ? '收起完整简介' : '展开完整简介';
+      });
+      synopsisBox.append(toggle);
+    }
+    infoCard.append(synopsisBox);
+  }
 
   // 3. 核心操作工具岛 (Action Island - 4 键网格：追剧 / 投屏 / 分享 / 沉浸全屏，SPEC §1.5.1)
   const actionIsland = document.createElement('div');
   actionIsland.className = 'detail-action-island';
 
-  const favBtn = document.createElement('button');
-  favBtn.type = 'button';
-  favBtn.className = 'action-island-item';
-  favBtn.innerHTML = `${icon('bookmark', { size: 20 })}<span>追剧</span>`;
+  const favBtn = islandButton('bookmark', '追剧');
   let disposed = false;
   favBtn.dataset.action = 'following';
   favBtn.disabled = true;
@@ -118,27 +145,17 @@ export function buildDetailBody(
   /**
    * 【投屏】取代原来的第二键。原第二键「缓存本集」是**没有任何机制的死键**：点击只把自身文字改成
    * "已在队列"、给自己加一个 active 类，既不入队、不落盘、不查 `public-cache`，也没有任何消费方读它——
-   * 属于 AGENTS.md「任何前端开关必有真实机制对应」明令禁止的那类假 UI，因此换成有真实原生机制的投屏，
-   * 不是砍掉一个活功能。（真正的离线缓存若要回来，应作为独立工作包接 `cache` 域，而不是挂回这里。）
+   * 属于 AGENTS.md「任何前端开关必有真实机制对应」明令禁止的那类假 UI，因此换成有真实原生机制的投屏。
    */
-  const castBtn = document.createElement('button');
-  castBtn.type = 'button';
-  castBtn.className = 'action-island-item';
-  castBtn.innerHTML = `${icon('cast', { size: 20 })}<span>投屏</span>`;
+  const castBtn = islandButton('cast', '投屏');
 
-  const shareBtn = document.createElement('button');
-  shareBtn.type = 'button';
-  shareBtn.className = 'action-island-item';
-  shareBtn.innerHTML = `${icon('share', { size: 20 })}<span>分享</span>`;
+  const shareBtn = islandButton('share', '分享');
   shareBtn.addEventListener('click', () => {
     const cur = info.episodes.find((e) => e.episodeId === currentEpisodeId) ?? info.episodes[0];
     if (onShare && cur) onShare(cur);
   });
 
-  const cinemaBtn = document.createElement('button');
-  cinemaBtn.type = 'button';
-  cinemaBtn.className = 'action-island-item';
-  cinemaBtn.innerHTML = `${icon('fullscreen', { size: 20 })}<span>沉浸全屏</span>`;
+  const cinemaBtn = islandButton('fullscreen', '沉浸全屏');
   cinemaBtn.addEventListener('click', () => onFullscreen?.());
 
   actionIsland.append(favBtn, castBtn, shareBtn, cinemaBtn);
@@ -160,39 +177,48 @@ export function buildDetailBody(
       castBtn.classList.toggle('active', device !== null && (state === 'casting' || state === 'paused'));
     }
   });
-  castBtn.addEventListener('click', () => castPanel.toggle());
+  castBtn.addEventListener('click', () => { menus?.beforeMenuOpen?.(); castPanel.toggle(); });
 
-  // 4. 常驻选集播放轨
+  // 4. 常驻选集播放轨：按钮只放集号，真实集名进 aria-label，当前集用 aria-current 说话。
   const epSection = document.createElement('div');
   epSection.className = 'episodes-section';
-
   const titleBar = document.createElement('div');
   titleBar.className = 'section-title-bar';
   const h3 = document.createElement('div');
   h3.className = 'section-h3';
-  h3.innerHTML = `<span>选集播放</span><span class="section-sub-info">(共 ${epCount} 集)</span>`;
+  const h3Label = document.createElement('span');
+  h3Label.textContent = '选集播放';
+  const h3Sub = document.createElement('span');
+  h3Sub.className = 'section-sub-info';
+  h3Sub.textContent = count === '' ? '' : `(${count})`;
+  h3.append(h3Label, h3Sub);
 
-  const viewAll = document.createElement('div');
+  const viewAll = document.createElement('button');
+  viewAll.type = 'button';
   viewAll.className = 'view-all-link';
-  viewAll.innerHTML = `<span>全部 ${epCount} 集</span><span style="font-size:12px; margin-left:2px;">›</span>`;
+  const viewLabel = document.createElement('span');
+  viewLabel.textContent = info.episodes.length > 0 ? `全部 ${info.episodes.length} 集` : '全部剧集';
+  viewAll.append(viewLabel);
+  withIcon(viewAll, 'chevronRight', 16);
   viewAll.addEventListener('click', onOpenDrawer);
   titleBar.append(h3, viewAll);
 
   const rail = document.createElement('div');
   rail.className = 'episodes-rail';
-  const pills: Map<number, HTMLElement> = new Map();
+  const pills: Map<number, HTMLButtonElement> = new Map();
 
   for (const ep of info.episodes) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'ep-rail-btn';
-    const numStr = ep.episodeNumber < 10 ? `0${ep.episodeNumber}` : `${ep.episodeNumber}`;
-    if (ep.episodeId === currentEpisodeId) {
-      btn.classList.add('active');
-      btn.innerHTML = `<span>${numStr}</span><div class="ep-wave"></div>`;
-    } else {
-      btn.innerHTML = `<span>${numStr}</span>`;
-    }
+    btn.dataset['episodeId'] = String(ep.episodeId);
+    btn.setAttribute('aria-label', episodeAriaLabel(ep));
+    if (ep.episodeId === currentEpisodeId) { btn.classList.add('active'); btn.setAttribute('aria-current', 'true'); }
+    const number = document.createElement('span');
+    number.textContent = episodeBadge(ep.episodeNumber, info.episodes.length);
+    const wave = document.createElement('span');
+    wave.className = 'ep-wave';
+    btn.append(number, wave);
     btn.addEventListener('click', () => onSelectEpisode(ep.episodeId));
     pills.set(ep.episodeId, btn);
     rail.append(btn);
@@ -211,20 +237,17 @@ export function buildDetailBody(
 
   if (loadRelated) {
     loadRelated().then((items) => {
-      if (!items || items.length === 0) {
-        relatedSection.remove();
-        return;
-      }
+      if (!items || items.length === 0) { relatedSection.remove(); return; }
       for (const item of items.slice(0, 6)) {
         const card = document.createElement('div');
         card.className = 'related-card';
         const cover = document.createElement('div');
         cover.className = 'related-cover';
-        if (item.coverUrl) {
-          cover.innerHTML = `<img src="${item.coverUrl}" alt="" loading="lazy" /><span class="related-tag">全${item.episodeCount || 1}集</span>`;
-        } else {
-          cover.innerHTML = `<span class="related-tag">全${item.episodeCount || 1}集</span>`;
-        }
+        coverInto(cover, item.coverUrl, item.title, 'image', 20);
+        const tag = document.createElement('span');
+        tag.className = 'related-tag';
+        tag.textContent = `全${item.episodeCount || 1}集`;
+        cover.append(tag);
         const descBox = document.createElement('div');
         descBox.className = 'related-body';
         const title = document.createElement('span');
@@ -232,15 +255,13 @@ export function buildDetailBody(
         title.textContent = item.title;
         const desc = document.createElement('span');
         desc.className = 'related-desc';
-        desc.textContent = item.synopsis || item.category || '精选热播剧集';
+        desc.textContent = item.synopsis || item.category || '暂无简介';
         descBox.append(title, desc);
         card.append(cover, descBox);
         card.addEventListener('click', () => onOpenRelated?.(item.id));
         relatedGrid.append(card);
       }
-    }).catch(() => {
-      relatedSection.remove();
-    });
+    }).catch(() => { relatedSection.remove(); });
   } else {
     relatedSection.remove();
   }
@@ -254,18 +275,20 @@ export function buildDetailBody(
     currentEpisodeId = id;
     // 手机上切集，大屏必须跟到同一集；未在投屏时 syncNow() 自己就是空操作。
     if (castPanel.activeDevice() !== null) void castPanel.syncNow();
-    const ep = info.episodes.find((e) => e.episodeId === id);
-    epTag.textContent = `第 ${ep?.episodeNumber ?? 1} 集`;
+    epTag.textContent = episodeTagOf(info, id);
     for (const [epId, btn] of pills.entries()) {
       const isCur = epId === id;
       btn.classList.toggle('active', isCur);
-      const targetEp = info.episodes.find((e) => e.episodeId === epId);
-      const numStr = (targetEp?.episodeNumber ?? 1) < 10 ? `0${targetEp?.episodeNumber ?? 1}` : `${targetEp?.episodeNumber ?? 1}`;
-      btn.innerHTML = isCur ? `<span>${numStr}</span><div class="ep-wave"></div>` : `<span>${numStr}</span>`;
+      if (isCur) btn.setAttribute('aria-current', 'true'); else btn.removeAttribute('aria-current');
     }
   };
 
-  return { body, markEpisode, openCast: () => castPanel.open(),
+  return {
+    body, markEpisode,
+    openCast: () => { menus?.beforeMenuOpen?.(); castPanel.open(); },
+    closeCast: () => castPanel.close(),
+    castOpen: () => castPanel.isOpen(),
     dismissOverlay: () => castPanel.isOpen() ? (castPanel.close(), true) : false,
-    destroy: () => { disposed = true; castPanel.destroy(); } };
+    destroy: () => { disposed = true; castPanel.destroy(); }
+  };
 }

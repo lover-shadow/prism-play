@@ -1,8 +1,10 @@
 /**
- * 选集抽屉与分集断点上报（SPEC §7 / AC-02-6 / §6.1）。
+ * 选集面板（R26-05 / AC-21）：三态容器 + 分段集号栅格。
  *
- * Both halves of this file are derived from the same object — the `episodes[]` of a loaded `TitleDetail`:
- * the drawer renders it, the reporter turns the current position inside it into a `WatchHistoryRow`.
+ * 三态由宿主的既有真相派生，本模块不持有"是否全屏"的副本：`mode()` 每次现读
+ * （非全屏 → 视频下方的 inline 正文流；全屏竖屏 → 底部限高 sheet；全屏横屏 → 右侧 side 抽屉）。
+ * 定位规则全部落在 `player.css`，那里每条边只在对应态里出现一次——历史上同一个 fixed 盒子
+ * 同时写了 `top` 与 `bottom`，定高盒过约束时浏览器忽略 `bottom`，面板从视口顶边铺满并盖死画面。
  *
  * Two privacy rules are enforced structurally rather than by hiding a button:
  *
@@ -13,21 +15,28 @@
  * 2. Background-audio persistence is only offered when the composition root has injected the permission
  *    flag. The drawer never calls the bridge itself; it reports intent upward.
  *
- * The reporter never writes storage either (SPEC §6.1): it emits into the injected `onProgress` sink and
- * attaches the privacy subject, so the storage interceptor — not the player — holds the write gate. All
- * upstream text goes through `textContent`, never `innerHTML`, so catalogue strings cannot inject DOM.
+ * 集号按钮上只允许出现数字（`episode-sheet.ts` 的徽章判据）：真实集名进 `aria-label`，时长与
+ * "第 N 集"字样一律不上按钮——栅格是给拇指点的 44px 方块，拼上标题在真机上必然溢出成两行。
+ * 所有来自目录的文本都走 `textContent`，绝不 `innerHTML`，片单字符串注入不了 DOM。
  */
 
 import type { EpisodeItem, TitleDetail } from '../../edge/src/types/api';
 import { icon } from '../components/icons';
 import { isPrivateSubject } from '../core/storage/storage-domains';
-import type { WatchHistoryRow, WriteGuardSubject } from '../core/storage/storage-domains';
-import type { Clock } from './sleep-timer';
+import {
+  EPISODE_SEGMENT_SIZE, episodeAriaLabel, episodeBadge, segmentLabel, segmentPage, segmentRange, type SheetMode
+} from './episode-sheet';
 
 export interface EpisodeDrawerOptions {
   root: HTMLElement;
+  /** inline 态的正文槽位（宿主给的视频下方容器）；缺省即挂在播放器根上，与旧行为等价。 */
+  mount?: HTMLElement;
   onSelect(episodeId: number): void;
   onClose(): void;
+  /** 面板被唤起时上报一次：倍速、投屏据此收起，同一时刻只允许一个菜单。 */
+  onOpen?(): void;
+  /** 现读模式，返回值同时决定 `data-mode` 与 `aria-modal`。 */
+  mode?(): SheetMode;
   /** Share is opt-in from the host and unconditionally absent for private works. */
   allowShare?: boolean;
   onShare?: (episode: EpisodeItem) => void;
@@ -43,6 +52,8 @@ export interface EpisodeDrawer {
   close(): void;
   /** Re-marks the current episode without rebuilding the list. */
   refresh(currentEpisodeId: number): void;
+  /** 全屏/转屏后重判模式，并把当前集拉回可见的分段窗口。 */
+  setMode(): void;
   isOpen(): boolean;
   destroy(): void;
 }
@@ -51,11 +62,9 @@ function isPrivateWork(detail: TitleDetail): boolean {
   return isPrivateSubject({ isPrivate: detail.item.isPrivate, channelId: detail.item.channelId });
 }
 
-function episodeLabel(episode: EpisodeItem): string {
-  const number = `第 ${episode.episodeNumber} 集`;
-  const minutes = episode.durationSeconds === undefined ? '' : ` · ${Math.round(episode.durationSeconds / 60)} 分钟`;
-  const name = episode.title === undefined || episode.title === '' ? '' : ` · ${episode.title}`;
-  return `${number}${name}${minutes}`;
+/** 面板内容按集号升序排：分段窗口与"自动落在当前集那一段"都依赖这个顺序。 */
+function ordered(detail: TitleDetail): EpisodeItem[] {
+  return [...detail.episodes].sort((a, b) => a.episodeNumber - b.episodeNumber);
 }
 
 function glyph(name: 'share' | 'list'): HTMLElement {
@@ -67,12 +76,12 @@ function glyph(name: 'share' | 'list'): HTMLElement {
 
 export function createEpisodeDrawer(options: EpisodeDrawerOptions): EpisodeDrawer {
   const doc = options.root.ownerDocument;
+  const host = options.mount ?? options.root;
 
   const shell = doc.createElement('div');
   shell.className = 'prism-drawer';
   shell.dataset['prismUi'] = 'drawer';
   shell.setAttribute('role', 'dialog');
-  shell.setAttribute('aria-modal', 'true');
   shell.setAttribute('aria-label', '选集');
   shell.hidden = true;
 
@@ -88,6 +97,11 @@ export function createEpisodeDrawer(options: EpisodeDrawerOptions): EpisodeDrawe
   const bar = doc.createElement('header');
   bar.className = 'prism-drawer__bar';
   bar.append(heading, closeButton);
+
+  const segments = doc.createElement('div');
+  segments.className = 'prism-drawer__segments';
+  segments.setAttribute('role', 'group');
+  segments.setAttribute('aria-label', '分集区间');
 
   const list = doc.createElement('ul');
   list.className = 'prism-drawer__list';
@@ -107,18 +121,19 @@ export function createEpisodeDrawer(options: EpisodeDrawerOptions): EpisodeDrawe
   const actions = doc.createElement('footer');
   actions.className = 'prism-drawer__actions';
 
-  shell.append(bar, list, actions);
-  options.root.append(shell);
+  shell.append(bar, segments, list, actions);
+  host.append(shell);
 
   let detail: TitleDetail | null = null;
   let currentId = Number.NaN;
+  let page = 0;
   let restoreFocus: Element | null = null;
-  let rows: HTMLElement[] = [];
+
+  const at = (): EpisodeItem[] => (detail === null ? [] : ordered(detail));
+  const indexOfCurrent = (): number => at().findIndex((episode) => episode.episodeId === currentId);
 
   const mark = (): void => {
-    for (const row of rows) {
-      const button = row.firstElementChild;
-      if (!(button instanceof HTMLElement)) continue;
+    for (const button of list.querySelectorAll<HTMLElement>('.prism-drawer__item')) {
       const current = button.dataset['episodeId'] === String(currentId);
       button.classList.toggle('is-current', current);
       if (current) button.setAttribute('aria-current', 'true');
@@ -126,20 +141,42 @@ export function createEpisodeDrawer(options: EpisodeDrawerOptions): EpisodeDrawe
     }
   };
 
+  /** 分段导航只在真的超过一段时出现；点一段即换窗口，当前集高亮保持不变。 */
+  const renderSegments = (): void => {
+    const episodes = at();
+    if (episodes.length <= EPISODE_SEGMENT_SIZE) { segments.replaceChildren(); return; }
+    const tabs = [];
+    for (let start = 0, index = 0; start < episodes.length; start += EPISODE_SEGMENT_SIZE, index += 1) {
+      const range = segmentRange(episodes.length, index);
+      const tab = doc.createElement('button');
+      tab.type = 'button';
+      tab.className = 'prism-drawer__segment';
+      tab.dataset['page'] = String(index);
+      tab.textContent = segmentLabel(episodes[range.from - 1]!.episodeNumber, episodes[range.to - 1]!.episodeNumber);
+      tab.classList.toggle('is-active', index === page);
+      if (index === page) tab.setAttribute('aria-current', 'true');
+      tabs.push(tab);
+    }
+    segments.replaceChildren(...tabs);
+  };
+
   const renderList = (): void => {
     if (detail === null) return;
-    rows = detail.episodes.map((episode) => {
+    const episodes = at();
+    const range = segmentRange(episodes.length, page);
+    list.replaceChildren(...episodes.slice(range.from - 1, range.to).map((episode) => {
       const li = doc.createElement('li');
       li.className = 'prism-drawer__row';
       const item = doc.createElement('button');
       item.type = 'button';
       item.className = 'prism-drawer__item';
       item.dataset['episodeId'] = String(episode.episodeId);
-      item.textContent = episodeLabel(episode);
+      item.setAttribute('aria-label', episodeAriaLabel(episode));
+      item.textContent = episodeBadge(episode.episodeNumber, episodes.length);
       li.append(item);
       return li;
-    });
-    list.replaceChildren(...rows);
+    }));
+    renderSegments();
     mark();
   };
 
@@ -154,8 +191,26 @@ export function createEpisodeDrawer(options: EpisodeDrawerOptions): EpisodeDrawe
     }
   };
 
+  /** 模式只在浮动态需要遮罩与模态语义，inline 态是正文，拦焦点就是自找麻烦。 */
+  const applyMode = (): void => {
+    const mode = options.mode?.() ?? 'inline';
+    shell.dataset['mode'] = mode;
+    shell.classList.toggle('prism-drawer--inline', mode === 'inline');
+    shell.classList.toggle('prism-drawer--sheet', mode === 'sheet');
+    shell.classList.toggle('prism-drawer--side', mode === 'side');
+    shell.setAttribute('aria-modal', mode === 'inline' ? 'false' : 'true');
+    if (mode !== 'inline' && shell.dataset['opened'] === '1') {
+      const current = indexOfCurrent();
+      if (current >= 0 && segmentPage(at().length, current) !== page) {
+        page = segmentPage(at().length, current);
+        renderList();
+      }
+    }
+  };
+
   const closeDrawer = (): void => {
     if (shell.hidden) return;
+    shell.dataset['opened'] = '0';
     shell.hidden = true;
     shell.classList.remove('is-open');
     options.onClose();
@@ -166,6 +221,15 @@ export function createEpisodeDrawer(options: EpisodeDrawerOptions): EpisodeDrawe
   shell.addEventListener('click', (event) => {
     const target = event.target;
     if (!(target instanceof Element)) return;
+    // `::before` 遮罩命中在面板本体上：点遮罩与点关闭等价。
+    if (target === shell) { closeDrawer(); return; }
+    const tab = target.closest<HTMLElement>('.prism-drawer__segment');
+    if (tab !== null && tab.dataset['page'] !== undefined) {
+      page = Number(tab.dataset['page']);
+      renderList();
+      tab.focus();
+      return;
+    }
     if (target.closest('.prism-drawer__close') !== null) closeDrawer();
     const row = target.closest<HTMLElement>('.prism-drawer__item');
     if (row === null || row.dataset['episodeId'] === undefined) return;
@@ -193,14 +257,19 @@ export function createEpisodeDrawer(options: EpisodeDrawerOptions): EpisodeDrawe
       const rebuilt = detail?.item.id !== next.item.id;
       detail = next;
       currentId = episodeId;
-      if (rebuilt) {
-        heading.textContent = next.item.title;
-        renderList();
-      } else mark();
+      if (rebuilt) heading.textContent = next.item.title;
       renderActions();
+      // 每次唤起都重新定位到当前集所在的分段：面板不该让用户先找一段再找一集。
+      const episodes = ordered(detail);
+      const current = episodes.findIndex((episode) => episode.episodeId === episodeId);
+      page = segmentPage(episodes.length, current);
+      renderList();
+      applyMode();
       restoreFocus = doc.activeElement;
       shell.hidden = false;
+      shell.dataset['opened'] = '1';
       shell.classList.add('is-open');
+      options.onOpen?.();
       (list.querySelector<HTMLElement>('.prism-drawer__item.is-current') ?? closeButton).focus();
     },
 
@@ -211,87 +280,13 @@ export function createEpisodeDrawer(options: EpisodeDrawerOptions): EpisodeDrawe
       mark();
     },
 
+    setMode: applyMode,
+
     isOpen: () => !shell.hidden,
 
     destroy: () => {
       shell.remove();
-      rows = [];
       detail = null;
-    }
-  };
-}
-
-/**
- * Escape handling for the drawer. Bound by the player on its own root so the unsubscribe travels with the
- * lifecycle — `destroy()` must leave no listener behind.
- */
-export function bindDrawerKeyboard(target: EventTarget, drawer: EpisodeDrawer): () => void {
-  const handler = (event: Event): void => {
-    if ((event as KeyboardEvent).key === 'Escape' && drawer.isOpen()) {
-      event.preventDefault();
-      drawer.close();
-    }
-  };
-  target.addEventListener('keydown', handler);
-  return () => target.removeEventListener('keydown', handler);
-}
-
-/* ==========================================================================
-   分集断点上报（SPEC §6.1 写入闸门的上游）
-   ========================================================================== */
-
-export interface ProgressContext extends WriteGuardSubject {
-  episodeId: number;
-  episodeNumber: number;
-  episodeTotal: number;
-}
-
-export interface ProgressReporter {
-  /** True when it emitted. `force` ignores the throttle, for pause / ended / leave. */
-  emit(force?: boolean): boolean;
-  due(): boolean;
-}
-
-export function createProgressReporter(input: {
-  clock: Clock;
-  intervalMs?: number;
-  detail(): TitleDetail | null;
-  episodeId(): number | null;
-  position(): number;
-  duration(): number;
-  onProgress?(row: WatchHistoryRow, context: ProgressContext): void;
-  onBlocked?(message: string): void;
-}): ProgressReporter {
-  const intervalMs = input.intervalMs ?? 5_000;
-  let lastAt = 0;
-  const due = (): boolean => input.clock.now() - lastAt >= intervalMs;
-  const privacy = (): WriteGuardSubject => {
-    const item = input.detail()?.item;
-    return { isPrivate: item?.isPrivate ?? false, channelId: item?.channelId, contentId: item?.id };
-  };
-  return {
-    due,
-    emit: (force = false) => {
-      const item = input.detail()?.item;
-      const episodeId = input.episodeId();
-      if (item === undefined || episodeId === null || (!force && !due())) return false;
-      const position = input.position();
-      const duration = input.duration() || position;
-      const episodes = input.detail()?.episodes ?? [];
-      const number = episodes.find((episode) => episode.episodeId === episodeId)?.episodeNumber ?? 0;
-      lastAt = input.clock.now();
-      const row: WatchHistoryRow = {
-        content_id: item.id, title: item.title, cover_url: item.coverUrl ?? null, last_episode_id: episodeId,
-        last_episode_number: number, position_seconds: Math.round(position), duration_seconds: Math.round(duration),
-        total_episodes: episodes.length, updated_at: Math.round(lastAt / 1_000)
-      };
-      try {
-        input.onProgress?.(row, { ...privacy(), episodeId, episodeNumber: number, episodeTotal: episodes.length });
-      } catch (error) {
-        // The sink's refusal is the AC-02 zero-disk boundary: surface it, never retry it, never write here.
-        input.onBlocked?.(error instanceof Error ? error.message : String(error));
-      }
-      return true;
     }
   };
 }

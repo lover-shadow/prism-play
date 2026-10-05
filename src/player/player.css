@@ -11,22 +11,33 @@
   /* 几何常量（非颜色）：控件条与底部控制带决定手势面剩余的区域。 */
   --prism-chrome-h: calc(var(--space-12) + env(safe-area-inset-top, 0px));
   --prism-lower-h: var(--space-16);
+  /* 层叠令牌（宿主唯一权威）：媒体子树整体只占 `--prism-z-media` 这一层，
+     artplayer 内部那些 z10/z20 出不了 `__stage` 的 stacking context，因此压不到宿主 chrome 之上。 */
+  --prism-z-media: 1; --prism-z-gesture: 2; --prism-z-chrome: 3; --prism-z-state: 4;
+  --prism-z-pulse: 5; --prism-z-pill: 6; --prism-z-rate: 60;
+  /* 画面内容矩形：由 `media-frame.ts` 实测后以内联值写回，未量到之前铺满容器（等价旧行为）。 */
+  --prism-media-top: 0px; --prism-media-left: 0px; --prism-media-width: 100%; --prism-media-height: 100%;
   position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden;
   background: var(--player-bg); color: var(--fg); border-radius: var(--radius-md);
 }
-.prism-player__stage { position: absolute; inset: 0; }
+/* `isolate` + `contain` 把内核的 DOM 与层叠一起关进这只盒子：它自己的 z-index 再高也出不来。 */
+.prism-player__stage { position: absolute; inset: 0; z-index: var(--prism-z-media); isolation: isolate; contain: layout paint; }
 
 /* 手势接收面：位于视频之上、控件之下；上下控制带由布局本身排除，因此 classifyTouch 看到的带宽为 0。 */
-.prism-player__body { position: absolute; inset: var(--prism-chrome-h) 0 var(--prism-lower-h); background: transparent; touch-action: none; }
+.prism-player__body { position: absolute; inset: var(--prism-chrome-h) 0 var(--prism-lower-h); z-index: var(--prism-z-gesture); background: transparent; touch-action: none; }
 
+/* 独立顶部控制带：宽度只跟舞台，窄竖屏内容矩形不能挤压五个入口。
+   标题先收窄；按钮固定 44px，长定时/倍速文案省略，完整名称仍由 aria-label 提供。 */
 .prism-player__chrome {
-  position: absolute; inset-inline: 0; top: 0; z-index: 3; display: flex; align-items: center; gap: var(--space-2);
-  min-height: var(--prism-chrome-h); padding: env(safe-area-inset-top, 0px) var(--space-3) 0;
+  position: absolute; top: 0; inset-inline: 0; width: auto; box-sizing: border-box;
+  z-index: var(--prism-z-chrome); display: flex; align-items: center; gap: var(--space-2);
+  min-height: var(--prism-chrome-h); padding: env(safe-area-inset-top, 0px) max(var(--space-3), env(safe-area-inset-right, 0px)) 0 max(var(--space-3), env(safe-area-inset-left, 0px));
   background: var(--surface-overlay); border-bottom: 1px solid var(--player-hud-border);
   opacity: 0; pointer-events: none; transform: translateY(-100%);
   transition: transform var(--duration-normal) var(--ease-out), opacity var(--duration-normal) var(--ease-out);
 }
 .prism-player__chrome.is-visible { opacity: 1; pointer-events: auto; transform: translateY(0); }
+.prism-player__chrome > button { flex: 0 0 44px; min-width: 44px; max-width: 44px; padding: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .prism-player__chrome-title {
   flex: 1 1 auto; min-width: 0; margin: 0; font-size: var(--text-sm); font-weight: 600; color: var(--fg);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -59,7 +70,7 @@
 .prism-hud.is-visible { opacity: 1; transform: translateY(-50%) scale(1); }
 .prism-hud--volume { right: var(--space-6); }
 .prism-hud--brightness { left: var(--space-6); }
-.prism-rate-sheet { position: absolute; inset: var(--prism-chrome-h) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); z-index: 60; display: flex; flex-wrap: wrap; align-content: center; justify-content: center; gap: var(--space-2); padding: var(--space-4); background: var(--surface-overlay); overflow-y: auto; }
+.prism-rate-sheet { position: absolute; inset: var(--prism-chrome-h) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); z-index: var(--prism-z-rate); display: flex; flex-wrap: wrap; align-content: center; justify-content: center; gap: var(--space-2); padding: var(--space-4); background: var(--surface-overlay); overflow-y: auto; }
 .prism-rate-sheet[hidden] { display: none; }
 .prism-hud__icon { display: block; line-height: 0; color: var(--player-vol-accent); }
 .prism-hud--brightness .prism-hud__icon { color: var(--player-bri-accent); }
@@ -75,7 +86,7 @@
    ========================================================================== */
 
 .prism-player__state {
-  position: absolute; inset: 0; z-index: 4; display: flex; flex-direction: column; align-items: center;
+  position: absolute; inset: 0; z-index: var(--prism-z-state); display: flex; flex-direction: column; align-items: center;
   justify-content: center; gap: var(--space-3); padding: var(--space-6) var(--space-4); text-align: center;
   background: var(--player-hud-bg); color: var(--fg);
 }
@@ -92,17 +103,33 @@
 .prism-player__retry:hover { background: var(--accent-hover); }
 
 /* ==========================================================================
-   选集抽屉：底部半屏数字矩阵面板 (Bottom Sheet)
+   选集面板三态（R26-05）：inline=非全屏正文流、sheet=全屏竖屏底部限高、side=全屏横屏右侧让位。
+   三条边各归各的态：旧写法给同一个 fixed 盒子同时写 `top` 与 `bottom`，定高盒过约束时浏览器
+   忽略 `bottom`，面板于是从视口顶边铺满并把画面整个盖死——真机"选集挡住视频"就是这么来的。
    ========================================================================== */
 
 .prism-drawer {
-  position: fixed; inset-inline: env(safe-area-inset-left, 0px) env(safe-area-inset-right, 0px); bottom: env(safe-area-inset-bottom, 0px); top: env(safe-area-inset-top, 0px); z-index: 240; display: flex; flex-direction: column;
-  width: auto; max-height: 65dvh; background: var(--surface-raised); border-top: 1px solid var(--player-hud-border);
-  border-left: 0; border-top-left-radius: var(--radius-lg); border-top-right-radius: var(--radius-lg);
-  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.45); transform: translateY(100%); transition: transform var(--duration-normal) var(--ease-out);
+  position: relative; z-index: var(--prism-z-drawer, 240); flex: none; display: flex; flex-direction: column;
+  max-height: 46vh; background: var(--surface-raised); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg); overflow: hidden;
 }
-.prism-drawer.is-open { transform: translateY(0); }
 .prism-drawer[hidden] { display: none; }
+/* 浮动态才有遮罩：点遮罩与点关闭等价，由 `episode-drawer.ts` 就地把点击目标判给遮罩。 */
+.prism-drawer--sheet::before, .prism-drawer--side::before { content: ''; position: fixed; inset: 0; z-index: -1; background: var(--surface-overlay); }
+.prism-drawer--sheet {
+  position: fixed; inset-inline: 0; top: auto; bottom: 0; max-height: 62dvh;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  border-inline: 0; border-bottom: 0; border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: 0 -8px 32px var(--player-hud-border); transform: translateY(100%);
+  transition: transform var(--duration-normal) var(--ease-out);
+}
+.prism-drawer--side {
+  position: fixed; inset-block: 0; top: 0; left: auto; right: 0; width: var(--prism-sheet-side, min(46vw, 320px)); max-height: none;
+  padding-right: env(safe-area-inset-right, 0px); border-block: 0; border-right: 0;
+  border-radius: var(--radius-lg) 0 0 var(--radius-lg); box-shadow: -8px 0 32px var(--player-hud-border);
+  transform: translateX(100%); transition: transform var(--duration-normal) var(--ease-out);
+}
+.prism-drawer--sheet.is-open, .prism-drawer--side.is-open { transform: translate(0, 0); }
 .prism-drawer__bar {
   display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-height: 48px; padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--border-subtle);
@@ -112,19 +139,30 @@
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .prism-drawer__close {
-  display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px;
+  display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; flex: none;
   border: 1px solid transparent; border-radius: var(--radius-pill); background: var(--surface); color: var(--fg-2); cursor: pointer;
 }
+/* 分段导航只在真的多于一时才出现（JS 不塞子节点，这里也就不占一行高度）。 */
+.prism-drawer__segments { display: none; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-4) 0; }
+.prism-drawer__segments:not(:empty) { display: flex; }
+.prism-drawer__segment {
+  display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 0; padding: 0 var(--space-3);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-pill); background: transparent; color: var(--fg-2);
+  font: inherit; font-size: var(--text-xs); font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; cursor: pointer;
+}
+.prism-drawer__segment.is-active { color: var(--accent-on); background: var(--accent); border-color: var(--accent); }
 .prism-drawer__list {
   flex: 1 1 auto; min-height: 0; margin: 0; padding: var(--space-3) var(--space-4); overflow-y: auto; overscroll-behavior: contain; list-style: none;
   display: grid; grid-template-columns: repeat(auto-fill, minmax(54px, 1fr)); gap: var(--space-2);
 }
-.prism-drawer__row { margin: 0 !important; }
+.prism-drawer__row { margin: 0 !important; min-width: 0; }
 .prism-drawer__row + .prism-drawer__row { margin-top: 0 !important; }
+/* 只放集号，超宽一律省略号：拼上标题与分钟数的按钮在真机上会撑破栅格。 */
 .prism-drawer__item {
-  display: flex; align-items: center; justify-content: center; width: 100%; height: 44px; padding: 0 var(--space-2);
+  display: flex; align-items: center; justify-content: center; width: 100%; min-width: 0; height: 44px; min-height: 44px; padding: 0 var(--space-2);
   border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--surface); color: var(--fg-2);
-  font: inherit; font-size: var(--text-sm); font-weight: 600; text-align: center; cursor: pointer;
+  font: inherit; font-size: var(--text-sm); font-weight: 600; font-variant-numeric: tabular-nums; text-align: center; cursor: pointer;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   transition: all var(--duration-fast) var(--ease-standard);
 }
 .prism-drawer__item:hover { color: var(--fg); border-color: var(--border-strong); }
@@ -134,7 +172,7 @@
   padding: var(--space-2) var(--space-4) calc(var(--space-2) + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--border-subtle);
 }
 .prism-drawer__action {
-  display: inline-flex; align-items: center; gap: var(--space-2); min-height: 38px; padding: 0 var(--space-4);
+  display: inline-flex; align-items: center; gap: var(--space-2); min-height: 44px; padding: 0 var(--space-4);
   border: 1px solid var(--border-strong); border-radius: var(--radius-pill); background: transparent;
   color: var(--fg); font: inherit; font-size: var(--text-xs); font-weight: 600; cursor: pointer;
 }
@@ -169,14 +207,14 @@ video::-webkit-media-controls-overlay-play-button {
 .prism-player.is-playing .prism-player__backdrop { opacity: 0; visibility: hidden; pointer-events: none; }
 
 /* 播放起播微光指示标 (呼吸动效) */
-.prism-player__pulse { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 54px; height: 54px; border-radius: var(--radius-pill); background: var(--accent); color: var(--accent-on); display: flex; align-items: center; justify-content: center; box-shadow: 0 0 25px var(--accent); cursor: pointer; animation: prismPulseGlow 2.2s infinite ease-in-out; z-index: 5; transition: opacity 0.3s ease; }
+.prism-player__pulse { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 54px; height: 54px; border-radius: var(--radius-pill); background: var(--accent); color: var(--accent-on); display: flex; align-items: center; justify-content: center; box-shadow: 0 0 25px var(--accent); cursor: pointer; animation: prismPulseGlow 2.2s infinite ease-in-out; z-index: var(--prism-z-pulse); transition: opacity 0.3s ease; }
 .prism-player.is-playing .prism-player__pulse { opacity: 0; pointer-events: none; }
 @keyframes prismPulseGlow { 0%, 100% { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 20px rgba(229, 169, 60, 0.5); } 50% { transform: translate(-50%, -50%) scale(1.08); box-shadow: 0 0 35px rgba(229, 169, 60, 0.85); } }
 
 /* 长按 2x 倍速微动效指示灯 */
 .prism-player__speed-pill {
   position: absolute; top: 16px; left: 50%; transform: translateX(-50%) translateY(-20px);
-  z-index: 10; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 14px;
+  z-index: var(--prism-z-pill); display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 14px;
   border-radius: var(--radius-pill); background: rgba(0, 0, 0, 0.75); border: 1px solid var(--accent);
   color: var(--accent); font-size: var(--text-xs); font-weight: 700; opacity: 0; pointer-events: none;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1); backdrop-filter: blur(10px);

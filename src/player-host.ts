@@ -11,7 +11,8 @@ import { buildDetailBody, type PlayerDetailStage } from './player/player-detail'
 import type { PlayerApi, PlayerFailure, PrismPlayer } from './player/prism-player';
 import type { EngineFactory } from './player/engine-seam';
 import type { AspectOrientation } from './player/aspect';
-import type { ProgressContext } from './player/episode-drawer';
+import type { ProgressContext } from './player/progress-reporter';
+import { episodeSheetMode } from './player/episode-sheet';
 import type { NotificationAction } from './core/native/capacitor-bridge';
 import { bindWatchVideo, type RuntimeServices } from './core/runtime-services';
 import { createSponsorNudge } from './views/sponsor-nudge';
@@ -101,7 +102,7 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
   const failure = (event: PlayerFailure): void => {
     if (event.kind === 'progress-blocked') deps.onBlocked?.(event.message);
   };
-  function buildLayer(): { shell: HTMLElement; stage: HTMLElement } {
+  function buildLayer(): { shell: HTMLElement; stage: HTMLElement; sheet: HTMLElement } {
     const shell = document.createElement('div');
     shell.className = 'prism-player-host';
     shell.setAttribute('role', 'dialog');
@@ -124,9 +125,12 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
     bar.append(exit, title);
     const stage = document.createElement('div');
     stage.className = 'prism-player-host__stage';
-    shell.append(bar, stage);
+    // 选集面板的正文槽位排在舞台之后：非全屏即视频下方，不覆盖画面（R26-05）。
+    const sheet = document.createElement('div');
+    sheet.className = 'prism-player-host__sheet';
+    shell.append(bar, stage, sheet);
     exit.addEventListener('click', () => close());
-    return { shell, stage };
+    return { shell, stage, sheet };
   }
   async function open(contentId: string, resume?: WatchHistoryRow): Promise<boolean> {
     close();
@@ -141,7 +145,7 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
     }
     if (player !== null || mine !== opening) return false; // 等待期间被关闭或另一次 open 抢占
     detail = loaded;
-    const { shell, stage } = buildLayer();
+    const { shell, stage, sheet } = buildLayer();
     layer = shell;
     deps.mount.appendChild(shell);
     const target = episodeFor(loaded, resume);
@@ -179,7 +183,11 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
       onShare: deps.onShare === undefined ? undefined : (episode) => void deps.onShare?.(loaded.item, episode),
       allowBackgroundAudio: deps.allowBackgroundAudio(),
       // 画幅由播放器嗅探后**上报**，宿主据此决定是否联动方向；播放器自己不锁屏、不进全屏。
-      onAspect: (aspect) => { videoAspect = aspect; void syncOrientation(); }
+      onAspect: (aspect) => { videoAspect = aspect; void syncOrientation(); },
+      // 选集面板的三态与控件收起判据都从宿主的既有真相现读，播放器不持有第二份全屏/菜单状态（R26-05）。
+      drawerMount: sheet, sheetMode: () => episodeSheetMode({ fullscreen: isFullscreen, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight }),
+      fullscreen: () => isFullscreen, overlayOpen: () => detailBodyRef?.castOpen() ?? false,
+      onOverlayOpen: () => { detailBodyRef?.closeCast(); }
     });
     deps.onPrivacyChange(loaded.item.isPrivate === true || loaded.item.channelId === 'private');
     keyup = (event: KeyboardEvent) => {
@@ -200,7 +208,8 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
     });
     resizeHandler = () => {
       const isLandscape = window.innerWidth > window.innerHeight;
-      if (isLandscape && !isFullscreen) toggleFullscreen(true);
+      // 转屏时全屏态不自动进出（那是用户的手），但画面矩形与面板模式必须跟着视口重量一次。
+      if (isLandscape && !isFullscreen) toggleFullscreen(true); else player?.relayout();
     };
     window.addEventListener('resize', resizeHandler);
     const detailBody = buildDetailBody(
@@ -222,7 +231,9 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
         }
       },
       (contentId) => { void open(contentId); },
-      deps.following ? { store: deps.following, report: deps.onBlocked } : undefined
+      deps.following ? { store: deps.following, report: deps.onBlocked } : undefined,
+      // 菜单互斥：详情台的投屏一开，选集与倍速必须先收——同一时刻只允许一个菜单（R26-05）。
+      { beforeMenuOpen: () => void player?.dismissOverlay() }
     );
     detailBodyRef = detailBody;
     shell.append(detailBody.body);
@@ -240,10 +251,8 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
     nudge?.close(); nudge = null;
     if (keyup !== null) document.removeEventListener('keydown', keyup);
     keyup = null;
-    if (unregisterBack !== null) unregisterBack();
-    unregisterBack = null;
-    if (resizeHandler !== null) window.removeEventListener('resize', resizeHandler);
-    resizeHandler = null;
+    if (unregisterBack !== null) unregisterBack(); unregisterBack = null;
+    if (resizeHandler !== null) window.removeEventListener('resize', resizeHandler); resizeHandler = null;
     isFullscreen = false;
     // 会话拆除必须把方向锁一并交还：留着锁横屏，用户退出播放器后手机会一直不肯回转。
     videoAspect = null;

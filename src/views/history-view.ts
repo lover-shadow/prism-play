@@ -8,6 +8,8 @@
  *
  */
 import { icon, type IconName, type IconSize } from '../components/icons';
+import { coverInto } from '../components/poster-cover';
+export { coverInto } from '../components/poster-cover';
 import { ApiError } from '../core/api/client';
 import type { ContentItem, DeviceTier, RelatedResponse } from '../../edge/src/types/api';
 import { isPrivateSubject, type StorageDomain, type WatchHistoryRow } from '../core/storage/storage-domains';
@@ -39,14 +41,6 @@ export function button(label: string, onClick: () => void, opts: { icon?: IconNa
 /** 卡片整体可点，卡内按钮自理：一次手势只触发一次回调。 */
 export function tap(node: HTMLElement, action: () => void): void {
   node.addEventListener('click', (event) => { if ((event.target as Element).closest('button') === null) action(); });
-}
-/** 封面只接受同源代理相对路径或 https，其它 scheme 退化为图标（顺带杜绝外部站源域名入 DOM）。 */
-export function coverInto(node: HTMLElement, url: string | null | undefined, alt: string, fallback: IconName, size: IconSize): void {
-  const usable = typeof url === 'string' && (url.startsWith('/') || url.startsWith('https://')) ? url : null;
-  if (usable === null) return glyphInto(node, fallback, size);
-  const img = make('img');
-  img.src = usable; img.alt = alt; img.loading = 'lazy';
-  node.append(img);
 }
 export function formatBytes(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;

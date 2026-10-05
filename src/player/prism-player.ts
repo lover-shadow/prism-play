@@ -10,8 +10,11 @@ import { ApiError } from '../core/api/client';
 import { icon } from '../components/icons';
 import type { PrismNativeBridge } from '../core/native/bridge';
 import { isPrivateSubject, type WatchHistoryRow } from '../core/storage/storage-domains';
-import { createEpisodeDrawer, createProgressReporter } from './episode-drawer';
-import type { ProgressContext } from './episode-drawer';
+import { createEpisodeDrawer } from './episode-drawer';
+import { createProgressReporter, type ProgressContext } from './progress-reporter';
+import { createControlsIdle } from './controls-idle';
+import { updateMediaFrame } from './media-frame';
+import type { SheetMode } from './episode-sheet';
 import { createLineFallback } from './line-fallback';
 import { createLineRunner, type Surface } from './line-runner';
 import { usesLocalEpisodeIds } from '../core/api/title-detail';
@@ -34,12 +37,13 @@ export interface PrismPlayerOptions {
   detail?: TitleDetail; allowShare?: boolean; onShare?: (episode: EpisodeItem) => void;
   /** AC-10 permission flag: background-audio persistence is never enabled without it. */
   allowBackgroundAudio?: boolean;
+  /** 选集面板宿主（R26-05）：inline 态挂进视频下方的正文槽位，浮动态由 CSS 摘成 fixed；模式现读不自持。 */
+  drawerMount?: HTMLElement; sheetMode?: () => SheetMode;
+  /** 全屏态与"别的菜单开着"由宿主报给播放器：控件收起判据与菜单互斥都只认宿主的真相。 */
+  fullscreen?: () => boolean; overlayOpen?: () => boolean; onOverlayOpen?(): void;
   /** Geometry override: jsdom has no layout, so integration tests inject the play-surface box. */
   measure?: () => GestureBounds; requestFrame?(callback: () => void): number; cancelFrame?(handle: number): void;
-  /**
-   * 画幅嗅探出口（SPEC §1.2.1）：元数据就绪后报告真实画幅朝向。
-   * 播放器只**报告**，不据此锁屏或改全屏——方向锁与全屏态都是宿主的权威范围（§1.2.0）。
-   */
+  /** 画幅嗅探出口（SPEC §1.2.1）：播放器只**报告**真实朝向，不据此锁屏或改全屏（§1.2.0 的宿主权威）。 */
   onAspect?: (orientation: AspectOrientation | null) => void;
   playbackPreferences?: PlaybackPreferences;
   onEpisodeChange?(episode: EpisodeItem): void;
@@ -61,12 +65,11 @@ export interface PrismPlayer {
   setLocked(locked: boolean): void; scheduleSleep(mode: SleepMode): void; openDrawer(): void; closeDrawer(): void;
   /** AC-11: audio focus is the host's fact, not the page's, so the caller reports it. */
   notifyAudioFocus(focus: 'restored' | 'lost'): void; notifyLeave(): void;
-  /** 视口几何变了（进出全屏、转屏）：只让内核重算内部尺寸，不触碰任何全屏通道（SPEC §1.2.0）。 */
+  /** 视口几何变了（进出全屏、转屏）：重算画面矩形与面板模式，不触碰任何全屏通道（SPEC §1.2.0）。 */
   relayout(): void;
   setPlaybackRate(rate: number): boolean; dismissOverlay(): boolean;
 }
-const errorKindOf = (error: unknown): PlayerErrorKind =>
-  error instanceof ApiError ? (error.treatedAsMissing ? 'missing' : error.code === 'NETWORK_ERROR' ? 'offline' : 'retryable') : 'retryable';
+const errorKindOf = (error: unknown): PlayerErrorKind => error instanceof ApiError ? (error.treatedAsMissing ? 'missing' : error.code === 'NETWORK_ERROR' ? 'offline' : 'retryable') : 'retryable';
 export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
   const clock = options.clock ?? systemClock;
   const { bridge, api, root } = options;
@@ -87,16 +90,15 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
   const readSurface = (): GestureBounds => { const r = chrome.surface.getBoundingClientRect(); return { width: r.width, height: r.height, top: r.top, left: r.left, topBandPx: 0, bottomBandPx: 0 }; };
   root.classList.add('prism-player');
   const backdrop = document.createElement('div'), speedPill = document.createElement('div'), pulse = document.createElement('div');
-  backdrop.className = 'prism-player__backdrop';
+  backdrop.className = 'prism-player__backdrop'; speedPill.className = 'prism-player__speed-pill';
   if (detail?.item.coverUrl) backdrop.innerHTML = `<img class="prism-player__backdrop-img" src="${detail.item.coverUrl}" alt="" /><div class="prism-player__backdrop-glow"></div>`;
   pulse.className = 'prism-player__pulse'; pulse.innerHTML = icon('play', { size: 24 }); pulse.addEventListener('click', () => { engine?.play(); });
-  speedPill.className = 'prism-player__speed-pill';
   root.append(backdrop, pulse, speedPill);
   const overlay = createStateOverlay(root);
   const hud = createGestureHud(root, clock);
   const chrome = createPlayerChrome(root, (action) => {
     if (action === 'lock') setLocked(!locked);
-    else if (action === 'list' && detail !== null && episodeId !== null) { rate.close(); rate.cancel(); drawer.open(detail, episodeId); }
+    else if (action === 'list') openDrawer();
     else {
       const cycle: SleepMode[] = ['off', ...SLEEP_CHOICES];
       scheduleSleep(cycle[(cycle.indexOf(sleep.mode()) + 1) % cycle.length] ?? 'off');
@@ -112,7 +114,8 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
     resume: (position) => { engine?.setCurrentTime(position); engine?.play(); }
   });
   const drawer = createEpisodeDrawer({
-    root, onSelect: (id) => void load(id, 0), onClose: () => undefined, allowShare: options.allowShare,
+    root, mount: options.drawerMount, mode: options.sheetMode, onSelect: (id) => void load(id, 0), onClose: () => relayout(),
+    onOpen: () => { options.onOverlayOpen?.(); relayout(); }, allowShare: options.allowShare,
     onShare: options.onShare, allowBackgroundAudio: options.allowBackgroundAudio, backgroundAudioEnabled: () => backgroundAudioOn,
     onBackgroundAudioToggle: (enabled) => {
       if (options.allowBackgroundAudio !== true) return;
@@ -121,8 +124,15 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
     }
   });
   const rate = createPlaybackRate({ root, surface: chrome.surface, pill: speedPill, clock, engine: () => engine, locked: () => locked || destroyed,
-    preferences: options.playbackPreferences, onHold: () => gesture.cancel(), onError: (message) => report({ kind: 'media', message }), beforeOpen: () => drawer.close() });
+    preferences: options.playbackPreferences, onHold: () => gesture.cancel(), onError: (message) => report({ kind: 'media', message }),
+    beforeOpen: () => { drawer.close(); options.onOverlayOpen?.(); } });
   chrome.el.append(rate.button);
+  // 全屏才收起控件：详情台的工具栏是那一屏唯一的控制面，收掉等于没有控制面（AC-19）。
+  const idle = createControlsIdle({
+    clock, playing: () => engine?.playing() ?? false, fullscreen: options.fullscreen ?? (() => false),
+    visible: () => chrome.el.classList.contains('is-visible'), setVisible: (on) => chrome.setVisible(on),
+    blocked: () => drawer.isOpen() || rate.isOpen() || (options.overlayOpen?.() ?? false)
+  });
   const sleep = createSleepTimer(clock, { getVolume: () => engine?.volume() ?? 1, setVolume: (v) => engine?.setVolume(v), stop: () => releaseHandle('sleep') });
   /** 剧集清单（§2.2）的进程内唯一缓存：装成"当前生效的那只"，投屏侧因此不必再造一份 api 客户端重拉清单。 */
   const manifests = installTitleManifestStore(createTitleManifestStore({ api }));
@@ -135,12 +145,16 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
     requestFrame: options.requestFrame, cancelFrame: options.cancelFrame,
     onVolume: (value) => void applyChannel('volume', value), onBrightness: (value) => void applyChannel('brightness', value),
     onSeek: (delta) => { if (engine !== null && delta !== 0) engine.setCurrentTime(engine.currentTime() + delta); },
-    onTap: () => { engine?.toggleControls(); chrome.setVisible(!chrome.el.classList.contains('is-visible')); }
+    onTap: () => { engine?.toggleControls(); idle.tap(); }
   });
   disposers.push(attachGestureLayer(chrome.surface, gesture).destroy);
   disposers.push(bridge.onCallState((state) => { if (!destroyed) interruption.onCallState(state); }));
   listen(overlay.retryButton, 'click', () => { if (episodeId !== null) void load(episodeId, engine?.currentTime() ?? 0); });
   chrome.setVisible(true); render();
+  function remeasure(): void { updateMediaFrame(root, chrome.stage); }
+  function relayout(): void { engine?.resize?.(); drawer.setMode(); remeasure(); }
+  /** 唤起选集面板：倍速先收（菜单互斥），当前集所在的分段由面板自己定位。 */
+  function openDrawer(): void { rate.close(); rate.cancel(); if (detail !== null && episodeId !== null) drawer.open(detail, episodeId); }
   function render(): void {
     const left = sleep.remainingMs();
     const label = SLEEP_LABELS[sleep.mode()];
@@ -159,10 +173,7 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
       return hud.show({ kind: 'brightness', value: applied.brightness, supported: applied.supported });
     }
     // AC-06 on the web: only the element's own gain moves, and the HUD states that instead of lying.
-    if (!systemVolumeSupported) {
-      engine?.setVolume(value);
-      return hud.show({ kind: 'volume', value, supported: false });
-    }
+    if (!systemVolumeSupported) { engine?.setVolume(value); return hud.show({ kind: 'volume', value, supported: false }); }
     const applied = await bridge.setSystemVolume(value);
     systemVolumeSupported = applied.supported;
     if (!applied.supported) engine?.setVolume(value);
@@ -171,23 +182,25 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
   async function onEnded(): Promise<void> {
     const episodes = detail?.episodes ?? [];
     const index = Math.max(0, episodes.findIndex((item) => item.episodeId === episodeId));
-    progress.emit(true);
-    phase = 'ended';
-    if (sleep.onEpisodeEnded({ episodeIndex: index, episodeTotal: episodes.length }) === 'stop') releaseHandle('sleep');
-    else if (episodes[index + 1] !== undefined) {
-      const mine = token;
-      await options.onNaturalBoundary?.();
-      if (!destroyed && mine === token) await load(episodes[index + 1].episodeId, 0);
-    }
+    progress.emit(true); phase = 'ended';
+    if (sleep.onEpisodeEnded({ episodeIndex: index, episodeTotal: episodes.length }) === 'stop') return releaseHandle('sleep');
+    const next = episodes[index + 1];
+    if (next === undefined) return;
+    const mine = token;
+    await options.onNaturalBoundary?.();
+    if (!destroyed && mine === token) await load(next.episodeId, 0);
   }
   function handleMediaEvent(event: MediaEvent): void {
     if (destroyed || engine === null) return;
+    idle.onMediaEvent(event);
     if (event === 'play') { root.classList.add('is-playing'); interruption.noteUserAction(); void bridge.setKeepScreenOn(true); ensureBackgroundAudio(); }
     else if (event === 'pause') { root.classList.remove('is-playing'); if (!interruption.pausingForCall()) interruption.noteUserAction(); progress.emit(true); }
     else if (event === 'timeupdate') { if (progress.due()) progress.emit(); }
     else if (event === 'error') { if (direct !== null) { noteLineFailure(); return; } root.classList.remove('is-playing'); phase = 'error'; errorKind = 'retryable'; overlay.show('retryable'); report({ kind: 'media', message: '播放失败' }); }
     // 必须显式一条分支：`loadedmetadata` 落到末尾的 `else` 会被当成 `ended`，于是每集刚出画面就自动跳下一集。
-    else if (event === 'loadedmetadata') options.onAspect?.(probeStageOrientation(chrome.stage));
+    else if (event === 'loadedmetadata') { options.onAspect?.(probeStageOrientation(chrome.stage)); remeasure(); }
+    // 缓冲/拖动同样必须显式一条分支：它们只剩收起判据的输入（`idle` 已接），绝不能落到 `else` 变成 `ended`。
+    else if (event === 'waiting' || event === 'seeking') return;
     else void onEnded();
   }
   async function ensureEngine(): Promise<PlayerEngine> {
@@ -195,24 +208,20 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
     const theme = getComputedStyle(document.documentElement).getPropertyValue('--player-accent').trim();
     engine = await (options.engine ?? createArtEngine)({
       container: chrome.stage, theme, poster: detail?.item.coverUrl,
-      // 直连时内核的 fatal 回调就是切线触发器（hls 的错误未必同时落到 `video:error` 上）；
-      // 代理回退链维持原语义：只如实报一次"播放失败"，不去切一条并不存在的备用线路。
+      // 直连时内核的 fatal 回调就是切线触发器（hls 的错误未必同时落到 `video:error` 上）；代理回退链只如实报一次"播放失败"。
       onError: (message) => { if (direct !== null) noteLineFailure(); else report({ kind: 'media', message }); }
     });
     const live = engine;
-    mediaOff = (['ended', 'timeupdate', 'play', 'pause', 'error', 'loadedmetadata'] as const).map((event) => live.on(event, () => handleMediaEvent(event)));
+    mediaOff = (['ended', 'timeupdate', 'play', 'playing', 'pause', 'waiting', 'seeking', 'seeked', 'error', 'loadedmetadata'] as const).map((event) => live.on(event, () => handleMediaEvent(event)));
     const [volume, brightness] = await Promise.all([bridge.getSystemVolume(), bridge.getBrightness()]);
     systemVolumeSupported = volume.supported; brightnessSupported = brightness.supported;
-    gesture.seed('volume', volume.supported ? volume.volume : live.volume());
-    gesture.seed('brightness', brightness.brightness);
+    gesture.seed('volume', volume.supported ? volume.volume : live.volume()); gesture.seed('brightness', brightness.brightness);
     return live;
   }
   /** AC-09 归零瞬间：暂停并释放播放句柄（hls 实例与 MediaSource 一并解除）。 */
   function releaseHandle(reason: 'sleep' | 'destroy'): void {
     options.onSourceChange?.();
-    const live = engine;
-    engine = null;
-    direct = null;
+    const live = engine; engine = null; direct = null;
     for (const off of mediaOff.splice(0)) off();
     if (live !== null) { live.pause(); live.setSource(''); live.destroy(); }
     void bridge.setKeepScreenOn(false);
@@ -221,8 +230,7 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
   }
   async function load(id: number, resumeSeconds = 0): Promise<void> {
     if (destroyed) return;
-    options.onSourceChange?.();
-    rate.cancel(); progress.emit(true);
+    options.onSourceChange?.(); rate.cancel(); progress.emit(true);
     token += 1;
     const mine = token;
     episodeId = id; phase = 'loading'; errorKind = null; runner.reset();
@@ -243,7 +251,7 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
     const current = detail?.episodes.find((ep) => ep.episodeId === episodeId);
     if (current) { options.onEpisodeChange?.(current); if (backgroundAudioOn) void bridge.startBackgroundAudio(detail?.item.title ?? '', `第 ${current.episodeNumber} 集`).catch(() => undefined); }
     if (resumeSeconds > 0) live.setCurrentTime(resumeSeconds);
-    overlay.hide(); render(); progress.emit(true);
+    overlay.hide(); render(); progress.emit(true); remeasure();
     if (drawer.isOpen() && episodeId !== null) drawer.refresh(episodeId);
   }
   // 私密与未知剧目共用同一份文案与同一套 UI，不泄露任何元信息（AC-02-6 / AC-15）。
@@ -268,22 +276,21 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
   const setLocked = (v: boolean): void => { rate.cancel(); locked = v; render(); }; const scheduleSleep = (m: SleepMode): void => { sleep.schedule(m); render(); };
   return {
     load, play: () => engine?.play(), pause: () => { progress.emit(true); engine?.pause(); },
-    setLocked, scheduleSleep, closeDrawer: () => drawer.close(),
-    openDrawer: () => { rate.close(); rate.cancel(); if (detail !== null && episodeId !== null) drawer.open(detail, episodeId); },
+    setLocked, scheduleSleep, closeDrawer: () => drawer.close(), openDrawer,
     setPlaybackRate: rate.set, dismissOverlay: () => rate.close() || (drawer.isOpen() ? (drawer.close(), true) : false),
     notifyAudioFocus: (value) => { if (value === 'lost') rate.cancel(); interruption.audioFocus(value); }, notifyLeave: () => { rate.cancel(); interruption.noteUserAction(); progress.emit(true); },
-    relayout: () => engine?.resize?.(),
+    // 视口几何变了（进出全屏、转屏）：重算画面矩形并让面板重判模式，仍然不触碰任何全屏通道（SPEC §1.2.0）。
+    relayout,
     state: (): PlayerState => ({
       phase, errorKind, episodeId, contentId: detail?.item.id ?? null, playing: engine?.playing() ?? false,
       locked, sleepMode: sleep.mode(), isPrivate: isPrivateSubject(detail?.item ?? {}),
-      positionSeconds: engine?.currentTime() ?? 0, durationSeconds: engine?.duration() ?? 0,
-      volume: engine?.volume() ?? 1, systemVolumeSupported, brightnessSupported,
-      lineIndex: direct
+      positionSeconds: engine?.currentTime() ?? 0, durationSeconds: engine?.duration() ?? 0, volume: engine?.volume() ?? 1,
+      systemVolumeSupported, brightnessSupported, lineIndex: direct
     }),
     destroy: () => {
       if (destroyed) return;
       destroyed = true; phase = 'destroyed'; token += 1; progress.emit(true);
-      rate.destroy(); sleep.destroy(); gesture.destroy(); hud.destroy(); drawer.destroy(); overlay.destroy(); chrome.destroy();
+      idle.destroy(); rate.destroy(); sleep.destroy(); gesture.destroy(); hud.destroy(); drawer.destroy(); overlay.destroy(); chrome.destroy();
       for (const [target, type, handler] of bound) target.removeEventListener(type, handler);
       bound.length = 0;
       for (const dispose of disposers.splice(0)) dispose();
