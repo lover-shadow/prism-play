@@ -4,6 +4,37 @@
 
 ---
 
+## 2026-10-07 · 原生 CENC 解密内核集成、轻量搜索卡片与验收 APK 交付
+
+- **执行主体**：Master_流光逸影（真机验收与战略定调）& MVP开发专家团（全栈工程闭环）
+- **核心背景与问题定位**：
+  1. 上游移动端内容采用 1080p HEVC（`bytevc1`/`hvc1`）+ 音视频双 CENC（AES-128-CTR）加密，WebView 播放器无法直接解密播放全集（前代依赖本地流式解密）；
+  2. 此前云端搜索在请求时同步抓取多剧全集流地址，造成 Cloudflare Free 10ms CPU 超限（1102 报错）；
+  3. 普通流经由 WebView 播放时因携带 `localhost` 来源头触发上游字节 CDN 防盗链（403 Referer ACL 拒流）；
+  4. 多季下拉框位置倒置、全屏手势 HUD 层级遮挡及版本号缺乏常驻展示。
+- **终局交付成果**：
+  1. **Android 原生 CENC 解密与 ExoPlayer 硬解播放内核闭环**：
+     - 实现 `ProbeNativeResolver`、`ProbeSpadeKey`（16字节 AES-128 密钥内存解析）、`ProbeCencDataSource`（Range 流式 AES-CTR 解密并动态修复 moov 盒）；
+     - `PrismPlayerPlugin` 通过 `TextureView` 实现原生画面在透明 WebView 下渲染，复用原有全手势 HUD 与选集抽屉；
+     - 集成 `PlaybackService` 前台服务与 `MediaSessionCompat` 支持后台播放与系统锁屏通知栏播控。
+  2. **云端搜索与播放分阶段解耦（对标成熟架构）**：
+     - 搜索只拉取、保存和返回剧目公开卡片，不再在搜索阶段逐集爬取视频流；
+     - 远程 D1 数据库执行增量迁移 `0007_discovery_cards.sql` 建立独立卡片账本；
+     - 详情接口按需拉取 `vid_list` 并生成纯 `native: { kind: 's1-cenc', videoId }` 描述符，彻底剔除假 `mediaUrl` 占位符；
+     - 部署 Worker 版本 `1f35163f-fd8d-423d-b17f-320a8e85c81f`，绑定版本元数据 `CF_VERSION_METADATA`。
+  3. **端侧防盗链与 UI 交互全面校准**：
+     - `src/index.html` 挂载 `<meta name="referrer" content="no-referrer">`，消除普通 MP4 播放 403 拒流；
+     - 季/部下拉框移至选集横滑轨正上方，理顺信息层级；
+     - 全屏手势 HUD 层级置顶至 `z-index: 50`，改为精致的【图标 + 百分比 + 竖向进度条】，移除冗余解释文案；
+     - 设置页增加常驻运行版本卡片，分别展示真实宿主 APP 版本（v2.6.5 Build 21605）与云端服务构建 ID。
+  4. **工程度量与最新验收 APK 交付**：
+     - 全量测试 **149 套测试套件、1,723 项测试用例全部通过 (1723/1723 PASS)**；
+     - 门禁 Gate G0 契约校验与 P0 工程红线（494 文件零 Emoji、零紫粉渐变、零裸 Hex、单文件 ≤300 行）全部通过；
+     - 编译并归档最新验收包 `build/apk265/prism-play-v2.6.5-acceptance-20261007.apk`（SHA-256: `7729c377fd6903e21d12b1955b38ba4f41af5b48ca13fa0c7f7f88dfc4d0a8b6`）；
+     - 官网 WEB 下载保持未发布状态，严格等待真机验收。
+
+---
+
 ## 2026-10-02 (深夜) · 万部级大视界内容生态全面落盘 (8,874部作品全景覆盖 · 54,023条SQL秒级灌装)
 
 - **执行主体**：Master_流光逸影 (战略指令：“能抓尽抓，不限制获取量”) & MVP开发专家团 (全栈工程闭环)

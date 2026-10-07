@@ -28,6 +28,8 @@
 
 > 修改任一层的契约，必须同步检查其下游文档，并在 SPEC 的「变更记录」中留痕。
 >
+> **2026-10-07 CENC原生硬解、轻量卡片搜索与UI校准验收交付**：落地 Android 原生 ExoPlayer 硬件解码与本地 CENC AES-128-CTR 样本流式解密；云端搜索瘦身解耦为轻量独立卡片（D1 0007 迁移新增 `discovery_cards` 表），详情按需拉取分集 `videoId` 纯原生描述符（彻底剔除虚假 `mediaUrl`）；前端增加 `no-referrer` 解决上游防盗链 403 拒流；选季框紧贴选集上方，全屏手势 HUD 层级置顶至 50 且精简为竖向进度指示；常驻展示本机与云端服务版本。149 套测试 1,723 项全绿，交付最新验收包 `build/apk265/prism-play-v2.6.5-acceptance-20261007.apk`（等待 Master 真机实测验收，WEB 下载保持未发布）。
+>
 > **2026-10-06 运营后台与全链路分析增量交付**：完成了同源管理后台（`/admin` 与 `/api/admin/*`）、D1 0004 增量迁移（30 张真实业务表）、卡密生命周期（确认库存/确认分发/查看全码/停止核销）、全链路访问与下载触发分析、用户隐私同意流程（`/privacy`）与定时自动留存清理。新增实施规范与交付全记录 `docs/04-spec/ADMIN-ANALYTICS-AND-COUPON-SPEC-AND-PLAN.md` 及配套《管理后台与卡密运维操作手册》`docs/04-spec/ADMIN-OPERATION-MANUAL.md`。本地凭据存放于根目录被 Git 忽略的 `admin-access.local`。生产已上线并完成真实环境端到端验证。
 >
 > **2026-10-01 修订范围**：F-13～F-15 / AC-16～AC-18 补入已配置来源增量接入与 AI 加工、词法＋BGE-M3/Vectorize 混合搜索、Android 公开目录与缩略海报本地缓存、公开增量目录协议；Windows 客户端和媒体离线下载后移。三层关联：客户端（PRD/UIUX/SPEC）→ 云端（ARCHITECTURE/ADR-003/D1）→ 传输（OpenAPI/API-SPEC），权威顺序不变。Cloudflare 账号套餐与 AI 实际用量未知，既有资源查询结果属于前次会话，云资源绑定待阶段 1 重新核验，不得误当已落地。
