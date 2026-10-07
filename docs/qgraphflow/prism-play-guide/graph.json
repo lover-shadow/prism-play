@@ -1,0 +1,1858 @@
+{
+  "diagrams": [
+    {
+      "meta": {
+        "title": "光影Play · 系统分工",
+        "subtitle": "先看谁负责什么：本地浏览、云端调度、视频直连。点击卡片查看说明与依据。",
+        "sourceRef": "prism-play@working-tree-2026-10-06",
+        "scope": "当前代码的主要产品链路；不是线上运行证明",
+        "diagramType": "architecture",
+        "locale": "zh-CN"
+      },
+      "groups": [
+        {
+          "id": "phone",
+          "label": "手机应用",
+          "kind": "ownership",
+          "position": {
+            "x": 32,
+            "y": 349
+          },
+          "size": {
+            "width": 740,
+            "height": 815
+          }
+        },
+        {
+          "id": "cloud",
+          "label": "云端服务",
+          "kind": "ownership",
+          "position": {
+            "x": 1336,
+            "y": 32
+          },
+          "size": {
+            "width": 409,
+            "height": 510
+          }
+        }
+      ],
+      "nodes": [
+        {
+          "id": "viewer",
+          "label": "观看者",
+          "kind": "external",
+          "subtitle": "浏览 · 搜索 · 选集 · 续播",
+          "position": {
+            "x": 424,
+            "y": 32
+          },
+          "size": {
+            "width": 302,
+            "height": 115
+          }
+        },
+        {
+          "id": "home",
+          "label": "首页与搜索",
+          "kind": "business",
+          "module": "浏览发现",
+          "groupId": "phone",
+          "subtitle": "优先使用手机已有目录",
+          "facts": [
+            "启动先恢复本地目录，或读取安装包预置目录",
+            "后台检查目录更新，不必每次浏览都查云端"
+          ],
+          "source": {
+            "file": "src/main.ts",
+            "lineStart": 59,
+            "lineEnd": 85
+          },
+          "position": {
+            "x": 453,
+            "y": 407
+          },
+          "size": {
+            "width": 244,
+            "height": 115
+          }
+        },
+        {
+          "id": "local",
+          "label": "本地内容目录",
+          "kind": "data",
+          "module": "内容目录",
+          "groupId": "phone",
+          "subtitle": "海报信息 · 分类 · 搜索索引",
+          "facts": [
+            "目录是影片信息，不是离线视频",
+            "已有索引但搜索未命中时，不会自动转联网搜索"
+          ],
+          "source": {
+            "file": "src/core/catalog-cache.ts",
+            "lineStart": 253,
+            "lineEnd": 294
+          },
+          "position": {
+            "x": 64,
+            "y": 712
+          },
+          "size": {
+            "width": 308,
+            "height": 115
+          }
+        },
+        {
+          "id": "player",
+          "label": "播放器",
+          "kind": "business",
+          "module": "观看播放",
+          "groupId": "phone",
+          "subtitle": "选集 · 加载 · 换线 · 续播",
+          "facts": [
+            "尝试自动播放，不保证浏览器一定允许",
+            "直连失败最多切换两次线路，耗尽后显示重试入口"
+          ],
+          "source": {
+            "file": "src/player/prism-player.ts",
+            "lineStart": 199,
+            "lineEnd": 253
+          },
+          "position": {
+            "x": 436,
+            "y": 712
+          },
+          "size": {
+            "width": 302,
+            "height": 115
+          }
+        },
+        {
+          "id": "gateway",
+          "label": "云端内容服务",
+          "kind": "service",
+          "module": "云端内容",
+          "groupId": "cloud",
+          "subtitle": "目录更新 · 剧目详情 · 播放地址",
+          "facts": [
+            "向手机提供公开内容与播放线路",
+            "当前主播放链路不是默认经过云端转发视频"
+          ],
+          "source": {
+            "file": "edge/src/routes/titles.ts",
+            "lineStart": 127,
+            "lineEnd": 166
+          },
+          "position": {
+            "x": 1368,
+            "y": 90
+          },
+          "size": {
+            "width": 345,
+            "height": 115
+          }
+        },
+        {
+          "id": "assets",
+          "label": "云端内容资产",
+          "kind": "data",
+          "module": "云端内容",
+          "groupId": "cloud",
+          "subtitle": "目录包 · 搜索投影 · 播放信息",
+          "facts": [
+            "发布脚本先上传资产，再更新当前目录指针",
+            "发布机制存在，不代表自动日更已稳定闭环"
+          ],
+          "source": {
+            "file": "edge/scripts/publish.mjs",
+            "lineStart": 143,
+            "lineEnd": 176
+          },
+          "position": {
+            "x": 1377.5,
+            "y": 395
+          },
+          "size": {
+            "width": 326,
+            "height": 115
+          }
+        },
+        {
+          "id": "history",
+          "label": "观看记录与追剧",
+          "kind": "component",
+          "module": "用户记录",
+          "groupId": "phone",
+          "subtitle": "本机保存 · 有条件同步",
+          "facts": [
+            "公开观看记录保存于本机",
+            "有同步凭证时才上报；私密观看记录只保存在内存"
+          ],
+          "source": {
+            "file": "src/core/user-sync.ts",
+            "lineStart": 188,
+            "lineEnd": 252
+          },
+          "position": {
+            "x": 482,
+            "y": 1017
+          },
+          "size": {
+            "width": 258,
+            "height": 115
+          }
+        },
+        {
+          "id": "media",
+          "label": "外部视频服务",
+          "kind": "external",
+          "module": "媒体来源",
+          "subtitle": "提供视频清单与媒体片段",
+          "facts": [
+            "以抽象名称展示，不暴露上游品牌",
+            "直连媒体的具体加载由播放引擎负责"
+          ],
+          "position": {
+            "x": 1809,
+            "y": 32
+          },
+          "size": {
+            "width": 263,
+            "height": 115
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "a1",
+          "source": "viewer",
+          "target": "home",
+          "kind": "call",
+          "label": "浏览与搜索",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 575,
+                "y": 159
+              },
+              {
+                "x": 575,
+                "y": 395
+              }
+            ],
+            "labelAt": {
+              "x": 575,
+              "y": 242
+            }
+          }
+        },
+        {
+          "id": "a2",
+          "source": "home",
+          "target": "local",
+          "kind": "data",
+          "label": "读取目录与索引",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 563,
+                "y": 534
+              },
+              {
+                "x": 563,
+                "y": 546
+              },
+              {
+                "x": 218,
+                "y": 546
+              },
+              {
+                "x": 218,
+                "y": 700
+              }
+            ],
+            "labelAt": {
+              "x": 218,
+              "y": 617
+            }
+          }
+        },
+        {
+          "id": "a3",
+          "source": "local",
+          "target": "gateway",
+          "kind": "request",
+          "label": "后台检查目录更新",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 218,
+                "y": 1212
+              },
+              {
+                "x": 874,
+                "y": 1212
+              },
+              {
+                "x": 874,
+                "y": 135.5
+              }
+            ],
+            "labelAt": {
+              "x": 874,
+              "y": 673.75
+            }
+          }
+        },
+        {
+          "id": "a4",
+          "source": "gateway",
+          "target": "assets",
+          "kind": "data",
+          "label": "读取目录和播放信息",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 1540.5,
+                "y": 217
+              },
+              {
+                "x": 1540.5,
+                "y": 383
+              }
+            ],
+            "labelAt": {
+              "x": 1540.5,
+              "y": 300
+            }
+          }
+        },
+        {
+          "id": "a5",
+          "source": "home",
+          "target": "player",
+          "kind": "call",
+          "label": "点开影片与选集",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 587,
+                "y": 534
+              },
+              {
+                "x": 587,
+                "y": 700
+              }
+            ],
+            "labelAt": {
+              "x": 587,
+              "y": 617
+            }
+          }
+        },
+        {
+          "id": "a6",
+          "source": "player",
+          "target": "gateway",
+          "kind": "request",
+          "label": "获取详情与播放线路",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 1054,
+                "y": 757.5
+              },
+              {
+                "x": 1054,
+                "y": 159.5
+              }
+            ],
+            "labelAt": {
+              "x": 1054,
+              "y": 458.5
+            }
+          }
+        },
+        {
+          "id": "a7",
+          "source": "player",
+          "target": "media",
+          "kind": "request",
+          "label": "直连加载视频",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 1234,
+                "y": 781.5
+              },
+              {
+                "x": 1234,
+                "y": 638
+              },
+              {
+                "x": 1940.5,
+                "y": 638
+              }
+            ],
+            "labelAt": {
+              "x": 1234,
+              "y": 709.75
+            }
+          }
+        },
+        {
+          "id": "a8",
+          "source": "player",
+          "target": "history",
+          "kind": "data",
+          "label": "保存观看进度",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 611,
+                "y": 839
+              },
+              {
+                "x": 611,
+                "y": 1005
+              }
+            ],
+            "labelAt": {
+              "x": 611,
+              "y": 922
+            }
+          }
+        }
+      ],
+      "layout": {
+        "version": "adaptive-v2-elkjs-0.11.0",
+        "strategy": "layered-0-fold2c"
+      }
+    },
+    {
+      "meta": {
+        "title": "点开影片 · 播放流程",
+        "subtitle": "从点击到起播；主画面只保留用户能感知的步骤与失败处理。",
+        "sourceRef": "prism-play@working-tree-2026-10-06",
+        "scope": "当前主链路；旧详情兼容入口见卡片说明",
+        "diagramType": "flowchart",
+        "locale": "zh-CN"
+      },
+      "layout": {
+        "primaryPath": [
+          "click",
+          "loading",
+          "detail",
+          "detail-ok",
+          "pick",
+          "lines",
+          "available",
+          "load",
+          "ready",
+          "watch"
+        ],
+        "version": "adaptive-v2-elkjs-0.11.0",
+        "strategy": "layered-3"
+      },
+      "nodes": [
+        {
+          "id": "click",
+          "label": "点开影片",
+          "kind": "start",
+          "module": "浏览发现",
+          "source": {
+            "file": "src/player-host.ts",
+            "lineStart": 96,
+            "lineEnd": 125
+          },
+          "position": {
+            "x": 771,
+            "y": 32
+          },
+          "size": {
+            "width": 240,
+            "height": 100
+          }
+        },
+        {
+          "id": "loading",
+          "label": "立即显示加载提示",
+          "kind": "process",
+          "module": "观看播放",
+          "source": {
+            "file": "src/player-host.ts",
+            "lineStart": 96,
+            "lineEnd": 125
+          },
+          "position": {
+            "x": 769,
+            "y": 322
+          },
+          "size": {
+            "width": 244,
+            "height": 100
+          }
+        },
+        {
+          "id": "detail",
+          "label": "获取影片详情",
+          "kind": "input",
+          "module": "云端内容",
+          "facts": [
+            "读取本地播放偏好后，请求剧目详情",
+            "详情请求失败会结束本次打开并提示错误"
+          ],
+          "source": {
+            "file": "src/player-host.ts",
+            "lineStart": 134,
+            "lineEnd": 164
+          },
+          "position": {
+            "x": 771,
+            "y": 612
+          },
+          "size": {
+            "width": 240,
+            "height": 100
+          }
+        },
+        {
+          "id": "detail-ok",
+          "label": "影片详情获取成功？",
+          "kind": "decision",
+          "module": "观看播放",
+          "source": {
+            "file": "src/player-host.ts",
+            "lineStart": 96,
+            "lineEnd": 125
+          },
+          "position": {
+            "x": 757.5,
+            "y": 902
+          },
+          "size": {
+            "width": 267,
+            "height": 134
+          }
+        },
+        {
+          "id": "detail-fail",
+          "label": "提示打开失败",
+          "kind": "end",
+          "module": "观看播放",
+          "source": {
+            "file": "src/player-host.ts",
+            "lineStart": 96,
+            "lineEnd": 125
+          },
+          "position": {
+            "x": 931,
+            "y": 1226
+          },
+          "size": {
+            "width": 240,
+            "height": 100
+          }
+        },
+        {
+          "id": "pick",
+          "label": "选择本次要看的集数",
+          "kind": "process",
+          "module": "观看播放",
+          "facts": [
+            "续播入口根据历史选择集数",
+            "普通点击未带历史时选择第一集"
+          ],
+          "source": {
+            "file": "src/player-host.ts",
+            "lineStart": 134,
+            "lineEnd": 164
+          },
+          "position": {
+            "x": 600,
+            "y": 1226
+          },
+          "size": {
+            "width": 267,
+            "height": 100
+          }
+        },
+        {
+          "id": "lines",
+          "label": "取得本集播放线路",
+          "kind": "subprocess",
+          "module": "观看播放",
+          "facts": [
+            "优先使用播放清单",
+            "旧详情无清单时存在兼容取址路径；新清单本地集号不走旧接口"
+          ],
+          "source": {
+            "file": "src/player/line-runner.ts",
+            "lineStart": 82,
+            "lineEnd": 105
+          },
+          "position": {
+            "x": 611.5,
+            "y": 1516
+          },
+          "size": {
+            "width": 244,
+            "height": 100
+          }
+        },
+        {
+          "id": "available",
+          "label": "取得可用地址？",
+          "kind": "decision",
+          "module": "观看播放",
+          "source": {
+            "file": "src/player/line-runner.ts",
+            "lineStart": 82,
+            "lineEnd": 105
+          },
+          "position": {
+            "x": 613.5,
+            "y": 1806
+          },
+          "size": {
+            "width": 240,
+            "height": 134
+          }
+        },
+        {
+          "id": "load",
+          "label": "加载视频并尝试起播",
+          "kind": "process",
+          "module": "观看播放",
+          "facts": [
+            "必要时尝试静音起播，保留点击播放入口",
+            "自动播放不是绝对承诺"
+          ],
+          "source": {
+            "file": "src/player/prism-player.ts",
+            "lineStart": 199,
+            "lineEnd": 225
+          },
+          "position": {
+            "x": 432,
+            "y": 2130
+          },
+          "size": {
+            "width": 267,
+            "height": 100
+          }
+        },
+        {
+          "id": "ready",
+          "label": "媒体加载是否正常？",
+          "kind": "decision",
+          "module": "观看播放",
+          "facts": [
+            "此处表示媒体加载结果，不表示浏览器一定允许自动播放"
+          ],
+          "source": {
+            "file": "src/player/prism-player.ts",
+            "lineStart": 234,
+            "lineEnd": 253
+          },
+          "position": {
+            "x": 432,
+            "y": 2420
+          },
+          "size": {
+            "width": 267,
+            "height": 134
+          }
+        },
+        {
+          "id": "watch",
+          "label": "进入观看，必要时点击播放",
+          "kind": "end",
+          "module": "观看播放",
+          "source": {
+            "file": "src/player/prism-player.ts",
+            "lineStart": 199,
+            "lineEnd": 225
+          },
+          "position": {
+            "x": 612.5,
+            "y": 2744
+          },
+          "size": {
+            "width": 336,
+            "height": 100
+          }
+        },
+        {
+          "id": "retry",
+          "label": "还能自动换下一条线路？",
+          "kind": "decision",
+          "module": "观看播放",
+          "facts": [
+            "最多换两次，最多尝试三条线路",
+            "换线携带当前位置；耗尽不会自动转代理"
+          ],
+          "source": {
+            "file": "src/player/line-fallback.ts",
+            "lineStart": 67,
+            "lineEnd": 82
+          },
+          "position": {
+            "x": 251.5,
+            "y": 2744
+          },
+          "size": {
+            "width": 313,
+            "height": 134
+          }
+        },
+        {
+          "id": "switch",
+          "label": "换线并保留观看位置",
+          "kind": "process",
+          "module": "观看播放",
+          "source": {
+            "file": "src/player/line-runner.ts",
+            "lineStart": 109,
+            "lineEnd": 117
+          },
+          "position": {
+            "x": 94,
+            "y": 3068
+          },
+          "size": {
+            "width": 267,
+            "height": 100
+          }
+        },
+        {
+          "id": "stop",
+          "label": "提示不可用或提供重试入口",
+          "kind": "end",
+          "module": "观看播放",
+          "facts": [
+            "影片详情失败、取址失败和线路耗尽的提示不完全相同"
+          ],
+          "source": {
+            "file": "src/player/prism-player.ts",
+            "lineStart": 234,
+            "lineEnd": 253
+          },
+          "position": {
+            "x": 444.5,
+            "y": 3068
+          },
+          "size": {
+            "width": 336,
+            "height": 100
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "f1",
+          "source": "click",
+          "target": "loading",
+          "kind": "flow",
+          "label": "打开",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 891,
+                "y": 144
+              },
+              {
+                "x": 891,
+                "y": 310
+              }
+            ],
+            "labelAt": {
+              "x": 891,
+              "y": 227
+            }
+          }
+        },
+        {
+          "id": "f2",
+          "source": "loading",
+          "target": "detail",
+          "kind": "flow",
+          "label": "开始读取",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 891,
+                "y": 434
+              },
+              {
+                "x": 891,
+                "y": 600
+              }
+            ],
+            "labelAt": {
+              "x": 891,
+              "y": 517
+            }
+          }
+        },
+        {
+          "id": "f3",
+          "source": "detail",
+          "target": "detail-ok",
+          "kind": "flow",
+          "label": "请求结果",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 891,
+                "y": 724
+              },
+              {
+                "x": 891,
+                "y": 890
+              }
+            ],
+            "labelAt": {
+              "x": 891,
+              "y": 807
+            }
+          }
+        },
+        {
+          "id": "f14",
+          "source": "detail-ok",
+          "target": "pick",
+          "kind": "yes",
+          "label": "成功",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 745.5,
+                "y": 969
+              },
+              {
+                "x": 733.5,
+                "y": 969
+              },
+              {
+                "x": 733.5,
+                "y": 1214
+              }
+            ],
+            "labelAt": {
+              "x": 733.5,
+              "y": 1131
+            }
+          }
+        },
+        {
+          "id": "f15",
+          "source": "detail-ok",
+          "target": "detail-fail",
+          "kind": "no",
+          "label": "失败",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 1036.5,
+                "y": 969
+              },
+              {
+                "x": 1051,
+                "y": 969
+              },
+              {
+                "x": 1051,
+                "y": 1214
+              }
+            ],
+            "labelAt": {
+              "x": 1051,
+              "y": 1131
+            }
+          }
+        },
+        {
+          "id": "f4",
+          "source": "pick",
+          "target": "lines",
+          "kind": "flow",
+          "label": "准备本集",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 733.5,
+                "y": 1338
+              },
+              {
+                "x": 733.5,
+                "y": 1504
+              }
+            ],
+            "labelAt": {
+              "x": 733.5,
+              "y": 1421
+            }
+          }
+        },
+        {
+          "id": "f5",
+          "source": "lines",
+          "target": "available",
+          "kind": "flow",
+          "label": "取址结果",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 733.5,
+                "y": 1628
+              },
+              {
+                "x": 733.5,
+                "y": 1794
+              }
+            ],
+            "labelAt": {
+              "x": 733.5,
+              "y": 1711
+            }
+          }
+        },
+        {
+          "id": "f6",
+          "source": "available",
+          "target": "load",
+          "kind": "yes",
+          "label": "有地址",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 601.5,
+                "y": 1873
+              },
+              {
+                "x": 589.5,
+                "y": 1873
+              },
+              {
+                "x": 589.5,
+                "y": 2118
+              }
+            ],
+            "labelAt": {
+              "x": 589.5,
+              "y": 2035
+            }
+          }
+        },
+        {
+          "id": "f7",
+          "source": "available",
+          "target": "stop",
+          "kind": "no",
+          "label": "没有地址",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 865.5,
+                "y": 1873
+              },
+              {
+                "x": 972.5,
+                "y": 1873
+              },
+              {
+                "x": 972.5,
+                "y": 3012
+              },
+              {
+                "x": 636.5,
+                "y": 3012
+              },
+              {
+                "x": 636.5,
+                "y": 3056
+              }
+            ],
+            "labelAt": {
+              "x": 972.5,
+              "y": 2487
+            }
+          }
+        },
+        {
+          "id": "f8",
+          "source": "load",
+          "target": "ready",
+          "kind": "flow",
+          "label": "媒体加载结果",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 565.5,
+                "y": 2242
+              },
+              {
+                "x": 565.5,
+                "y": 2408
+              }
+            ],
+            "labelAt": {
+              "x": 565.5,
+              "y": 2325
+            }
+          }
+        },
+        {
+          "id": "f9",
+          "source": "ready",
+          "target": "watch",
+          "kind": "yes",
+          "label": "正常",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 711,
+                "y": 2487
+              },
+              {
+                "x": 780.5,
+                "y": 2487
+              },
+              {
+                "x": 780.5,
+                "y": 2732
+              }
+            ],
+            "labelAt": {
+              "x": 780.5,
+              "y": 2649
+            }
+          }
+        },
+        {
+          "id": "f10",
+          "source": "ready",
+          "target": "retry",
+          "kind": "no",
+          "label": "加载失败",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 420,
+                "y": 2487
+              },
+              {
+                "x": 408,
+                "y": 2487
+              },
+              {
+                "x": 408,
+                "y": 2732
+              }
+            ],
+            "labelAt": {
+              "x": 408,
+              "y": 2649
+            }
+          }
+        },
+        {
+          "id": "f11",
+          "source": "retry",
+          "target": "switch",
+          "kind": "yes",
+          "label": "有下一条且未超限",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 239.5,
+                "y": 2811
+              },
+              {
+                "x": 227.5,
+                "y": 2811
+              },
+              {
+                "x": 227.5,
+                "y": 3056
+              }
+            ],
+            "labelAt": {
+              "x": 227.5,
+              "y": 2973
+            }
+          }
+        },
+        {
+          "id": "f12",
+          "source": "retry",
+          "target": "stop",
+          "kind": "no",
+          "label": "没有或已耗尽",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 576.5,
+                "y": 2811
+              },
+              {
+                "x": 588.5,
+                "y": 2811
+              },
+              {
+                "x": 588.5,
+                "y": 3056
+              }
+            ],
+            "labelAt": {
+              "x": 588.5,
+              "y": 2973
+            }
+          }
+        },
+        {
+          "id": "f13",
+          "source": "switch",
+          "target": "load",
+          "kind": "flow",
+          "label": "再次加载",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 227.5,
+                "y": 3180
+              },
+              {
+                "x": 227.5,
+                "y": 3192
+              },
+              {
+                "x": 70,
+                "y": 3192
+              },
+              {
+                "x": 70,
+                "y": 2074
+              },
+              {
+                "x": 541.5,
+                "y": 2074
+              },
+              {
+                "x": 541.5,
+                "y": 2118
+              }
+            ],
+            "labelAt": {
+              "x": 70,
+              "y": 2649
+            }
+          }
+        }
+      ]
+    },
+    {
+      "meta": {
+        "title": "开始观看 · 先后时序",
+        "subtitle": "先取详情，再取线路，最后直连媒体。媒体响应异步到达，图示不代表固定耗时或返回先后。",
+        "sourceRef": "prism-play@working-tree-2026-10-06",
+        "scope": "主链路成功场景；线路缓存命中时省去第二次云端请求",
+        "diagramType": "sequence",
+        "locale": "zh-CN"
+      },
+      "nodes": [
+        {
+          "id": "viewer",
+          "label": "观看者",
+          "kind": "actor",
+          "size": {
+            "width": 160,
+            "height": 948
+          },
+          "position": {
+            "x": 32,
+            "y": 48
+          }
+        },
+        {
+          "id": "host",
+          "label": "影片打开页面",
+          "kind": "participant",
+          "module": "观看播放",
+          "facts": [
+            "立即显示加载层",
+            "普通打开与续播入口的选集规则不同"
+          ],
+          "source": {
+            "file": "src/player-host.ts",
+            "lineStart": 96,
+            "lineEnd": 164
+          },
+          "size": {
+            "width": 166,
+            "height": 948
+          },
+          "position": {
+            "x": 263,
+            "y": 48
+          }
+        },
+        {
+          "id": "gateway",
+          "label": "云端内容服务",
+          "kind": "service",
+          "module": "云端内容",
+          "source": {
+            "file": "edge/src/routes/titles.ts",
+            "lineStart": 127,
+            "lineEnd": 166
+          },
+          "size": {
+            "width": 166,
+            "height": 948
+          },
+          "position": {
+            "x": 558,
+            "y": 48
+          }
+        },
+        {
+          "id": "player",
+          "label": "播放器",
+          "kind": "participant",
+          "module": "观看播放",
+          "facts": [
+            "读取播放清单缓存；未命中时再请求剧目详情",
+            "因此冷缓存首次打开可能有两次详情请求"
+          ],
+          "source": {
+            "file": "src/player/title-manifest.ts",
+            "lineStart": 212,
+            "lineEnd": 254
+          },
+          "size": {
+            "width": 160,
+            "height": 948
+          },
+          "position": {
+            "x": 879,
+            "y": 48
+          }
+        },
+        {
+          "id": "media",
+          "label": "外部视频服务",
+          "kind": "external",
+          "module": "媒体来源",
+          "size": {
+            "width": 166,
+            "height": 948
+          },
+          "position": {
+            "x": 1251,
+            "y": 48
+          }
+        }
+      ],
+      "groups": [
+        {
+          "id": "uncached",
+          "label": "仅播放清单未缓存时",
+          "kind": "opt",
+          "operands": [
+            {
+              "id": "miss",
+              "guard": "本机没有有效播放清单",
+              "edgeIds": [
+                "s5",
+                "s6"
+              ]
+            }
+          ],
+          "position": {
+            "x": 437,
+            "y": 444
+          },
+          "size": {
+            "width": 586,
+            "height": 274
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "s1",
+          "source": "viewer",
+          "target": "host",
+          "kind": "async",
+          "label": "点击影片或续播",
+          "order": 1,
+          "evidence": "source",
+          "route": {
+            "messageY": 216
+          }
+        },
+        {
+          "id": "s2",
+          "source": "host",
+          "target": "gateway",
+          "kind": "sync",
+          "label": "请求影片详情",
+          "order": 2,
+          "evidence": "source",
+          "route": {
+            "messageY": 282
+          }
+        },
+        {
+          "id": "s3",
+          "source": "gateway",
+          "target": "host",
+          "kind": "return",
+          "label": "返回影片资料与集数",
+          "order": 3,
+          "replyTo": "s2",
+          "evidence": "source",
+          "route": {
+            "messageY": 348
+          }
+        },
+        {
+          "id": "s4",
+          "source": "host",
+          "target": "player",
+          "kind": "sync",
+          "label": "创建播放器并准备本集",
+          "order": 4,
+          "evidence": "source",
+          "route": {
+            "messageY": 414
+          }
+        },
+        {
+          "id": "s5",
+          "source": "player",
+          "target": "gateway",
+          "kind": "sync",
+          "label": "再次读取详情中的播放清单",
+          "order": 5,
+          "evidence": "source",
+          "route": {
+            "messageY": 582
+          }
+        },
+        {
+          "id": "s6",
+          "source": "gateway",
+          "target": "player",
+          "kind": "return",
+          "label": "返回本集可用线路",
+          "order": 6,
+          "replyTo": "s5",
+          "evidence": "source",
+          "route": {
+            "messageY": 648
+          }
+        },
+        {
+          "id": "s7",
+          "source": "player",
+          "target": "media",
+          "kind": "async",
+          "label": "直连请求视频清单与媒体数据",
+          "order": 7,
+          "evidence": "source",
+          "route": {
+            "messageY": 778
+          }
+        },
+        {
+          "id": "s9",
+          "source": "player",
+          "target": "host",
+          "kind": "return",
+          "label": "播放地址已交给引擎，不等待媒体全部加载",
+          "order": 8,
+          "replyTo": "s4",
+          "evidence": "source",
+          "route": {
+            "messageY": 868
+          }
+        },
+        {
+          "id": "s8",
+          "source": "media",
+          "target": "player",
+          "kind": "return",
+          "label": "异步媒体响应；返回时点不固定",
+          "order": 9,
+          "replyTo": "s7",
+          "evidence": "framework",
+          "route": {
+            "messageY": 934
+          }
+        }
+      ],
+      "executions": [
+        {
+          "id": "x1",
+          "participantId": "gateway",
+          "start": {
+            "edgeId": "s2",
+            "at": "receive"
+          },
+          "end": {
+            "edgeId": "s3",
+            "at": "send"
+          }
+        },
+        {
+          "id": "x2",
+          "participantId": "gateway",
+          "start": {
+            "edgeId": "s5",
+            "at": "receive"
+          },
+          "end": {
+            "edgeId": "s6",
+            "at": "send"
+          }
+        },
+        {
+          "id": "x3",
+          "participantId": "player",
+          "start": {
+            "edgeId": "s4",
+            "at": "receive"
+          },
+          "end": {
+            "edgeId": "s9",
+            "at": "send"
+          }
+        }
+      ],
+      "layout": {
+        "version": "adaptive-v2-elkjs-0.11.0",
+        "strategy": "sequence-0"
+      }
+    },
+    {
+      "meta": {
+        "title": "内容更新 · 从采集到手机",
+        "subtitle": "展示数据如何流动：云端准备目录，手机先用已有目录，再同步变化。",
+        "sourceRef": "prism-play@working-tree-2026-10-06",
+        "scope": "已实现的数据处理机制；自动日更稳定性待验证，不代表生产调度已闭环",
+        "diagramType": "dataflow",
+        "locale": "zh-CN"
+      },
+      "nodes": [
+        {
+          "id": "provider",
+          "label": "外部内容来源",
+          "kind": "external",
+          "module": "内容采集",
+          "subtitle": "影片信息 · 集数 · 播放线路",
+          "position": {
+            "x": 176,
+            "y": 32
+          },
+          "size": {
+            "width": 308,
+            "height": 100
+          }
+        },
+        {
+          "id": "collect",
+          "label": "采集与归一整理",
+          "kind": "process",
+          "module": "内容采集",
+          "facts": [
+            "批处理脚本获取变化，并与已有完整状态合并",
+            "云端定时采集入口的注册表为空，不能当作真实来源"
+          ],
+          "source": {
+            "file": "edge/scripts/sync-incremental.mjs",
+            "lineStart": 106,
+            "lineEnd": 139
+          },
+          "position": {
+            "x": 800,
+            "y": 32
+          },
+          "size": {
+            "width": 240,
+            "height": 100
+          }
+        },
+        {
+          "id": "pack",
+          "label": "生成内容包",
+          "kind": "process",
+          "module": "云端内容",
+          "facts": [
+            "生成目录分片、播放事实、搜索投影和目录整包",
+            "只画已存在的机制，不宣称每天发布一定成功"
+          ],
+          "source": {
+            "file": "edge/scripts/daily-facts.mjs",
+            "lineStart": 94,
+            "lineEnd": 130
+          },
+          "position": {
+            "x": 176,
+            "y": 212
+          },
+          "size": {
+            "width": 240,
+            "height": 100
+          }
+        },
+        {
+          "id": "assets",
+          "label": "云端内容资产",
+          "kind": "dataStore",
+          "module": "云端内容",
+          "facts": [
+            "上传对象后再切换目录指针"
+          ],
+          "source": {
+            "file": "edge/scripts/publish.mjs",
+            "lineStart": 143,
+            "lineEnd": 176
+          },
+          "position": {
+            "x": 729.5,
+            "y": 212
+          },
+          "size": {
+            "width": 240,
+            "height": 100
+          }
+        },
+        {
+          "id": "gateway",
+          "label": "目录更新服务",
+          "kind": "process",
+          "module": "云端内容",
+          "facts": [
+            "设备带本地修订号检查变化",
+            "游标失效时客户端转全量下载"
+          ],
+          "source": {
+            "file": "edge/src/routes/catalog.ts",
+            "lineStart": 120,
+            "lineEnd": 145
+          },
+          "position": {
+            "x": 176,
+            "y": 728
+          },
+          "size": {
+            "width": 240,
+            "height": 112
+          }
+        },
+        {
+          "id": "update",
+          "label": "手机检查与应用更新",
+          "kind": "process",
+          "module": "内容目录",
+          "facts": [
+            "有本地目录或安装包种子时，先展示后后台更新",
+            "增量包含新增、修改和删除",
+            "全量整包校验后导入；仅整包明确不存在时才走频道分页"
+          ],
+          "source": {
+            "file": "src/core/catalog-cache.ts",
+            "lineStart": 130,
+            "lineEnd": 173
+          },
+          "position": {
+            "x": 716,
+            "y": 376
+          },
+          "size": {
+            "width": 267,
+            "height": 112
+          }
+        },
+        {
+          "id": "local",
+          "label": "本地内容目录",
+          "kind": "dataStore",
+          "module": "内容目录",
+          "facts": [
+            "保存目录并更新搜索索引",
+            "离线可浏览已有信息，不等于离线可播放视频"
+          ],
+          "source": {
+            "file": "src/core/catalog-cache.ts",
+            "lineStart": 253,
+            "lineEnd": 294
+          },
+          "position": {
+            "x": 176,
+            "y": 935
+          },
+          "size": {
+            "width": 240,
+            "height": 100
+          }
+        },
+        {
+          "id": "home",
+          "label": "首页与搜索",
+          "kind": "process",
+          "module": "浏览发现",
+          "facts": [
+            "已有本机索引时优先本地搜索",
+            "没有可用索引或索引零条目时才自动使用云端搜索"
+          ],
+          "source": {
+            "file": "src/core/storage/index.ts",
+            "lineStart": 144,
+            "lineEnd": 198
+          },
+          "position": {
+            "x": 732,
+            "y": 935
+          },
+          "size": {
+            "width": 240,
+            "height": 100
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "d1",
+          "source": "provider",
+          "target": "collect",
+          "kind": "data",
+          "label": "内容变化与播放信息",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 496,
+                "y": 82
+              },
+              {
+                "x": 788,
+                "y": 82
+              }
+            ],
+            "labelAt": {
+              "x": 642,
+              "y": 81.5
+            }
+          }
+        },
+        {
+          "id": "d2",
+          "source": "collect",
+          "target": "pack",
+          "kind": "data",
+          "label": "归一后的完整内容状态",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 920,
+                "y": 171
+              },
+              {
+                "x": 296,
+                "y": 171
+              }
+            ],
+            "labelAt": {
+              "x": 608,
+              "y": 171
+            }
+          }
+        },
+        {
+          "id": "d3",
+          "source": "pack",
+          "target": "assets",
+          "kind": "data",
+          "label": "目录包与播放事实",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 428,
+                "y": 262
+              },
+              {
+                "x": 717.5,
+                "y": 262
+              }
+            ],
+            "labelAt": {
+              "x": 566,
+              "y": 261.5
+            }
+          }
+        },
+        {
+          "id": "d4",
+          "source": "assets",
+          "target": "gateway",
+          "kind": "data",
+          "label": "当前目录与变化记录",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 1055,
+                "y": 262
+              },
+              {
+                "x": 1055,
+                "y": 527
+              },
+              {
+                "x": 272,
+                "y": 527
+              }
+            ],
+            "labelAt": {
+              "x": 663.5,
+              "y": 527
+            }
+          }
+        },
+        {
+          "id": "d5",
+          "source": "update",
+          "target": "gateway",
+          "kind": "data",
+          "label": "本地目录修订号",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 825.5,
+                "y": 581
+              },
+              {
+                "x": 296,
+                "y": 581
+              }
+            ],
+            "labelAt": {
+              "x": 560.75,
+              "y": 581
+            }
+          }
+        },
+        {
+          "id": "d6",
+          "source": "gateway",
+          "target": "update",
+          "kind": "data",
+          "label": "目录变化或全量目录",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 320,
+                "y": 635
+              },
+              {
+                "x": 849.5,
+                "y": 635
+              }
+            ],
+            "labelAt": {
+              "x": 584.75,
+              "y": 635
+            }
+          }
+        },
+        {
+          "id": "d7",
+          "source": "update",
+          "target": "local",
+          "kind": "data",
+          "label": "校验后的目录与新修订号",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 873.5,
+                "y": 689
+              },
+              {
+                "x": 32,
+                "y": 689
+              },
+              {
+                "x": 32,
+                "y": 985
+              }
+            ],
+            "labelAt": {
+              "x": 452.75,
+              "y": 689
+            }
+          }
+        },
+        {
+          "id": "d8",
+          "source": "local",
+          "target": "home",
+          "kind": "data",
+          "label": "影片目录与搜索结果",
+          "evidence": "source",
+          "route": {
+            "via": [
+              {
+                "x": 428,
+                "y": 985
+              },
+              {
+                "x": 720,
+                "y": 985
+              }
+            ],
+            "labelAt": {
+              "x": 574,
+              "y": 984.5
+            }
+          }
+        }
+      ],
+      "layout": {
+        "version": "adaptive-v2-elkjs-0.11.0",
+        "strategy": "layered-3-fold3"
+      }
+    }
+  ]
+}

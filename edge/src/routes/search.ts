@@ -13,6 +13,7 @@
  */
 
 import { generationSearch, generationResults } from '../search/generation';
+import { searchWithDiscovery } from './search-discovery';
 import { configUnavailableResponse } from '../config/kv-config';
 import type { Clock } from '../core/clock';
 import type { Env } from '../types/env';
@@ -78,6 +79,7 @@ export function readPagingParameter(
   }
   const parsed = Number(raw);
   if (cap !== undefined && parsed > cap) return { ok: true, value: cap };
+  if (!Number.isSafeInteger(parsed)) return { ok: false, response: invalidInputResponse(`${name} 超出安全整数范围`) };
   return { ok: true, value: parsed };
 }
 
@@ -103,12 +105,18 @@ export async function handleSearch(request: Request, env: Env, _clock: Clock): P
   if (!page.ok) return page.response;
   const pageSize = readPagingParameter(searchParams, 'pageSize', SEARCH_DEFAULT_PAGE_SIZE, SEARCH_MAX_PAGE_SIZE);
   if (!pageSize.ok) return pageSize.response;
+  const discoveryPage = readPagingParameter(searchParams, 'discoveryPage', 1, 100);
+  if (!discoveryPage.ok) return discoveryPage.response;
   const tag = (searchParams.get('tag') ?? '').trim();
 
   const filters: StageRequest = { query: query.value, ...(channel.value ? { channel: channel.value } : {}), ...(tag === '' ? {} : { tag }) };
   const generation = await generationSearch(env, originOf(request));
   if (generation === null) return configUnavailableResponse();
-  if (generation !== undefined) return generationResults(env, generation, filters, page.value, pageSize.value);
+  if (generation !== undefined) {
+    if (env.SEARCH_DISCOVERY_ENABLED === 'true') return searchWithDiscovery(request, env, _clock,
+      generation, filters, page.value, pageSize.value, discoveryPage.value);
+    return generationResults(env, generation, filters, page.value, pageSize.value);
+  }
   const ranked = rankCandidates(await planStages(env.DB, filters));
   const window = pageSlice(ranked, page.value, pageSize.value);
 

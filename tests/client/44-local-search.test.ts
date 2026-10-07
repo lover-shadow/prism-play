@@ -2,7 +2,7 @@
 /**
  * A-6 接线验收：`commitSnapshot → 索引 → 视图`这条数据流（§A-6.2 / §A-6.4；AC-A6-1/2/3）。
  * 三段都用真实件：公开缓存域用真 `PublicCache + MemoryCacheDisk`，索引用真 `node:sqlite`，视图用真 DOM，
- * 只有网络侧是脚本化 fetch——所以"断网零请求"与"本机没有 SQLite 才回落云端"是被证出来的，不是被断言出来的。
+ * 只有网络侧是脚本化 fetch——门面本机检索不联网，视图整词检索自动联网补充，无 SQLite 也由视图补齐。
  */
 import { createRequire } from 'node:module';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -122,7 +122,7 @@ describe('§A-6.2 数据流：快照与增量批次落地即建索引', () => {
   });
 });
 
-describe('§A-6.4 门面：本机优先、默认零请求、能力缺席才回落', () => {
+describe('§A-6.4 门面：本机检索与联网补充分离', () => {
   const remoteStub = (items: SearchResult[], suggestions: SearchSuggestion[] = []): { client: PrismApiClient; seen: string[] } =>
     server({ '/api/search': () => ok({ items, page: 1 }), '/api/search/suggestions': () => ok({ query: '', suggestions }) });
 
@@ -141,7 +141,7 @@ describe('§A-6.4 门面：本机优先、默认零请求、能力缺席才回�
     expect(remote.seen).toEqual([]);
   });
 
-  it('本机没命中就是空：不拿云端猜第二次；联网补充只在用户点下去时才发请求', async () => {
+  it('本机没命中返回空且不隐式联网；独立联网接口供视图自动补充', async () => {
     const remote = remoteStub([{ item: CORPUS[1] as ContentItem, matchType: 'exact' }]);
     const api = apiOf(await seeded(CORPUS), CORPUS, remote.client);
     expect((await api.search({ q: '不存在词' })).items).toEqual([]);
@@ -150,12 +150,17 @@ describe('§A-6.4 门面：本机优先、默认零请求、能力缺席才回�
     expect(remote.seen).toEqual(['/api/search?q=%E4%B8%8D%E5%AD%98%E5%9C%A8%E8%AF%8D']);
   });
 
-  it('本机没有可用索引（Web 宿主无 SQLite）才如实回落云端检索', async () => {
+  it('Web 宿主无 SQLite 时本机检索返回空，联网补充仍可用且补全保留回落', async () => {
     const remote = remoteStub([{ item: CORPUS[0] as ContentItem, matchType: 'exact' }], [{ text: '战神之龙王归来', type: 'title' }]);
     const api = apiOf(createSearchIndex({ sqlite: deadSqlite() }), CORPUS, remote.client);
-    expect((await api.search({ q: '战神' })).items.map((entry) => entry.item.id)).toEqual(['d_longwang']);
+    expect(await api.search({ q: '战神', page: 1, pageSize: 20 })).toMatchObject({ items: [], page: 1, hasMore: false });
+    expect(remote.seen).toEqual([]);
+    expect((await api.searchOnline?.({ q: '战神', page: 1, pageSize: 20 }))?.items.map((entry) => entry.item.id)).toEqual(['d_longwang']);
     expect((await api.suggestions('战神')).suggestions.map((entry) => entry.text)).toEqual(['战神之龙王归来']);
-    expect(remote.seen).toHaveLength(2);
+    expect(remote.seen).toEqual([
+      '/api/search?q=%E6%88%98%E7%A5%9E&page=1&pageSize=20',
+      '/api/search/suggestions?q=%E6%88%98%E7%A5%9E'
+    ]);
   });
 
   it('快照已下架的条目即刻消失：索引只是候选源，条目本体一律以快照为准', async () => {
@@ -171,7 +176,7 @@ describe('§A-6.4 门面：本机优先、默认零请求、能力缺席才回�
   });
 });
 
-describe('视图：本机检索的措辞与联网补充按钮（AC-A6-1/2）', () => {
+describe('视图：本机检索与自动联网补充（AC-A6-1/2）', () => {
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); });
   let host: HTMLElement = document.createElement('div');
@@ -191,8 +196,9 @@ describe('视图：本机检索的措辞与联网补充按钮（AC-A6-1/2）', (
     input().dispatchEvent(new Event('input', { bubbles: true }));
   }
 
-  it('本机优先：补全与结果都写明是本机目录，点结果卡片直接起播', async () => {
-    const api = apiOf(await seeded(CORPUS), CORPUS);
+  it('本机命中也自动联网补充，补全保持本机口径，点结果卡片直接起播', async () => {
+    const remote = server({ '/api/search': () => ok({ items: [], page: 1 }) });
+    const api = apiOf(await seeded(CORPUS), CORPUS, remote.client);
     const { view, opened } = await mount(api);
     typeAt('甜宠');
     expect(host.textContent).toContain('本机目录中补全');
@@ -203,6 +209,10 @@ describe('视图：本机检索的措辞与联网补充按钮（AC-A6-1/2）', (
     expect(host.textContent).toContain('正在检索本机公开目录');
     await vi.advanceTimersByTimeAsync(0);
     expect(host.querySelectorAll('[data-el="result-card"]').length).toBe(1);
+    expect(remote.seen).toEqual(['/api/search?q=%E7%94%9C%E5%AE%A0&page=1&pageSize=20']);
+    expect(host.querySelector('[data-el="search-online"]')).toBeNull();
+    expect(host.querySelector('.srch-results-grid')?.querySelectorAll('[data-el="result-card"]').length).toBe(1);
+    expect(host.querySelector('.pv-rail')).toBeNull();
     expect(host.textContent).not.toContain('词法检索需联网');
     expect(host.innerHTML).not.toContain('个人探索');
     (host.querySelector('[data-el="result-card"]') as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -210,19 +220,21 @@ describe('视图：本机检索的措辞与联网补充按钮（AC-A6-1/2）', (
     view.destroy();
   });
 
-  it('零结果显示「本机未命中」与可点的联网补充；不点就一次请求都不发', async () => {
-    const remote = server({ '/api/search': () => ok({ items: [{ item: CORPUS[1] as ContentItem, matchType: 'exact' }], page: 1 }) });
-    const api = apiOf(await seeded(CORPUS), CORPUS, remote.client);
+  it.each(['可用索引未命中', '宿主无 SQLite'] as const)('%s：本机零结果由视图自动联网补充，无手动联网按钮', async (mode) => {
+    const remote = server({
+      '/api/search': () => ok({ items: [{ item: CORPUS[1] as ContentItem, matchType: 'exact' }], page: 1 }),
+      '/api/search/suggestions': () => ok({ query: '不存在词', suggestions: [] })
+    });
+    const index = mode === '宿主无 SQLite' ? createSearchIndex({ sqlite: deadSqlite() }) : await seeded(CORPUS);
+    const api = apiOf(index, CORPUS, remote.client);
     const { view, opened } = await mount(api);
     typeAt('不存在词');
     await vi.advanceTimersByTimeAsync(260);
     click('search-submit');
     await vi.advanceTimersByTimeAsync(0);
     expect(host.textContent).toContain('本机公开目录未命中');
-    expect(remote.seen).toEqual([]);
-    click('search-online');
-    await vi.advanceTimersByTimeAsync(0);
-    expect(remote.seen).toHaveLength(1);
+    expect(host.querySelector('[data-el="search-online"]')).toBeNull();
+    expect(remote.seen.filter((path) => path.startsWith('/api/search?'))).toEqual(['/api/search?q=%E4%B8%8D%E5%AD%98%E5%9C%A8%E8%AF%8D&page=1&pageSize=20']);
     expect(host.querySelectorAll('[data-el="result-card"]').length).toBe(1);
     (host.querySelector('[data-el="result-card"]') as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(opened).toEqual(['d_changan']);
@@ -237,7 +249,7 @@ describe('视图：本机检索的措辞与联网补充按钮（AC-A6-1/2）', (
     click('search-submit');
     await vi.advanceTimersByTimeAsync(0);
     expect(host.querySelector('[data-el="search-online"]')).toBeNull();
-    expect(host.textContent).toContain('没有找到匹配的公开剧目');
+    expect(host.textContent).toContain('联网目录未命中');
     expect(host.textContent).not.toContain('本机');
     view.destroy();
   });

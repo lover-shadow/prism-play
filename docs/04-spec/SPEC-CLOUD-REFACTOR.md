@@ -171,6 +171,16 @@ GitHub Actions (ubuntu-latest, cron 0 19 * * * UTC = 北京 03:00)
 - 内容寻址 pack 可长缓存；无 revision 的详情/分享/海报入口须随 generation 重验证，不能以长期缓存保留旧 flags；**私密清单必须经 Worker 路由双重准入校验后 `no-store` 返回**（见 C-3b）；
 - 单部约 80 集 ≈ 12 KB，端侧打开剧目时惰性拉取并本地缓存。
 
+### 3.2.1 native 线路增量与云端边界（2026-10-06）
+
+`EpisodeLine` / `PlaybackLine` 保持必填 providerId/mediaUrl，新增 `native?: {kind:'s1-cenc',videoId:string}`。仅 provider_s1 可带；videoId 是1～32位 ASCII 数字字符串（`^[0-9]{1,32}$`），保留前导零，不转数字。native 对象严格只允许 kind/videoId，unknown-field reject：key/cencKeyHex（即使 null）、任何额外键、错误 kind/类型/长度及显式 null/undefined 均拒绝，不丢掉 native 后当普通线路。严格闭集只针对 native，不宣称整个响应所有层级均已严格拒绝未知字段。
+
+实际主链为 work manifest 与私有 R2 discovery fact，经按作详情投影传递无 key 身份，不是 D1 episode 旧 playback。DISCOVERY_BUCKET 私有是访问权限属性，不是个人探索准入；公开发现池仍不得收入私密内容。native mediaUrl 仅为来源候选，不是明文可播证明；原生桥的来源输入仅 vid（videoId，会话/进度控制参数另计），Android runtime resolver 取实时地址/key，key 不返回 JS，不入 manifest/事实/响应/缓存/日志。Web/native cast 必须诚实拒绝 native 线路；普通无 native 线路沿用既有直连规则，不据此承诺分享 H5 可播 CENC。
+
+Android 本地 CENC DataSource + ExoPlayer 单集已获 Master 正常播放反馈；完整 HUD 集成代码已写/编译但未真机通过。云端授权绑定的播放解析 handle 尚未实现，Stage A 未完成；旧生产 fact 无 native，必须刷新，本轮未部署。manifest 支持1～32位不代表原生执行已同范围：当前 Java bridge/resolver 仅1～20位，21～32位仍待接齐。现有 C-2/C-3b、发现刷新与真实 CI/发布 todos 均保留，字段落地不等于事实刷新或生产完成。
+
+裁定仅同步 provider_s1 native 特例；AGENTS authority 与私密双准入不变，FLAG_SECURE 仍限正本 AC-02 个人探索频道/播放，不扩大到其他内容。旧“所有线路直连”受本节收窄；OpenAPI/ADR/index/专门 CENC 计划由主会话同步，本次不修改、不宣称 G0～G4 全通过。
+
 ### 3.3 KV 清单 `catalog:manifest`
 
 ```jsonc
@@ -351,10 +361,35 @@ C-4(遥测) 独立，任意时点可施工
 
 私密原双准入读取及D1消费者保持，本次不发布private objects；真实bucket访问隔离和CI secrets/备份分别后续批，无权限/密钥写入授权，不从历史“已配置”推导当前可用性。二维码字段与公开计时持久模型待先立契约，云商业配置和核销安全边界不变。
 
+## 6.1.1 真实来源搜索与共享发现增量（2026-10-06 已批准，待验）
+
+以 SPEC-v2.0 §10.1.1 与 Accepted ADR-006 为准，替代旧 JIT 冻结/只查不存/仅零命中手点。完整查询本机先显，默认自动联网补充，有无本机命中都执行；真实来源检索与核验不是旧库搜索的别称。
+
+- 仅配置中公开来源出网，保留白名单、逐跳 SSRF、保留IP拒绝、独立限流/硬超时与脱敏日志；private/exclude 不进入公开查询、缓存、共享索引和持久层。响应元数据/错误/日志零品牌，日志无上游域名/原始URL/响应；播放清单已批准的 mediaUrl 例外不扩大。
+- 规范化查询 + 频道/标签 + public边界 + 来源配置版本作为查询缓存/同词在途合并依据；分页不串结果，跨实例合并覆盖需举证。缓存只复用新鲜核验结果，过期重验。成功确认无结果才短负缓存≤5分钟，超时/限流/来源及核验失败不写空集，不冒充搜无结果。
+- 核验公开身份、可信作品映射、完整集数/季数和真实可用线路后幂等共享持久保存作品 facts/发现索引，不等起播；永久剧库不是关键词缓存，TTL到期不删作品，新集/新季、线路与撤片持续更新。空lines不构成可播核验，同名不构成归并依据。
+- 静态全量基底 + 独立共享发现增量，不每搜改整个manifest；基底仍blobs先指针后、同generation校验，发现独立版本化提交。搜索/title/share/poster读基底或增量均复核版本与当前公开flags，不回旧公开D1。客户端稳定ID/版本幂等合并、数据与同步进度同事务，重启/整包升级不误删发现，只有明确撤片/删除事实才移除。旧 C-5 不能停用仍被白名单/发现/私密消费者依赖的表，当前基线disabled/private不能被发现覆盖。D1只存metadata/任务，独立DISCOVERY_BUCKET无r2.dev，R2存事实/cursor；0005发现五表、0006 jobqueries/jobs两表，总业务37表（不含FTS影子表），不因旧C-5停用发现依赖。永久剧库metadata与播放事实24小时刷新分离，查询TTL不删metadata；本次不执行迁移。
+- `GET /api/search` 保留可选hasMore、items/page与pageSize≤20；增可选discoveryPage（1～200），响应discoveryPending/discoveryFailed/retryAfterSeconds。App按等待秒数自动同词同页poll至pending结束，切词取消旧poll及迟到响应；成功partial保留结果，不伪装成功empty。目录60分片、三列全可达与准确已加载计数不变，缺hasMore不是false。
+- `GET /api/search/discoveries?after=&limit=`使用独立seq cursor（初始0），limit默认60/max100，返回changes[{seq,workId,operation:upsert|withdraw,updatedAt,card?}],cursor,hasMore（Unix秒、可选公开ContentItem）；非catalog revision，无私密元数据/墓碑。客户端数据与cursor同事务，verify_contracts由主会话更新。
+
+必要云施工/CI/独立验收APK已获用户授权，正式官网APK/OTA须验收后。本次仅文档；G0静态检查不等于G1真实检索核验/并发脱敏、G2持久增量更新与故障恢复、G3真机重启升级/可达性或G4正式发布通过。
+
+## 6.2 运营后台与统计云端增量目标（2026-10-05，planned）
+
+本节 additive，不改 C-1～C-6、App端点/表计数或三轨公开facts规则。依据 SPEC-v2.0 §12.3、API-SPEC §八.三及后台计划；用户授权继续实施，已有局部本地数据/认证模块，完整接线与真实D1验收待证，无部署、后台G0未签署。OTP/Cloudflare Access 未实现。
+
+- fetch 在公共 routeRequest/withCors/OPTIONS 之前按段处理同源 `/admin`、`/api/admin/*`，独立guard；不改公共管线签名、App JWT/私密准入、CORS/缓存/Set-Cookie。登录PBKDF2-SHA256哈希，Workers CPU参数待冻结；D1存至少256位随机opaque session的SHA-256摘要及CSRF摘要，Cookie `__Host-prism_admin_session` Secure/HttpOnly/Strict/Path=/、无Domain、12小时绝对到期，每次复核、登出撤销/版本轮换失效。Origin/CSRF/no-CORS/no-store及故障关闭按API-SPEC执行。
+- 目标GET session/dashboard/coupons/opaque详情/operations，POST login/logout/generate/reveal/confirm-stock/dispatch/revoke；路径及独立AdminError以API-SPEC §八.三为准，不扩App闭合错误码。卡密id为SHA-256(code)，全码不进URL或日志。资产动作requestId幂等，载荷复用/竞争409；条件写+资产+成功审计同D1 batch，零行更新整批回滚。REVOKED不撤回已有设备会员，operations仅授权设备/失败样本/android OTA只读，无OTA写发布。
+- additive数据目标：analytics_daily/visitors/visitor_days、admin_sessions/login_limits、coupon_batches/admin_audit_logs，以及card_coupons批次/dispatch_status(IDLE/DISPATCHED/UNKNOWN)/独立分发备注字段；详细约束按计划§2.4，施工前核对migration ledger，不据本文执行迁移或DROP既有表。旧码UNKNOWN人工确认，新码ACTIVE+IDLE；复制不是dispatch。
+- fetch取得合法公开响应后通过ctx.waitUntil原子统计batch，不阻塞核销/前台响应、不与App资产同batch。只计公开GET 200页面请求与APK存在后302下载触发；同意Cookie UV是浏览器标识不是用户/安装，期间转化用访问与下载标识交集。匿名默认，不计私密/后台/API/404；失败允许少计并展示延迟/不完整，不承诺永久免费或永久可靠。
+- 清理目标：visitor-day90天、visitor最长180天、匿名汇总/审计365天，过期session清理、登录窗口24小时后清理；scheduled限量索引删除，不清其他业务表。Secrets/生产迁移/Cache Rules/部署需各自授权与证据；真实D1竞争、回滚、配额及App全量无回归是独立待验门禁。
+
 ## 七、变更记录与交付门禁
 
 | 日期 | 变更 | 状态/边界 |
 | :--- | :--- | :--- |
+| 2026-10-06 | 新增§3.2.1，native字段与work manifest/私有R2 discovery fact主链边界 | provider_s1、1～32位数字字符串、native严格unknown-field reject且无key；原生vid/runtime key不返JS、Web/native cast拒绝。单集Master反馈不代表完整HUD真机通过；授权绑定handle未实现，Stage A未完成，旧生产fact待刷新、未部署，Java仅1～20位执行缺口待接齐。AGENTS/FLAG_SECURE不扩大，原todos保留，OpenAPI等主会话同步。 |
+| 2026-10-06 | ADR-006 Accepted，§6.1.1真实来源核验后共享持久发现、查询新鲜缓存/并发合并/短负缓存、静态基底+独立增量，search可选hasMore | 本次局部同步discoveries独立seq、search发现分页/自动轮询、0005/0006共37业务表、独立无r2.dev bucket与metadata/24小时播放事实分离，基线disabled/private不可覆盖；运营修改保留；仅文档，无部署验收，verify_contracts由主会话更新，官网APK/OTA验收后 |
 | 2026-10-03 | v2 审计后重写 | 原任务基线保留 |
 | 2026-10-04 | 新公开事实 pack：UTF-8 id 哈希前缀叶索引、512 KiB blob / 64 KiB manifest、显式 coverOrigins、同 generation 目录/title/share/poster、无旧公开 D1 fallback；显式递增 revision、blob 后 manifest、稳定 bundle 禁 immutable；旧日更 publisher 禁覆盖 workFacts | 本次仅修订本 SPEC 与 SPEC-APP-REFACTOR；不执行代码/CI/Git/云端修改或发布 |
 | 2026-10-04 | 私密原双准入保留，本次不发布任何 private objects；公开 bucket 风险确认先于后续私密发布 | 用户已批准必要工程步骤与新 APK，但此文档任务不执行构建/签名/部署；不得据此标记生产完成 |

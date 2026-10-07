@@ -160,6 +160,17 @@ npm run scan:p0            # P0 红线静态扫描
 
 二维码放大保存与微信辅助不改变分享门禁：`/s` 不自动跳出、不阻断本集，用户手动点击下载可蒙层辅助，自动下载引导仅 `/dl`；ended才截流、私密与未知字节一致404、同源自托管HLS唯一例外不变。日更新facts生产、私密资源真实隔离与CI secrets/备份另批，旧拒覆盖不是日更成功。本轮仅文档，无部署或浏览器/微信真机验收。
 
+## 4.2 同源后台与公开统计增量目标（2026-10-05，planned）
+
+本节 additive，不改 S-1～S-4、App AC或既有视图计数。关联 SPEC-v2.0 §12.3、API-SPEC §八.三和后台计划；用户授权继续实施，源码/认证模块仅局部落地，完整页面/接线/浏览器待验，无部署、后台G0未签署；OTP/Cloudflare Access 未实现。
+
+- `/admin` 为同源独立后台入口，未认证只渲染登录壳；API走 `/api/admin/*` 独立guard、绕过公共CORS。哈希口令+12小时D1 opaque session Cookie `__Host-prism_admin_session`，Origin/已登录POST CSRF、no-CORS/no-store，失败关闭；不接受App JWT，安全细则以API-SPEC为准。
+- 目标界面：登录、session/登出、dashboard、掩码卡密列表/opaque详情、只读operations；GET无副作用，登录/登出与generate/reveal/confirm-stock/dispatch/revoke为POST。详情id为SHA-256(code)，无全码URL/日志/localStorage；资产POST必带requestId，事务/幂等/409不能用UI防重代替。复制不分发，Clipboard失败不得提示成功；UNKNOWN库存人工确认、dispatch条件由服务端裁决。停核销确认必须提示“已有会员权限不会撤回”；OTA只读无发布按钮。
+- 统计只计 `/`、`/dl`、合法公开 `/s` GET 200“页面访问请求”，不是页面渲染；下载仅R2存在校验后302“下载触发”，不是完成/安装。HEAD/OPTIONS/assets/API/proxy/404/私密/后台不计，已识别爬虫排除但承认漏识别。`/s`仍当前集、ended截流、无自动跳出，不以同意弹层阻断播放。
+- 默认匿名聚合；明确同意后才设置 `__Host-p_vid`（随机UUID、Secure/HttpOnly/SameSite=Lax/Path=/、无Domain、最长180天），独立服务端HMAC仅存摘要，不指纹、不跨浏览器传ID、不自动关联APK/device_id。新增同源POST `/api/analytics/consent` agree/revoke；拒绝/GPC/DNT只计匿名，撤回清Cookie并删除visitor/去重记录，不重写匿名历史。
+- UV是期间浏览器标识DISTINCT，不是人数，每日/页面UV不可相加；新/回访不是新增安装。转化用同期间访问与下载标识交集/访问标识数，分母零暂无数据，无标识下载单列并显示覆盖率。渠道仅有限登记代号，未知direct/unknown，不存完整query/Referer/剧目ID/私密身份，ref不是奖励凭据。
+- 被统计HTML统一private/no-store，Set-Cookie不进共享缓存；静态assets保持既有缓存，生产Cache Rules须另验。不向既有App API/proxy加Cookie或改变缓存/认证；fetch合法响应后waitUntil写失败不阻断前台，报表显示延迟/不完整。UI复用Tokens/Lucide与移动/桌面、键盘/焦点、空/错/401/409/断网状态，不展示假健康率。
+
 ## 五、已决策事项备忘
 
 - 分享页视频流直连上游 CDN（CORS `*` 实测通过），不经云端代理。

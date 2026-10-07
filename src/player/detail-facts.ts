@@ -47,7 +47,8 @@ export function statusPillLabels(info: TitleDetail): string[] {
   return [
     ...(count === '' ? [] : [count]),
     ...(category === undefined || category === '' ? [] : [category]),
-    ...(isMarkedCollection(info.item) ? ['合集'] : [])
+    ...(isMarkedCollection(info.item) ? ['合集'] : []),
+    ...(info.item.releaseStatus === 'ongoing' ? ['连载中'] : info.item.releaseStatus === 'finished' ? ['已完结'] : [])
   ];
 }
 

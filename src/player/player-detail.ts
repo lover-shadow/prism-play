@@ -17,6 +17,7 @@ import { SYNOPSIS_CLAMP_CHARS, episodeCountLabel, episodeTagOf, statusPillLabels
 
 export interface PlayerDetailStage {
   body: HTMLElement;
+  attachSeasonSwitcher(element: HTMLElement): void;
   markEpisode(id: number): void;
   openCast(): void; closeCast(): void; castOpen(): boolean;
   dismissOverlay(): boolean; destroy(): void;
@@ -284,7 +285,9 @@ export function buildDetailBody(
   };
 
   return {
-    body, markEpisode,
+    body,
+    attachSeasonSwitcher: (el: HTMLElement) => { epSection.before(el); },
+    markEpisode,
     openCast: () => { menus?.beforeMenuOpen?.(); castPanel.open(); },
     closeCast: () => castPanel.close(),
     castOpen: () => castPanel.isOpen(),

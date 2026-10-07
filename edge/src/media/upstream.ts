@@ -185,8 +185,15 @@ export function assertAllowedTarget(rawUrl: string, allowedOrigins: ReadonlySet<
     const refused = octets !== null ? forbiddenIpv4(octets[0], octets[1], octets[2], octets[3]) : forbiddenIpv6(host);
     if (refused) throw new UpstreamTargetRejectedError('forbidden_ip', '拒绝内网与特殊用途 IP 字面量');
   }
-  // Exact origin equality: a longer-prefix host, a lookalike port or another scheme is a different origin.
-  if (!allowedOrigins.has(url.origin)) {
+  // Exact origin equality or wildcard subdomain matching (e.g. `https://*.domain.com`).
+  const inAllowlist = allowedOrigins.has(url.origin) || Array.from(allowedOrigins).some((entry) => {
+    if (entry.startsWith('https://*.') && url.protocol === 'https:' && url.port === '') {
+      const suffix = entry.slice('https://*'.length);
+      return host.endsWith(suffix) && host.length > suffix.length;
+    }
+    return false;
+  });
+  if (!inAllowlist) {
     throw new UpstreamTargetRejectedError('not_allowlisted', '目标不在上游白名单内');
   }
   return url;

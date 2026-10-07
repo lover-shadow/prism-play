@@ -289,11 +289,32 @@
 
 当前频道或子类首个重复点击回内容头，连续第二个真实刷新；切新分类正常加载并重置重复状态。每个公开频道顶部提供累计热度榜（不称24小时实时榜，替代§5.2旧仅24小时口径），按可信hitsTotal等排序、ID仅同分收口，缺数据明确不足不假排名；Overlay三榜保留。追剧真持久化，正在追→同类→完播，推荐独立可读可点，缓存归“我的”。作者二维码允许host静态注入旧已确认 `D:/DEV/prism-play/public/images/author-contact.jpg` / `author-reward.jpg`，不要求云QR字段；点击放大、文件下载及微信用户手动识别辅助。下载不等于保存相册，失败不假Toast成功；旧reward含历史“换长期通行证”权益文案，必须伴随“不构成当前购买/授权承诺”说明。价格/档位/提醒策略仍有效云配置控制。
 
-搜索Overlay三态recommendations/candidates/results互斥，输入法组合不查，默认本地优先/联网补充须手动（替代§9旧默认云补全）；完整公开快照hydrate发feed，搜索判fallback前等待init/queued sync并校验revision/count。公开内容同generation，不将索引未就绪当零结果。追剧/提醒与二维码不复用私密数据，真实观看时间非position/假duration，云配置自然切集可关闭、缺配置关闭，不造价格阈值。海报512 MiB、目录20 MiB按三轨A-9；3列紧凑gap6px/padding8px替代旧12px，断点由现有Tokens联动，分享仅播放器内。
+搜索Overlay三态recommendations/candidates/results互斥，输入法组合不查，完整查询本机先显示、默认自动联网补充，无论有无本机命中（2026-10-06批准，替代旧仅零命中/手动补充；输入中补全不逐键穿透）；完整公开快照hydrate发feed，搜索判fallback前等待init/queued sync并校验revision/count。公开内容同generation，不将索引未就绪当零结果。追剧/提醒与二维码不复用私密数据，真实观看时间非position/假duration，云配置自然切集可关闭、缺配置关闭，不造价格阈值。海报512 MiB、目录20 MiB按三轨A-9；3列紧凑gap6px/padding8px替代旧12px，断点由现有Tokens联动，分享仅播放器内。
 
 **存储与执行事实同步（2026-10-04）**：独立收藏按正本§6.1 local_following同history库含created_at，清cache/history与history500条淘汰不删收藏、不新增云sync，失败不显示已保存。计时只存Preference `prism.watch_seconds_total` / `prism.watch_seconds_last_nudge` 标量，无私密ID/时长，private/unknown零计，实际playing首帧后单调计时，离场/暂停/缓冲停计，恢复不补未知时间；自然切集提醒可关闭、缺云配置关闭。已有局部模块/测试不等于R26完成，旧1040首批通过后新全量待跑，浏览器/原生/生产未验；本次仅文档。
 
+### 搜索交互增量（2026-10-06 已批准，未真机验收）
+
+依据 SPEC-v2.0 §10.1.1 / Accepted ADR-006，完整查询先显示本机结果并默认自动联网补充，无论本机是否命中；建议态/输入法合成不逐键穿透。零命中不要求用户再点“联网”才开始，重试按钮只为失败恢复，不替代默认机制。
+
+- 搜索结果独立纵向三列网格，沿用Tokens与Lucide；不是横向轨道或固定首批截断。所有去重结果通过滚动/加载更多可达，加载中/失败/重试/确无更多均可操作。GET /api/search可选hasMore缺省表示未知，不直接显示“没有更多”，沿用旧分页兼容。
+- 计数准确区分已展示/已加载；去重后实时更新，不把本机数+重复联网数相加，不把单页数当总数。全量总数未知时只标已加载数。区分“本机结果”“联网补充”，同作合并不重复卡片；匹配类型与可信题材标签如实显示，不暴露来源品牌，不从查询词猜题材。
+- 本机初始化/同步中是加载，不是假零结果；离线标缓存可能过时，联网补充失败保留本机卡片并提供重试，不写“未找到相关内容”。只有成功确认无结果才空态；过期查询缓存须重验，不装作新鲜结果。
+- 公开发现核验身份/完整集数季数/可用线路后共享持久保存，客户端按稳定ID/版本合并；重启、整包升级和同步失败不误删，明确撤片/删除才移除，新集/新季真实更新。静态全量基底+独立发现增量，不每搜替换整个manifest；关键词短缓存与永久剧库分开，短负缓存≤5分钟不缓存失败。
+- public/private/exclude查询、缓存、索引、日志与持久层隔离，私密原双准入/零落盘不变；保留白名单/限流/并发合并与脱敏日志。GET /api/search增可选discoveryPage（1～200）及响应discoveryPending/discoveryFailed/retryAfterSeconds；App按等待秒数自动同词同页poll至pending结束，切词取消旧poll及迟到响应。成功partial保留已有卡片，不伪装成功empty/确认无结果，failed明确提示可重试；hasMore缺省未知、pageSize≤20不变。
+- 发现同步GET /api/search/discoveries：after为独立seq cursor（初始0），limit默认60/max100；返回changes[{seq,workId,operation:upsert|withdraw,updatedAt,card?}],cursor,hasMore（Unix秒、可选公开ContentItem），非catalog revision，数据与cursor同事务，无私密元数据/墓碑。当前基线disabled/private不可被发现覆盖。0005发现五表、0006 jobqueries/jobs两表，总业务37表（不含FTS影子表）；D1存metadata/任务，独立DISCOVERY_BUCKET无r2.dev，R2存事实/cursor。永久metadata与播放事实24小时刷新不同，持久卡片不是永久可播承诺；本轮只改文档，verify_contracts由主会话更新。
+
+必要云/CI/独立验收APK获准，正式官网APK/OTA验收后。三列全可达、计数标签、失败态及重启/升级持久性都需独立真机证据；本文不是已部署或已验收报告，不改运营后台设计。
+
 **变更记录（2026-10-04，历史文档批）**：直接修正左右手势/HUD图、三Tab和微信辅助；补R26可达性与异常态，均未通过浏览器或真机验收，既有勾选只代表历史设计文档层自检。
+
+## 9.2 运营后台交互增量（2026-10-06，页面未实现）
+
+同源/admin未登录只显示登录壳，数据通过独立后台会话加载；继承Tokens与16/20/24px、2px Lucide SVG，不写裸色值。模块为登录/会话/登出、7/30日看板、脱敏卡密列表/详情、只读运维。数字标注页面访问请求、下载触发、浏览器UV及授权设备，缺数据和延迟显示真实状态；失败样本不涂成健康率。
+
+核销状态、首次绑定与分发状态分开；全码审计后按需查看，不入URL/localStorage。复制成功仍未分发，Clipboard失败给手动复制兜底，不假成功；显式分发要备注与确认，409刷新状态防止重复发出。UNKNOWN人工确认库存；停止核销提示已有会员权限不撤回，OTA无发布按钮。
+
+覆盖加载/空/错误/401到期/403/409/断网/长备注、移动桌面、键盘标签、焦点返回/Escape及非颜色状态；统计同意不拦分享当前集和ended引导。Origin/CSRF/no-store等规则以SPEC-v2.0 §12.3与API-SPEC §八.三为准，现有App验收编号不变，浏览器验收另附证据。
 
 ## 10. 验收核对表与交付审查 (Checklist)
 

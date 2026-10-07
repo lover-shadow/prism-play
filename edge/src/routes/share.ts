@@ -38,7 +38,8 @@ import { HTTP_STATUS_BY_ERROR_CODE, buildErrorResponse } from '../http/errors';
 import { jsonResponse } from '../http/json';
 import { renderSharePage } from '../html/share-page';
 import { sanitizeDisplayToken } from '../html/escape';
-import { factsManifest, readWorkFact } from '../library/work-facts';
+import { factsManifest } from '../library/work-facts';
+import { readPublicFact } from '../search/public-facts';
 import { configUnavailableResponse } from '../config/kv-config';
 
 /** The document is public and short-lived: a takedown must be visible within a minute. */
@@ -127,7 +128,7 @@ export async function handleShare(request: Request, env: Env, _clock: Clock): Pr
   if (manifest === null) return configUnavailableResponse();
   let resolved: ShareEpisode | null;
   if (manifest?.workFacts !== undefined) {
-    const read = await readWorkFact(env, manifest, dramaId);
+    const read = await readPublicFact(env, manifest, dramaId, _clock.nowSeconds());
     if (read.status === 'rejected') return configUnavailableResponse();
     if (read.status !== 'ok' || !read.fact.shareable) return shareNotFoundResponse();
     const ep = read.fact.asset.episodes.find((entry) => entry.episodeNumber === episodeNumber);

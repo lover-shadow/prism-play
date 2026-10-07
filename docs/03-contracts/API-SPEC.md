@@ -37,9 +37,13 @@
 ### 3. 剧目详情与分集
 - **`GET /api/titles/{titleId}`**｜认证：可选 Bearer + 可选 `X-Private-Session`
 - 公开返回 TitleAssetResponse（含兼容item、workId及完整episodes[].lines[]），episodeNumber身份为本作局部编号，禁止调用旧全局playback作为兜底。有workFacts时以当前generation投影，缺失/损坏不能回旧公开D1；私密原双准入路径不变。
+- `EpisodeLine` / `PlaybackLine` 保留必填 `providerId:string`、`mediaUrl:string`，新增可选 `native?: { kind:'s1-cenc', videoId:string }`。仅 `providerId === 'provider_s1'` 可带 native；videoId 为1～32位 ASCII 数字字符串（`^[0-9]{1,32}$`），保留前导零，不转数字。native 对象严格只含 kind/videoId 两键，unknown-field reject：任何额外字段（包括 key、cencKeyHex，即使 null）、错误 kind/类型/长度、显式 null 或 undefined 均拒绝，不能丢弃 native 后当普通线路起播。此闭集裁定仅针对 native 描述符，不宣称整份响应所有层级已严格拒绝未知字段。
+- native 的 `mediaUrl` 只是来源候选，不证明可由 ArtPlayer、Web 或电视直播。原生桥的来源输入仅接 vid（videoId；会话/进度控制参数另计），runtime resolver 在 Android 内部取实时地址与 key，key 不返回 JS，不进入 manifest、响应、缓存或日志。实际主链是 work manifest / 私有 R2 discovery fact 的按作投影，不是 D1 episode 旧 playback；私有 R2 是访问权限属性，不代表个人探索内容获准进入公开发现池。
+- 实现边界：Android 本地 CENC DataSource + ExoPlayer 单集已获 Master 播放正常反馈；完整 HUD 集成代码已写并编译，但未真机通过。云端授权绑定的播放解析 handle 尚未实现，**Stage A 未完成**；旧生产 fact 无 native，需要刷新，本轮未部署。Web/native cast 对 native 线路须诚实拒绝，不把候选地址当明文流；不带 native 的合法普通线路保持既有能力。
+- 本次只同步上述实现事实，不修改 OpenAPI 机读正本；新增字段的机读同步由主会话负责，未完成前不宣称全链路契约门禁通过。AGENTS authority、私密双准入与 SPEC-v2.0 AC-02 的 FLAG_SECURE 范围保持，不扩展到其他内容。
 - 未同时具备有效 B/Y/S 授权与有效 `X-Private-Session` 的私密剧目、以及不存在或未发布的剧目一律返回 404，不区分差异以防探测；公开剧目或已获双重准入者正常返回详情。
 
-### 4. 分集播放解析
+### 4. 分集播放解析（仅真实旧全局 episode ID 兼容，不是 native 主链）
 - **`GET /api/episodes/{episodeId}/playback`**｜认证：可选 Bearer
 - 返回 `{ episodeId, url, mimeType, durationSeconds, expiresInSeconds }`。
 - `url` 必须是服务端从可用候选源中选出的单个同源代理短时句柄；源失效时客户端以同一 `episodeId` 最多重取两次并尝试恢复进度；候选穷尽返回 503，**绝不**返回真实上游媒体地址。
@@ -186,7 +190,7 @@
 | `COUPON_DEVICE_LIMIT_EXCEEDED` | 400 | `POST /api/redeem` | 超过最大允许绑定的设备数（默认 10 台上限） |
 | `COUPON_INVALID_FORMAT` | 400 | `POST /api/redeem` | 卡密字符串格式不符合 `^GY-...` 正则 |
 | `DEVICE_ID_INVALID` | 400 | `POST /api/redeem` | 客户端提交的 deviceId 不合法 |
-| `RATE_LIMITED` | 429 | `POST /api/redeem` | 单 IP 兑换频次超限（1 分钟超过 10 次） |
+| `RATE_LIMITED` | 429 | `POST /api/redeem`、`GET /api/search` | 兑换单IP 1分钟超过10次；搜索按独立具名配置限流，不作为无结果或负缓存 |
 | `PRIVATE_SESSION_REQUIRED` | 400 | `POST /api/private-sessions` | 请求体未确认免责声明 (`acknowledged: false`) |
 | `TIER_INSUFFICIENT` | 403 | `POST /api/private-sessions` | 当前卡密未包含私密准入权限（非当前云端开放的有效档位） |
 | `NOT_FOUND` | 404 | 详情/分集/代理/分享 | 资源不存在、已下架，或私密内容未获双重准入（统一返回 404 反探测） |
@@ -204,7 +208,7 @@
 
 关联正本§10.1及 `D:/DEV/prism-play/docs/04-spec/SPEC-v2.6.3-REPAIR.md`。公开目录、搜索/补全/related候选、按作详情、分享及海报使用同一manifest generation公开事实及flags；搜索不得返回旧anime ID或已不可见作品，完整集表不得截两集。§八旧D1内容入库/公开变更原子写口径仅为旧代兼容描述，新公开代由完整facts产物与manifest发布驱动，私密D1消费者不得整体停用。
 
-本地搜索hydrate完整feed、判fallback前等待init/queued sync并核验revision/count；仅SQLite真不可用可明确降级，联网补充须用户手动。新公开详情允许缓存按作清单（替代§〇“地址仅内存”的公开限制），需随generation重验证，禁止媒体文件离线缓存；私密地址/清单仍仅内存no-store。旧playback仅用于真实旧全局episode ID，不能接本作局部集号。公开60条分片为目标契约，现源码20/50常量未在本文档任务修改，待B2回归。
+本地搜索hydrate完整feed、判fallback前等待init/queued sync并核验revision/count；仅SQLite真不可用可明确降级；2026-10-06起完整查询默认自动联网补充，无论有无本机命中，不以索引失败或手动点击作为前提。新公开详情允许缓存按作清单（替代§〇“地址仅内存”的公开限制），需随generation重验证，禁止媒体文件离线缓存；私密地址/清单仍仅内存no-store。旧playback仅用于真实旧全局episode ID，不能接本作局部集号。公开60条分片为目标契约，现源码20/50常量未在本文档任务修改，待B2回归。
 
 商业计时按实际播放经过时间累计，seek/position/假duration不计，暂停缓冲不计、倍速不乘媒体位移；云配置阈值/间隔/价格/档位/文案无本地猜测，缺配置关闭提醒，仅自然切集可关闭。作者二维码允许host静态注入旧已确认 `D:/DEV/prism-play/public/images/author-contact.jpg` / `author-reward.jpg`，不新增虚构云QR字段或端点；放大/文件下载及微信手动辅助如实反馈，下载不等于相册保存。旧reward含历史“换长期通行证”文字，不构成当前购买/授权承诺，须附免责声明；价格/档位/提醒仍有效云配置控制。核销原子幂等、撤销、限流、设备绑定及Ed25519/离线边界保持。
 
@@ -213,6 +217,61 @@
 端侧按正本§6.1：local_following与history同prism_local.db含created_at Unix秒，独立收藏不受history500条LRU/清cache/history影响，不新增云sync；观看累计仅Preference `prism.watch_seconds_total` / `prism.watch_seconds_last_nudge` 标量无ID/凭据，private/unknown零计。`/api/user/sync`仍只同步既有公开断点/画像，不扩展收藏或观看累计字段。
 
 私密隔离和CI secrets/备份另批，前缀不是安全边界。本次仅文档同步，已有局部业务模块不代表R26全完成；历史1040通过仅首批report，新全量/云响应复测/浏览器/原生/生产真实CI均待验，不以旧30项矩阵标本轮绿色。
+
+## 八.二.一、真实来源搜索与发现增量（2026-10-06 已批准，待验）
+
+依据 SPEC-v2.0 §10.1.1 / Accepted ADR-006：完整查询本机先显、默认自动联网补充，有无命中均执行，不逐键穿透。云端真实检索受控公开来源；保留白名单/逐跳SSRF/限流/超时和零品牌响应及日志（无原始URL/响应/域名）。private/exclude与public的查询、缓存、索引、持久层和日志隔离，私密双准入不变。
+
+- `GET /api/search?q=&channel=&tag=&page=&pageSize=&discoveryPage=` 保留既有参数与 `items/page`，pageSize≤20；可选discoveryPage为1～200。`hasMore:boolean`可选，缺省未知而非false；响应含discoveryPending/discoveryFailed/retryAfterSeconds，App按等待秒数自动同词同页poll直到pending结束，切词取消旧poll及迟到响应。成功partial保留已核验结果，pending/failed不等于确认无结果，不伪装成功empty。跨页稳定ID去重、准确已加载数、三列全可达，不新增total。
+- `GET /api/search/discoveries?after=&limit=`：after为独立seq cursor（初始0），limit默认60、最大100；返回 `{changes:[{seq,workId,operation:upsert|withdraw,updatedAt,card?}],cursor,hasMore}`，updatedAt为Unix秒，card为可选ContentItem，不含播放地址。与 `/api/catalog/changes` revision独立；仅公开增量，无私密元数据/墓碑，数据与cursor同事务幂等提交。
+- 查询缓存/同词并发合并包含规范化查询、频道/标签过滤、public边界与来源配置版本，分页不串；只复用新鲜核验结果，过期重验，跨实例合并范围需举证。成功确认无结果才短负缓存≤5分钟，超时/限流/来源或核验失败不写成功空集。补充失败保留本机结果并明确失败/重试；pending可返回200等待态，成功partial保留结果；仅已结束失败且无可用结果时按既有ErrorResponse返回503，不以200空集掩盖失败或宣称确认无结果；429使用既有RATE_LIMITED。
+- 核验当前公开作品身份、可信映射、完整集表/季数与可用线路后幂等共享持久保存facts/发现索引，不等起播；共享永久剧库不随查询TTL删除。新集/新季、线路失效和撤片须重验更新，持久存在不等于永久可播。
+- 静态全量基底仍按同generation校验发布，独立共享发现增量不每搜改整个manifest；搜索/详情/海报/分享复核基底或增量的版本及公开flags，禁止旧公开D1兜底掩盖损坏。客户端稳定ID/版本原子合并数据与同步进度，重启/整包更新保留发现，只有明确撤片/删除事实才移除。发现同步使用独立seq端点，不将catalog/changes当发现同步。当前基线disabled/private不能被增量覆盖。
+- Schema增量：0005发现五表、0006 jobqueries/jobs两表，0001～0006总业务37表（不含FTS影子表）；D1存metadata/任务，R2存事实/cursor，独立DISCOVERY_BUCKET无r2.dev，不向公网提供事实对象。永久剧库metadata与播放事实24小时刷新不同，查询TTL不删metadata，持久存在不等于永久可播；本轮不执行迁移，verify_contracts由主会话更新。
+
+必要云/CI/独立验收APK获准，官网APK/OTA仅验收后；本次仅文档同步，无部署或验收结论，不改运营后台目标。
+
+## 八.三、 运营后台 additive API 目标（2026-10-05，planned）
+
+本节独立于§〇/§八.一 App `ErrorResponse` 与16项闭集，不改既有端点计数、认证、CORS或错误码。依据 SPEC-v2.0 §12.3 与后台计划；部分本地模块已有，完整接线/验收待证，无部署、后台G0未签署；OpenAPI现已登记12个后台目标路径及独立AdminSession/AdminError；本地API已接线，统计/页面/清理和真实D1/浏览器/生产门禁仍待验。OTP/Cloudflare Access未实现。
+
+### 路由与安全
+
+所有路径同源，`/admin` 与 `/api/admin/*` 按段进入独立 guard，先于公共 CORS/OPTIONS；不接受 App JWT，不返回 Access-Control-Allow-*，管理响应 `Cache-Control: no-store`。口令使用独立 PBKDF2-SHA256 哈希（Workers CPU参数待冻结）；至少256位随机 opaque 会话，仅SHA-256摘要存D1。Cookie `__Host-prism_admin_session`：Secure/HttpOnly/SameSite=Strict/Path=/、无Domain、12小时绝对到期；每次查D1，登出撤销、认证版本轮换全失效，缺Secret/DB故障关闭。
+
+登录POST精确Origin、JSON、≤8 KiB；其余已登录POST同时验证精确Origin与会话绑定 `X-CSRF-Token`。GET无状态变更；登录失败5次/15分钟按可信CF来源IP哈希D1原子限流，另限总尝试与生成频率。安全头/审计按计划§2.3，禁止记录口令、Cookie、CSRF或全码。
+
+| Method | Path | 目标语义 |
+| :--- | :--- | :--- |
+| GET | `/admin` | 未登录仅登录壳；有效会话才显示后台，不泄露受保护数据 |
+| POST | `/api/admin/login` | 校验口令，建立Cookie会话；不是GET登录 |
+| GET | `/api/admin/session` | 返回 `csrf/expiresAt`（Unix秒），不续长绝对期限 |
+| POST | `/api/admin/logout` | 撤销D1会话并清Cookie；不是GET登出 |
+| GET | `/api/admin/dashboard` | 按Asia/Shanghai日期查看页面请求、浏览器UV及下载触发；披露标识覆盖率/延迟/不完整 |
+| GET | `/api/admin/coupons` | 掩码分页列表与opaque id；limit仅20/50，total与筛选一致 |
+| GET | `/api/admin/coupons/{id}` | 掩码详情及绑定/期限/分发状态；绑定IP默认不展示 |
+| POST | `/api/admin/coupons/generate` | `{requestId,tier,count,note}`，Q/B/Y/S、count 1～100、note≤200字符，A仅历史查看 |
+| POST | `/api/admin/coupons/{id}/reveal` | `{requestId}`，审计后受控返回全码，GET不得揭示 |
+| POST | `/api/admin/coupons/{id}/confirm-stock` | `{requestId}`，人工确认UNKNOWN→IDLE |
+| POST | `/api/admin/coupons/{id}/dispatch` | `{requestId,note}`（保存至独立dispatch_note），显式确认分发；备注≤200字符 |
+| POST | `/api/admin/coupons/{id}/revoke` | `{requestId,reason}`，reason为1～200字符，只置REVOKED停止后续核销，不撤回已有会员权限 |
+| GET | `/api/admin/operations` | 授权设备、线路失败样本及嵌套android OTA只读；无OTA写接口 |
+
+`id = SHA-256(UTF-8(code))`小写hex，为不可解释的opaque查找标识，不是认证凭据；URL/错误/普通日志不含明文code，全码不得写localStorage。新码沿既有GY兑换格式，12位crypto随机载荷而非固定期限/序号，D1唯一键处理碰撞，初态ACTIVE+IDLE；ACTIVE不代表已使用，期限按设备核销时刻计算。
+
+generate/reveal/confirm-stock/dispatch/revoke 均以 requestId 关联幂等记录与审计：同ID同动作/目标/载荷重试不重复资产或成功审计，同ID不同请求返回409。条件更新、资产变更与成功审计同D1事务；零行更新必须整批失败。dispatch仅IDLE、非REVOKED、device_count=0可成功，双标签不同requestId只一方成功，其余409；复制/reveal不改变分发状态。note与dispatchNote独立，旧码UNKNOWN不可直接当库存。
+
+### 独立 AdminError
+
+独立AdminError形状为 `{code}`，不得引用或扩大App ErrorResponse.code，不附带敏感资产或内部错误。映射：400 VALIDATION_ERROR；401 UNAUTHENTICATED；403 FORBIDDEN；404 NOT_FOUND；405 METHOD_NOT_ALLOWED；409 CONFLICT；429 RATE_LIMITED；503 UNAVAILABLE。管理域闭合集合与OpenAPI AdminError一致，不因同名代码复用App认证。部分动作冲突响应为 `{status:'conflict'|'needs_confirm'|'noop'}`，HTTP409；请求重试载荷冲突为 `{code:'CONFLICT'}`。
+
+统计仅合法公开页GET 200及APK存在校验后的302下载触发，不称实际下载完成/安装；UV为同意Cookie浏览器标识DISTINCT，不是人数。期间转化为同期间访问与下载标识交集/访问标识数，零分母暂无数据，无标识单列。匿名默认、同意/撤回 `POST /api/analytics/consent`（agree/revoke）作为独立公开新增端点，非管理会话；Cookie/隐私/缓存规则见静态页增量，不改变既有App API Cookie行为。operations失败样本不支持健康率或实时报警结论，OTA下载仍仅同源 `/dl/latest/android`。
+
+## 八.四、 变更记录（本轮限定同步）
+
+| 日期 | 变更 | 范围与实现边界 |
+| :--- | :--- | :--- |
+| 2026-10-06 | §一.3新增 key-free native 描述符，§一.4标明旧 playback 兼容范围 | 仅 EpisodeLine/PlaybackLine 的 provider_s1、数字字符串1～32位、native unknown-field reject；work manifest/私有R2发现事实主链、原生 vid/runtime key 不返JS、Web/native cast拒绝。单集 Master 反馈不等于完整HUD真机通过；授权绑定handle未实现，Stage A未完成，旧fact待刷新、未部署。当前Java仅1～20位，21～32位执行缺口待接齐；OpenAPI等由主会话同步，AGENTS/FLAG_SECURE范围不扩大。 |
 
 ## 九、 本期不含
 

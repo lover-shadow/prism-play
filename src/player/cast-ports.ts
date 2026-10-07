@@ -84,8 +84,9 @@ export function createLineAwareCastStreamSource(deps: {
   return async (episodeId: number) => {
     const episode = deps.episodes.find((item) => item.episodeId === episodeId);
     const lines = episode === undefined ? [] : await (store()?.linesFor(deps.workId(), episode.episodeNumber) ?? Promise.resolve([]));
-    const direct = lines.find((line) => isCastableStreamUrl(line.mediaUrl));
-    if (direct === undefined) return await fallback(episodeId);
+    const direct = lines.find((line) => line.native === undefined && typeof line.mediaUrl === 'string' && isCastableStreamUrl(line.mediaUrl));
+    if (direct === undefined && lines.some((line) => line.native !== undefined)) throw new Error('此内容暂不支持投屏');
+    if (direct === undefined || direct.mediaUrl === undefined) return await fallback(episodeId);
     return { url: direct.mediaUrl, mimeType: mimeTypeOfMediaUrl(direct.mediaUrl) };
   };
 }

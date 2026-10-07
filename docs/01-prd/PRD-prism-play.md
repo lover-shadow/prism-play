@@ -505,11 +505,29 @@
 
 关联正本§10.1与 `D:/DEV/prism-play/docs/04-spec/SPEC-v2.6.3-REPAIR.md` R26-01～12：正常倍速1（正常）/1.25/1.5/1.75/2/2.5/3/4；长按倍率设置可改，松开/取消恢复原正常倍率；独立选集，返回先关浮层→退全屏→退播放器；原生横屏隐藏系统栏、退出恢复；全屏倍速/投屏可达且当前集同步。重复当前频道/子类首击滚头、连续第二击真实刷新，切新分类正常加载/重置。各公开频道顶部真热度榜（非仅isHot+ID）；无可信热度不假排，累计榜不称24小时实时榜，此规则替代§12.4旧“仅24小时榜”口径。追剧真持久化及同类空间；作者二维码可由host静态注入旧已确认 `D:/DEV/prism-play/public/images/author-contact.jpg` / `author-reward.jpg`，无需新增云QR字段；支持放大、文件下载及微信手动识别辅助，下载不等于相册保存。旧reward历史“换长期通行证”权益不是当前购买/授权承诺，必须显示免责声明，价格/档位/提醒仍100%有效云配置控制。
 
-§12.1～12.3旧云端D1公开权威/代理单入口/默认云搜索由三轨v2取代：公开60条分片，客户端完整快照+FTS本地优先，用户手动联网补充；hydrate发完整feed，搜索判fallback前等待init/queued sync并校验revision/count。公开目录/搜索/补全/related/详情/分享/海报必须同generation事实，完整分集多线路不截两集、有workFacts不得回旧公开D1；私密原双准入及核销安全不变。私密内容不落盘/不上报，服务端无法证明真实点击。来源调查尚未完成，旧库多来源/多集按待证矩阵，不以provider_m3部分合集代表全部来源；每日新packs发布、私密隔离、CI secrets/备份分别另批。§12开头及旧AI加工/语义条款是历史描述，本期仍按§13纯词法边界，不启用收费AI。
+§12.1～12.3旧云端D1公开权威/代理单入口/默认云搜索由三轨v2取代：公开60条分片，客户端完整快照+FTS本机先显示，提交完整查询默认自动联网补充（2026-10-06批准，无论有无本机命中）；hydrate发完整feed，搜索判fallback前等待init/queued sync并校验revision/count。公开目录/搜索/补全/related/详情/分享/海报必须同generation事实，完整分集多线路不截两集、有workFacts不得回旧公开D1；私密原双准入及核销安全不变。私密内容不落盘/不上报，服务端无法证明真实点击。来源调查尚未完成，旧库多来源/多集按待证矩阵，不以provider_m3部分合集代表全部来源；每日新packs发布、私密隔离、CI secrets/备份分别另批。§12开头及旧AI加工/语义条款是历史描述，本期仍按§13纯词法边界，不启用收费AI。
 
 **执行事实与存储补充（2026-10-04）**：按正本§6.1，local_following(content_id/title/cover_url/created_at)与history同prism_local.db，created_at Unix整数秒，显式收藏独立于观看历史及500条LRU，清cache/history不删，不新增收藏云sync；事务成功才显示已保存。公开观看累计仅Preference `prism.watch_seconds_total` / `prism.watch_seconds_last_nudge` 非负数值字符串，无内容ID/凭据、无新增云sync，private/unknown零计，读取/写失败如实反馈。内部publicSearch投影同代facts，现代缺/坏投影503不回D1；上线须同代blobs→manifest pointer+Worker配套，禁止单独部署搜索Worker，不新增公网端点。provider_s1元数据非可播证据。已有局部实现，新全量/浏览器/原生/生产均待验，旧1040通过只是首批report，R26未全完成；本次仅文档同步。
 
+### 2026-10-06 真实搜索与共享发现产品规则（已批准执行，未验收）
+
+以 SPEC-v2.0 §10.1.1 / Accepted ADR-006 为准：完整查询本机先显示，默认自动联网补充，有无本机命中都执行，不再只在零命中手点。结果纵向三列，全部去重结果可滚动/加载更多到达；准确显示已展示/已加载数，未知总数不冒称全量；本机/联网补充、真实匹配/可信标签及离线/过期/失败状态清晰，零外部品牌。
+
+云端真实检索受控公开来源，核验公开身份、可信作品映射、完整集数/季数与可用线路后共享持久保存，不能等点击起播或同名即合并。关键词查询缓存只复用新鲜核验结果，与永久剧库分开；TTL到期不删作品，过期重验、新集新季和线路/撤片更新。成功确认无结果才短负缓存≤5分钟；来源失败/超时/限流/核验失败不能当无结果，保留本机结果并提示可重试。保留白名单、逐跳SSRF、限流、同词并发合并（范围待实测）与零品牌响应/脱敏日志。
+
+静态全量基底+独立共享发现增量，不每搜重写manifest；客户端稳定ID/版本去重合并且数据与进度原子提交，重启/整包升级/同步失败不误删发现，仅明确撤片/删除才移除。public/private/exclude查询、缓存、索引、日志与持久层隔离，私密双准入不变。GET /api/search保留可选hasMore（缺省未知）与分页上限20，增可选discoveryPage（1～200）及discoveryPending/discoveryFailed/retryAfterSeconds；App按等待秒数自动同词同页poll到pending结束，切词取消旧poll及迟到响应。成功partial展示已有结果，不伪装成功empty/确认无结果。
+
+发现同步采用GET /api/search/discoveries，after为独立seq cursor（初始0），limit默认60/max100，返回changes[{seq,workId,operation:upsert|withdraw,updatedAt,card?}],cursor,hasMore（Unix秒、可选公开ContentItem），不与catalog revision混用，无私密元数据/墓碑。0005发现五表、0006 jobqueries/jobs两表，总业务37表（不含FTS影子表）；D1存metadata/任务，独立DISCOVERY_BUCKET无r2.dev，R2存事实/cursor。永久剧库metadata与播放事实24小时刷新分离，查询TTL不删metadata；当前基线disabled/private不可被发现覆盖。本次不执行迁移，verify_contracts由主会话更新。
+
+待验收用例：本机有/无命中都联网，超过首批的三列结果全部可达且计数准确；同词并发/新鲜缓存及失败不负缓存；核验后其他客户端可复用持久作品；新季/新集、撤片与线路失效更新；重启和整包升级保留发现；private与品牌响应/日志泄露为零。必要云/CI/独立验收APK已获准，正式官网APK/OTA仅验收后；本次只改文档，不代表部署、真机或发布完成，不变更旧AC编号/后台目标。
+
 **变更记录（2026-10-04，历史文档批）**：直接修正§4.2、F-02、AC-06/07、AC-20/21、三Tab/缓存及提醒示例；关联R26修复计划，未改业务、未构建发布、未真机验收，不改变2.6.2 tag，30项旧矩阵不等于本轮通过。
+
+## 13.4 运营后台增量（2026-10-06，局部实现、未发布）
+
+运营者通过同源后台查看页面访问请求、下载触发、可识别浏览器UV及只读授权设备/失败样本/OTA；不把UV称人数、不把下载触发称下载完成。后台支持Q/B/Y/S批量储备、掩码列表、审计后查看/复制、UNKNOWN旧库存确认、显式分发及停止后续核销；复制不是分发，REVOKED不撤回已有会员权限。
+
+后台是独立管理会话，12小时服务端可撤销、Origin/CSRF/no-CORS/no-store，不接受App JWT，不改App原有AC。目标、DDL、接口及安全规则关联SPEC-v2.0 §12.3、API-SPEC §八.三和后台计划；统计同意/清理、页面、真实D1并发、浏览器和生产发布尚未验收，OTP/Access/多管理员/支付/OTA写发布不在一期。
 
 ## 十四、 附录：与相关架构与接口规范索引
 1. **系统架构与 ADR 规格书**：`docs/02-architecture/ARCHITECTURE.md`（含 `ADR-001` ~ `ADR-005`）

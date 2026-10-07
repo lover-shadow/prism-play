@@ -23,6 +23,12 @@
 }
 /* `isolate` + `contain` 把内核的 DOM 与层叠一起关进这只盒子：它自己的 z-index 再高也出不来。 */
 .prism-player__stage { position: absolute; inset: 0; z-index: var(--prism-z-media); isolation: isolate; contain: layout paint; }
+.prism-native-transparent { background: transparent !important; }
+.prism-native-active .prism-player__backdrop { visibility: hidden; }
+.prism-native-controls { position: absolute; inset-inline: 0; bottom: 0; z-index: var(--prism-z-chrome); display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2); background: var(--player-chrome-scrim); }
+.prism-native-controls[hidden] { display: none; }
+.prism-native-controls input { flex: 1; min-width: 0; accent-color: var(--player-accent); min-height: var(--player-hit); }
+.prism-native-controls__time { font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
 
 /* 手势接收面：位于视频之上、控件之下；上下控制带由布局本身排除，因此 classifyTouch 看到的带宽为 0。 */
 .prism-player__body { position: absolute; inset: var(--prism-chrome-h) 0 var(--prism-lower-h); z-index: var(--prism-z-gesture); background: transparent; touch-action: none; }
@@ -71,10 +77,10 @@
    手势 HUD：音量（水滴冰蓝 --player-vol-accent）与亮度（暖阳金芒 --player-bri-accent）
    ========================================================================== */
 
-.prism-hud-layer { position: absolute; inset: 0; pointer-events: none; }
+.prism-hud-layer { position: absolute; inset: 0; pointer-events: none; z-index: 50; }
 .prism-hud {
   position: absolute; top: 50%; display: flex; flex-direction: column; align-items: center; gap: var(--space-2);
-  min-width: 108px; padding: var(--space-3) var(--space-4); opacity: 0;
+  min-width: 0; padding: var(--space-3); opacity: 0;
   border: 1px solid var(--player-hud-border); border-radius: var(--radius-lg);
   background: var(--player-hud-bg); box-shadow: var(--elev-hud);
   transform: translateY(-50%) scale(0.96);
@@ -88,8 +94,8 @@
 .prism-hud__icon { display: block; line-height: 0; color: var(--player-vol-accent); }
 .prism-hud--brightness .prism-hud__icon { color: var(--player-bri-accent); }
 .prism-hud__value { font-size: var(--text-sm); font-weight: 700; font-variant-numeric: tabular-nums; color: var(--fg); }
-.prism-hud__track { display: block; width: 88px; height: 6px; overflow: hidden; border-radius: var(--radius-pill); background: var(--player-track-bg); }
-.prism-hud__fill { display: block; width: 0; height: 100%; border-radius: var(--radius-pill); background: var(--player-vol-accent); }
+.prism-hud__track { display: flex; align-items: flex-end; width: var(--space-2); height: var(--space-16); overflow: hidden; border-radius: var(--radius-pill); background: var(--player-track-bg); }
+.prism-hud__fill { display: block; width: 100%; height: 0; border-radius: var(--radius-pill); background: var(--player-vol-accent); }
 .prism-hud--brightness .prism-hud__fill { background: var(--player-bri-accent); }
 .prism-hud__notice { max-width: 168px; font-size: var(--text-2xs); line-height: var(--leading-snug); text-align: center; color: var(--warn); }
 .prism-hud__notice[hidden] { display: none; }

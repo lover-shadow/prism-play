@@ -89,6 +89,7 @@ export function createHostLayer(deps: { mount: HTMLElement; onClose(): void }): 
     stage,
     sheet,
     showState(kind: OverlayState) {
+      title.textContent = '';
       shell.dataset.phase = kind === 'loading' ? 'loading' : 'error';
       shell.setAttribute('aria-busy', kind === 'loading' ? 'true' : 'false');
       shell.setAttribute('aria-label', kind === 'loading' ? '正在载入' : '播放不可用');

@@ -19,34 +19,7 @@ import androidx.core.content.ContextCompat;
 import androidx.media.app.NotificationCompat.MediaStyle;
 import com.getcapacitor.Logger;
 
-/**
- * AC-10 / F-05: the mediaPlayback foreground service that keeps audio alive when the screen turns
- * off or the user leaves the app, with a MediaStyle card carrying 剧名 + 集数 and transport buttons.
- *
- * The audio itself is still produced by the WebView's media element in this same process: nothing here
- * plays a stream. What the service buys is (a) process priority and a visible reason to exist, (b) an
- * audio-focus claim so the system stops suspending background media, (c) a bounded partial wake lock so
- * the CPU does not sleep mid-episode. Capacitor keeps the WebView timers running while paused
- * (BridgeActivity.keepRunning / Bridge.shouldKeepRunning default to true), which is why JS-driven HLS
- * playback survives at all - a fact that has to be observed on a real phone, not assumed (checklist 4).
- *
- * TWO HONEST LIMITATIONS, BOTH BY DESIGN RATHER THAN OMISSION:
- * 1. No MediaSession token is attached (androidx.media is not in the dependency set on purpose), so the
- *    card lives in the notification shade and not in the system media panel / lock-screen controls or
- *    on Bluetooth headsets. AC-10 only requires the shade card; promoting it is a Stage 4 decision.
- * 2. The play/pause glyph reflects the state this service last saw (a startBackgroundAudio call, or the
- *    button being pressed), not the truth inside the <video> element. Reading that truth would mean
- *    polling JS from a timer - the exact anti-pattern ARCHITECTURE 1.1 condemns - so the icon is allowed
- *    to lag and the button always forwards a TOGGLE to the authoritative side.
- * 3. PowerManager.PARTIAL_WAKE_LOCK is deprecated since API 28 yet still honoured, and it remains the
- *    only way to keep the CPU awake for screen-off audio without a media session; hence the timeout.
- *
- * Notification commands reach JavaScript through PrismNativePlugin's installed CommandListener, which
- * evaluates a documented window.PrismNativeMedia hook. The command vocabulary handed to that hook is
- * ACTION_TOGGLE / ACTION_NEXT / ACTION_PREVIOUS / ACTION_STOP (the reversed-DNS action strings) plus
- * COMMAND_FOCUS_LOST / COMMAND_FOCUS_REGAINED. Without the hook the buttons are inert; the hook name is
- * part of the Stage 3 integration contract.
- */
+/** Foreground lifetime, audio focus and transport controls shared by native and Web playback. */
 public final class PlaybackService extends Service {
 
     static final String ACTION_START = "org.prismos.play.action.START_PLAYBACK";
@@ -54,7 +27,6 @@ public final class PlaybackService extends Service {
     static final String ACTION_TOGGLE = "org.prismos.play.action.TOGGLE";
     static final String ACTION_NEXT = "org.prismos.play.action.NEXT";
     static final String ACTION_PREVIOUS = "org.prismos.play.action.PREVIOUS";
-    /** Focus-only commands for the JavaScript hook; they are never Intent actions. */
     static final String COMMAND_FOCUS_LOST = "focus-lost";
     static final String COMMAND_FOCUS_REGAINED = "focus-regained";
     static final String EXTRA_TITLE = "extra_title";
@@ -65,16 +37,14 @@ public final class PlaybackService extends Service {
     /** Hard ceiling on the wake lock so a leaked service cannot drain a battery overnight. */
     private static final long WAKE_LOCK_LIMIT_MS = 4L * 60L * 60L * 1000L;
 
-    /** Bridge to the WebView: receives ACTION_TOGGLE / ACTION_NEXT / ACTION_PREVIOUS. */
     public interface CommandListener {
         void onCommand(String action);
     }
 
     private static CommandListener commandListener;
-
-    static void setCommandListener(CommandListener listener) {
-        commandListener = listener;
-    }
+    private static volatile boolean running;
+    static boolean isRunning() { return running; }
+    static void setCommandListener(CommandListener listener) { commandListener = listener; }
 
     private AudioManager audioManager;
     @androidx.annotation.Nullable
@@ -86,6 +56,13 @@ public final class PlaybackService extends Service {
     private String episode = "";
     private boolean showingPauseGlyph = true;
     private boolean focusHeld = false;
+    private PlaybackMediaSession mediaSession;
+    private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final NativePlaybackCommands.StateListener nativeState = (playing, position, rate) -> main.post(() -> {
+        if (mediaSession == null) return;
+        mediaSession.state(playing, position, rate);
+        if (showingPauseGlyph != playing) { showingPauseGlyph = playing; if (running) postNotification(); }
+    });
 
     static void start(Context context, String titleLabel, String episodeLabel) {
         Intent intent = new Intent(context, PlaybackService.class)
@@ -96,7 +73,9 @@ public final class PlaybackService extends Service {
     }
 
     static void stop(Context context) {
-        context.startService(new Intent(context, PlaybackService.class).setAction(ACTION_STOP));
+        NativePlaybackCommands.dispatch(ACTION_STOP);
+        running = false;
+        context.stopService(new Intent(context, PlaybackService.class));
     }
 
     @Override
@@ -104,6 +83,11 @@ public final class PlaybackService extends Service {
         super.onCreate();
         audioManager = (AudioManager) getApplicationContext().getSystemService(Context.AUDIO_SERVICE);
         createChannel();
+        mediaSession = new PlaybackMediaSession(this, command -> {
+            if (ACTION_STOP.equals(command)) { dispatch(command); stop(this); }
+            else dispatch(command);
+        });
+        NativePlaybackCommands.observe(nativeState);
         PowerManager powerManager =
                 (PowerManager) getApplicationContext().getSystemService(Context.POWER_SERVICE);
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "prism:playback");
@@ -114,6 +98,8 @@ public final class PlaybackService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null || intent.getAction() == null ? ACTION_START : intent.getAction();
         if (ACTION_STOP.equals(action)) {
+            NativePlaybackCommands.dispatch(ACTION_STOP);
+            running = false;
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE);
             stopSelf();
             return START_NOT_STICKY;
@@ -139,7 +125,7 @@ public final class PlaybackService extends Service {
         if (title.isEmpty()) { title = getString(R.string.prism_playback_default_title); }
         if (episode.isEmpty()) { episode = getString(R.string.prism_playback_default_episode); }
         showingPauseGlyph = true;
-        requestAudioFocus();
+        mediaSession.metadata(title, episode);
         acquireWakeLock();
         // API 34 rejects startForeground without the type the manifest declares; on 29+ ServiceCompat
         // passes it, and below 29 the two-arg call is the only form that exists.
@@ -149,12 +135,18 @@ public final class PlaybackService extends Service {
         } else {
             startForeground(NOTIFICATION_ID, buildNotification().build());
         }
+        running = true;
+        requestAudioFocus();
         postNotification();
         return START_STICKY;
     }
 
     @Override
     public void onDestroy() {
+        running = false;
+        NativePlaybackCommands.removeObserver(nativeState);
+        main.removeCallbacksAndMessages(null);
+        if (mediaSession != null) { mediaSession.close(); mediaSession = null; }
         abandonAudioFocus();
         if (wakeLock != null && wakeLock.isHeld()) {
             wakeLock.release();
@@ -169,6 +161,13 @@ public final class PlaybackService extends Service {
     }
 
     private void dispatch(String action) {
+        if (NativePlaybackCommands.dispatch(action)) return;
+        if (NativePlaybackCommands.PLAY.equals(action) || NativePlaybackCommands.PAUSE.equals(action)) {
+            boolean requested = NativePlaybackCommands.PLAY.equals(action);
+            if (requested == showingPauseGlyph) return;
+            showingPauseGlyph = requested;
+            action = ACTION_TOGGLE;
+        }
         CommandListener listener = commandListener;
         if (listener == null) {
             Logger.warn("PrismPlayback", "no command listener installed; notification button ignored");
@@ -206,7 +205,7 @@ public final class PlaybackService extends Service {
                         broadcast(ACTION_TOGGLE, 12))
                 .addAction(R.drawable.ic_media_next,
                         getString(R.string.prism_playback_action_next), broadcast(ACTION_NEXT, 13))
-                .setStyle(new MediaStyle().setShowActionsInCompactView(0, 1, 2));
+                .setStyle(new MediaStyle().setMediaSession(mediaSession.token()).setShowActionsInCompactView(0, 1, 2));
         Intent open = new Intent(this, MainActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         builder.setContentIntent(PendingIntent.getActivity(this, 14, open, immutableFlags()));
@@ -214,7 +213,7 @@ public final class PlaybackService extends Service {
     }
 
     private PendingIntent broadcast(String action, int requestCode) {
-        return PendingIntent.getBroadcast(this, requestCode,
+        return PendingIntent.getService(this, requestCode,
                 new Intent(this, PlaybackService.class).setAction(action), immutableFlags());
     }
 
@@ -253,6 +252,7 @@ public final class PlaybackService extends Service {
                             .setUsage(AudioAttributes.USAGE_MEDIA)
                             .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
                             .build())
+                    .setWillPauseWhenDucked(true)
                     .setOnAudioFocusChangeListener(focusListener)
                     .build();
             focusRequest = request;
@@ -263,7 +263,8 @@ public final class PlaybackService extends Service {
         }
         focusHeld = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
         if (!focusHeld) {
-            Logger.warn("PrismPlayback", "audio focus refused; screen-off playback is at risk");
+            dispatch(COMMAND_FOCUS_LOST);
+            Logger.warn("PrismPlayback", "audio focus refused");
         }
     }
 
@@ -285,14 +286,13 @@ public final class PlaybackService extends Service {
             // Permanent loss (another app took media focus): release the foreground claim so the OS is
             // free to stop us; the wake lock and focus go with it in onDestroy.
             dispatch(ACTION_STOP);
+            running = false;
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE);
             stopSelf();
             return;
         }
-        // Transient loss / duck and regaining: forwarded as focus commands so TypeScript - which owns
-        // the media element - decides to pause, duck the player volume, or resume.
-        dispatch(focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT
-                ? COMMAND_FOCUS_LOST
-                : COMMAND_FOCUS_REGAINED);
+        if (focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT
+                || focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK) dispatch(COMMAND_FOCUS_LOST);
+        else if (focusChange == AudioManager.AUDIOFOCUS_GAIN) dispatch(COMMAND_FOCUS_REGAINED);
     }
 }

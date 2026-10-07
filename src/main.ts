@@ -9,6 +9,7 @@ import type { RedeemOutcome } from './views/settings-view';
 import { CATALOG_CACHE_LIMIT_BYTES, createLocalSearchApi, createSearchIndex, createStorageDomains, isPrivateSubject, MemoryCacheDisk, POSTER_CACHE_LIMIT_BYTES } from './core/storage';
 import { PrismApiClient } from './core/api/client';
 import { createCatalogCacheService } from './core/catalog-cache';
+import { createDiscoverySync } from './core/discovery-sync';
 import { createPosterUrls } from './core/poster-urls';
 import { createUserSync } from './core/user-sync';
 import { createGrantProbe, grantAdaptersFor } from './core/identity/offline-grant';
@@ -35,7 +36,6 @@ export interface BootOptions {
   fetchImpl?: FetchLike;
   nowSeconds?: () => number;
 }
-
 export interface PrismApp {
   shell: AppShell;
   /** 端云同步中枢（AC-30）：推荐引擎经 `sync.preferences()` 继承跨端画像，视图不另开第二条网络路径。 */
@@ -49,7 +49,6 @@ function mountPoints(): [HTMLElement, HTMLElement, HTMLElement, HTMLElement] | n
   const main = document.getElementById('app-main'), tabbar = document.getElementById('app-tabbar');
   return app !== null && header !== null && main !== null && tabbar !== null ? [app, header, main, tabbar] : null;
 }
-
 export async function boot(options: BootOptions = {}): Promise<PrismApp | null> {
   const mounts = mountPoints();
   if (mounts === null) return null;
@@ -65,7 +64,6 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
   const storage = createStorageDomains({ sqlite, disk: (await createCacheDisk()) ?? new MemoryCacheDisk(), nowSeconds: now });
   // 冷启动即焚：上一次进程的私密痕迹不该存在于本进程（AC-02-2 每次进入默认关闭）。
   storage.privateVault.clear();
-
   const defaultApiBaseUrl = options.apiBaseUrl ?? (isNativeHost() ? 'https://play.prismos.org' : '');
   const posters = createPosterUrls(defaultApiBaseUrl);
   const client = new PrismApiClient({ baseUrl: defaultApiBaseUrl, fetchImpl: options.fetchImpl });
@@ -82,12 +80,18 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
   client.setAuthorization(stored.token);
 
   // §A-6.2 数据流：快照/增量批次落地即喂端侧 FTS5 索引；索引自己吞异常并记进 status()，不改落盘结论。
-  const catalog = createCatalogCacheService({ client, baseUrl: defaultApiBaseUrl, cache: storage.cache, nowSeconds: now, onSnapshotEntries: (feed) => void searchIndex.sync(feed) });
+  const catalog = createCatalogCacheService({ client, baseUrl: defaultApiBaseUrl, cache: storage.cache, nowSeconds: now,
+    onSnapshotEntries: (feed) => void searchIndex.sync(feed.changes === undefined ? { ...feed, items: storage.cache.list() } : feed)
+  });
+  const discoverySync = createDiscoverySync({ cache: storage.cache, client, onEntries: async () => {
+    const epoch = storage.cache.discoveryState().epoch;
+    // Same revision + same count may still contain changed titles/episodes: bypass rebuild's count shortcut.
+    await searchIndex.clear();
+    const result = await searchIndex.sync({ items: storage.cache.list(), revision: storage.cache.snapshotRevision() });
+    if (epoch !== storage.cache.discoveryState().epoch) { await searchIndex.clear(); throw new Error('Discovery cache was cleared'); }
+    if (result.error !== null) throw new Error(result.error);
+  } });
 
-  /**
-   * AC-02-3 的端侧兜底：公开频道响应里若混进私密条目（服务端故障或响应被篡改），它既不进界面也不进缓存读取面。
-   * 走【个人探索】时 `channel` 参数本身就是 private，那条链路按契约允许私密条目，因此不做剔除。
-   */
   const homeApi: HomeApi = {
     channels: () => catalog.api.channels(),
     catalog: async (input) => {
@@ -115,11 +119,6 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
 
   /** 双击退出 Toast 的停留时长（A-1 定案 6.5s）：比系统提示长一点，用户才来得及读完"再按一次"。 */
   const report = createNotice(app, 6_500);
-  /**
-   * 端云状态同步中枢（SPEC §1.9 / AC-30）：构造即补发待发队列（§3.1 要求补传先于任何拉取），并交出
-   * "断点落库路由"这唯一咽喉点——私密内容永不进历史域、也永不进待发队列（§1.9.4）。分类与私密出处
-   * 都取自公开快照：本文件不另判私密，视图也不自建第二条网络路径。
-   */
   const sync = createUserSync({
     token: stored.token, history: storage.history, privateVault: storage.privateVault, prefs,
     baseUrl: defaultApiBaseUrl, fetchImpl: options.fetchImpl, nowSeconds: now, onNotice: report,
@@ -130,7 +129,7 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
   const share = createShareAction({ bridge, report });
   const runtime = await createRuntimeServices({ prefs, grant, monetization: () => client.monetization(), report });
   const player = createPlayerHost({
-    mount: app, bridge, api: client, following, runtime,
+    mount: app, bridge, api: client, following, runtime, seriesItems: () => storage.cache.list().filter((entry) => !isPrivateSubject(entry)),
     onRedeem: () => void shell.activate('settings'),
     onProgress: sync.onProgress,
     // §1.9.3 节点 ①：退出播放/关闭播放器/系统 Back 销毁的那一刻就地断点上报（`keepalive` + 待发队列）。
@@ -142,13 +141,12 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
   });
 
   let homeView: HomeView | null = null;
-  /**
-   * 本机公开快照的剧目集合：榜单与热词的唯一数据源。私密判定同 `homeApi` 再挡一道（AC-02-3），
-   * 私密内容连标题都不进 DOM。搜索 Overlay（A-3）不是 Tab，由首页搜索条拉起并在返回栈注册为 Layer（A-1）。
-   */
   const publicLocalItems = () => posters.items(storage.cache.list().filter((entry) => !isPrivateSubject(entry)));
-  // A-6：搜索数据源换成本机 FTS5 索引；本机没有可用索引（Web 宿主无 SQLite）才如实回落云端检索。
-  const searchApi = createLocalSearchApi({ index: searchIndex, localItems: publicLocalItems, remote: client });
+  const searchApi = createLocalSearchApi({ index: searchIndex, localItems: publicLocalItems, remote: client, onOnlineItems: async (items) => {
+    const discoveries = await storage.cache.mergeDiscoveries(items);
+    await searchIndex.sync({ items: [], discoveries, revision: storage.cache.snapshotRevision() });
+    void discoverySync.sync(); // Search's successful online supplement can resume the independent log.
+  } });
   const overlay = createSearchOverlay({
     appRoot: app, api: searchApi,
     localItems: publicLocalItems,
@@ -203,6 +201,10 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
     const view = createSettingsView({
       api: client,
       apiBaseUrl: defaultApiBaseUrl,
+      runtimeVersions: {
+        app: async () => (await import('@capacitor/app')).App.getInfo(),
+        cloud: () => client.version()
+      },
       catalogStatus: () => catalog.snapshotState(), checkCatalogUpdate: () => catalog.syncIncremental(),
       prefs,
       bridge,
@@ -255,13 +257,11 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
     onTabChange: async () => { backgroundAudio = (await prefs.get(SETTINGS_PREF_KEYS.keepScreenOn)) === '1'; }
   });
 
-  // 快照优先（AC-01）：bootstrap 内部会先 hydrate 再后台同步；同步成功即刷新离线校验时点（AC-15）。
   const started = await catalog.bootstrap();
+  void discoverySync.sync(); // hydrate and local catalog bootstrap always precede background discovery I/O.
   if (started.outcome !== null && started.outcome.offline === false) await grant.recordOnlineCheck(now());
   catalog.onSynced((outcome) => { if (homeView !== null && outcome.appliedEntries > 0) void homeView.syncRecommendation(); }); // HP-06b：后台推进只走背景同步入口，新的发现轮次只由用户显式刷新开启
   const releaseNotifications = bindNotificationActions((action) => player.onNotification(action));
-  // §1.9.3 节点 ②：切到后台（`isActive === false`）即静默上报当前断点。监听口与 `back-button.ts` 同款
-  // 守卫——非原生宿主根本不注册，Web 构建退化为 no-op，绝不因为缺 `@capacitor/app` 而抛错。
   const releaseAppState = await sync.observeBackground(() => { player.suspend(); void sync.reportExit(sync.lastBreakpoint()); });
   await shell.activate('home');
   if (started.hadSnapshot === false && storage.cache.snapshotRevision() === 0) {

@@ -32,8 +32,13 @@ public class MainActivity extends BridgeActivity {
         // AC-24 DLNA cast, same in-module pattern (SPEC §1.5.2.2): no capacitor.settings.gradle entry and no
         // plugins.json entry, because neither is consulted for classes that live in this app module.
         registerPlugin(PrismCastPlugin.class);
+        registerPlugin(PrismPlayerPlugin.class);
         super.onCreate(savedInstanceState);
         applyDisplayCutoutMode();
+        if (BuildConfig.PLAYBACK_PROBE) {
+            startActivity(new android.content.Intent().setClassName(this,
+                    "org.prismos.play.PrismPlaybackProbeActivity"));
+        }
     }
 
     /**

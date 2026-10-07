@@ -192,6 +192,19 @@ export interface CatalogChangesResponse {
 export interface SearchResponse {
   items: SearchResult[];
   page: number;
+  hasMore?: boolean;
+  discoveryPending?: boolean;
+  discoveryFailed?: boolean;
+  retryAfterSeconds?: number;
+  /** Source page is independent of the merged result window. */
+  discoveryPage?: number;
+  discoveryHasMore?: boolean;
+}
+
+export interface DiscoveryChangesResponse {
+  changes: { seq: number; workId: string; operation: 'upsert' | 'withdraw'; updatedAt: number; card?: ContentItem }[];
+  cursor: number;
+  hasMore: boolean;
 }
 
 export interface SuggestionsResponse {
@@ -240,6 +253,7 @@ export interface AndroidRelease {
 
 export interface VersionResponse {
   android: AndroidRelease;
+  service?: { buildId: string; deployedAt: string };
 }
 
 /** Closed set; must stay aligned with openapi.yaml ErrorResponse.code enum. */

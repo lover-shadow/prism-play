@@ -42,6 +42,7 @@ export interface PlayerHostDeps {
   orientation?: OrientationPort;
   playbackPreferences?: import('./playback-rate').PlaybackPreferences;
   following?: import('../core/storage/following-store').FollowingStore;
+  seriesItems?(): readonly ContentItem[];
   runtime?: RuntimeServices;
   onRedeem?(): void;
 }

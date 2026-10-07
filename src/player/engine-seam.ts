@@ -32,9 +32,12 @@ import type { LineFailureCode } from '../core/native/telemetry';
 export interface PlayerEngine {
   play(): void; pause(): void; playing(): boolean; destroy(): void;
   currentTime(): number; setCurrentTime(seconds: number): void; duration(): number;
-  volume(): number; setVolume(value: number): void; setSource(url: string, mimeType?: string): void;
+  volume(): number; setVolume(value: number): void; setSource(url: string | undefined, mimeType?: string, native?: { kind: 's1-cenc'; videoId: string }): void;
   toggleControls(): void; on(event: MediaEvent, handler: () => void): () => void;
   resize?(): void;
+  setControlsVisible?(visible: boolean): void;
+  setControlsLocked?(locked: boolean): void;
+  setBackgroundAllowed?(allowed: boolean): void;
   playbackRate?(): number; setPlaybackRate?(rate: number): void;
   /**
    * 直连上游之后（A-7），切线与遥测都需要知道这一跳是怎么死的：超时、HTTP 失败还是解码失败。
@@ -45,6 +48,7 @@ export interface PlayerEngine {
 
 export interface EngineContext {
   container: HTMLDivElement; theme: string; poster?: string;
+  resolveNative?(source: { kind: 's1-cenc'; videoId: string }): Promise<{ kind: 's1-cenc'; videoId: string }>;
   /** 第二条实参是内核分得出的失败类型（hls fatal 明细 / `MediaError.code`）；分不出来时为 undefined。 */
   onError(message: string, failureCode?: LineFailureCode): void;
 }

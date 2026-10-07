@@ -27,7 +27,6 @@ export const HUD_HIDE_AFTER_MS = 600;
 const GLYPH: Readonly<Record<HudKind, IconName>> = { volume: 'volume', brightness: 'brightness' };
 const LABEL: Readonly<Record<HudKind, string>> = { volume: '音量', brightness: '亮度' };
 
-/** What the platform refused to do, stated plainly. Kept next to the HUD so copy stays in one place. */
 const UNSUPPORTED_COPY: Readonly<Record<HudKind, string>> = {
   volume: '系统音量需在 Android 端调节，此处仅改变播放器音量',
   brightness: '窗口亮度需在 Android 端调节，此处仅改变画面遮罩'
@@ -122,8 +121,7 @@ export function createGestureHud(
       const percent = Math.round(Math.min(1, Math.max(0, value)) * 100);
       const node = nodes[kind];
       node.value.textContent = `${LABEL[kind]} ${percent}%`;
-      // Inline width is a measurement, not a colour: tokens stay in player.css.
-      node.fill.style.width = `${percent}%`;
+      node.fill.style.height = `${percent}%`;
       node.notice.textContent = supported ? '' : UNSUPPORTED_COPY[kind];
       node.notice.hidden = supported;
       node.root.classList.add('is-visible');

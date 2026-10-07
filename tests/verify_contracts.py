@@ -23,8 +23,10 @@ def check_openapi():
         "/api/channels",
         "/api/sources",
         "/api/search/suggestions",
+        "/api/search/discoveries",
         "/api/search",
         "/api/titles/{titleId}/related",
+        "/api/titles/{titleId}/episodes/{episodeNumber}/native-playback",
         "/api/catalog/changes",
         "/api/catalog",
         "/api/titles/{titleId}",
@@ -43,9 +45,25 @@ def check_openapi():
         "/assets/{file}",
         "/proxy/{kind}/{handle}"
     ]
+    admin_paths = {
+        '/api/admin/' + suffix for suffix in [
+            'login', 'session', 'logout', 'dashboard', 'coupons', 'coupons/generate',
+            'coupons/{id}', 'coupons/{id}/reveal', 'coupons/{id}/confirm-stock',
+            'coupons/{id}/dispatch', 'coupons/{id}/revoke', 'operations',
+        ]
+    }
     for p in expected_paths:
         assert p in paths, f"OpenAPI 缺少端点: {p}"
-    assert len(paths) == len(expected_paths), f"端点数量异常: {len(paths)} != {len(expected_paths)}"
+    privacy_paths = {'/privacy', '/api/analytics/consent'}
+    assert set(paths) == set(expected_paths) | admin_paths | privacy_paths, 'App或后台路径集合发生漂移'
+    for path in admin_paths:
+        for method, operation in paths[path].items():
+            if method not in ('get', 'post'):
+                continue
+            if path != '/api/admin/login':
+                assert operation.get('security') == [{'AdminSession': []}], f'后台认证缺失: {path}'
+                if method == 'post':
+                    assert any(p.get('name') == 'X-CSRF-Token' and p.get('required') for p in operation.get('parameters', [])), f'后台CSRF缺失: {path}'
     
     # 悬空引用检查
     schemas = doc.get("components", {}).get("schemas", {})
@@ -71,7 +89,7 @@ def check_openapi():
     assert schemas["RedeemRequest"]["properties"]["platform"]["enum"] == ["android"], "本期平台仅限 android"
     assert "windows" not in schemas["VersionResponse"]["properties"], "VersionResponse 不得包含未交付的 windows 产物属性"
     assert "oneOf" in schemas["CatalogChange"], "CatalogChange 必须使用 oneOf 区分 upsert 与 delete"
-    print(f"  -> OpenAPI {len(expected_paths)} 个路由与 Schema 全部闭环，无悬空引用，错误码与代理路由已收口。")
+    print(f"  -> OpenAPI {len(expected_paths)} 个App路径与 {len(admin_paths)} 个后台目标路径校验通过，无悬空引用；不代表后台已部署。")
 
 def load_migration_sql():
     """按序读取全部迁移文件。
@@ -105,7 +123,9 @@ def check_sqlite_schema():
     # 0003 瘦身迁移新增线路健康遥测账本 line_health_signals（内容大表标记 DEPRECATED 但不物理 DROP）；
     # 0004 运营后台与分析 additive 新增 analytics_daily / analytics_visitors / analytics_visitor_days /
     #   admin_sessions / admin_login_limits / coupon_batches / admin_audit_logs 七张表（同样不 DROP 旧表）。
-    assert len(business_tables) == 30, f"业务表数量不符: 期望 30, 实际 {len(business_tables)}: {business_tables}"
+    discovery_tables = {"discovery_works", "discovery_changes", "discovery_queries", "discovery_leases", "discovery_rate_windows", "discovery_job_queries", "discovery_jobs", "discovery_cards"}
+    assert discovery_tables.issubset(set(business_tables)), f"缺少共享发现表: {discovery_tables - set(business_tables)}"
+    assert len(business_tables) == 38, f"业务表数量不符: 期望 38, 实际 {len(business_tables)}: {business_tables}"
     assert len(fts_shadow) == 5, f"FTS5 影子表数量不符: 期望 5, 实际 {len(fts_shadow)}: {fts_shadow}"
 
     # 0004 运营后台与分析表必须实际落地，而不只是让表数凑够 (计划 §2.4)
@@ -240,7 +260,7 @@ if __name__ == "__main__":
         check_design_tokens()
         print("\n==================================================")
         print("  【阶段 0：施工前契约复核门禁 (Gate G0)】通过检验！")
-        print("   (覆盖 22 API / 30 业务表 / 13 功能 / 30 AC 验收)")
+        print("   (覆盖 24 App API / 37 业务表 / 13 功能 / 30 AC 验收)")
         print("==================================================")
     except Exception as e:
         print(f"\n[FAILED] 契约复核未通过: {e}", file=sys.stderr)

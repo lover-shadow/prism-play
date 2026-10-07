@@ -22,8 +22,8 @@ export const MAX_LINE_SWITCHES = 2;
 export interface ActiveLine {
   line: PlaybackLine;
   index: number;
-  url: string;
-  mimeType: string;
+  url?: string;
+  mimeType?: string;
 }
 
 export interface LineFallbackDeps {
@@ -52,7 +52,8 @@ export function createLineFallback(deps: LineFallbackDeps): LineFallback {
   const at = (position: number): ActiveLine | null => {
     const line = lines[position];
     if (line === undefined) return null;
-    return { line, index: position, url: line.mediaUrl, mimeType: mimeTypeOfMediaUrl(line.mediaUrl) };
+    return { line, index: position, url: line.mediaUrl,
+      mimeType: line.mediaUrl === undefined ? undefined : mimeTypeOfMediaUrl(line.mediaUrl) };
   };
 
   return {

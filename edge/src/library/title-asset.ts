@@ -18,11 +18,21 @@ import { CHANNEL_IDS } from '../types/api';
 import type { AssetRejection, AssetVerdict } from './contract';
 import { accept, isCount, isHttpUrl, isNonEmptyText, isRecord, isSafeWorkId, reject } from './contract';
 import { sanitizePublicMetadata } from './metadata-policy.mjs';
+import { readReleaseProgress, type ReleaseProgress } from './release-progress';
 
 export interface EpisodeLine {
   /** Abstract provider code (`provider_m1` style): never a brand name, per AGENTS.md §二.1. */
   readonly providerId: string;
-  readonly mediaUrl: string;
+  readonly mediaUrl?: string;
+  /** Source candidate only: native lines require runtime resolution, never ArtPlayer/cast direct play. */
+  readonly native?: { readonly kind: 's1-cenc'; readonly videoId: string };
+}
+
+/** Exact, key-free identity descriptor; numeric strings stay lossless (including leading zeroes). */
+export function isNativeDescriptor(value: unknown, providerId: string): value is NonNullable<EpisodeLine['native']> {
+  return providerId === 'provider_s1' && isRecord(value) &&
+    Object.keys(value).length === 2 && Object.keys(value).every((key) => key === 'kind' || key === 'videoId') &&
+    value.kind === 's1-cenc' && typeof value.videoId === 'string' && /^\d{1,32}$/.test(value.videoId);
 }
 
 export interface TitleEpisodeEntry {
@@ -32,7 +42,7 @@ export interface TitleEpisodeEntry {
   readonly lines: readonly EpisodeLine[];
 }
 
-export interface TitleAsset {
+export interface TitleAsset extends ReleaseProgress {
   readonly workId: string;
   readonly title: string;
   readonly channelId: ChannelId;
@@ -76,6 +86,11 @@ function parseLine(value: unknown): EpisodeLine | null {
   const providerId = value.providerId;
   const mediaUrl = value.mediaUrl;
   if (typeof providerId !== 'string' || !isSafeWorkId(providerId)) return null;
+  if ('native' in value) {
+    if (!isNativeDescriptor(value.native, providerId) || (mediaUrl !== undefined && !isHttpUrl(mediaUrl))) return null;
+    return { providerId, ...(mediaUrl === undefined ? {} : { mediaUrl: mediaUrl as string }),
+      native: { kind: 's1-cenc', videoId: value.native.videoId } };
+  }
   if (!isHttpUrl(mediaUrl)) return null;
   return { providerId, mediaUrl };
 }
@@ -135,7 +150,9 @@ export function parseTitleAsset(raw: string, expectedWorkId: string): AssetVerdi
   if (typeof parsed.isHot === 'boolean') asset.isHot = parsed.isHot;
   // HP-11：可选元数据统一经策略源消毒后才落到卡片。旧 generation 缺这些键时 sanitize 返回空对象，
   // 解析照样成功——这正是「旧产物仍可读取」的硬要求，越界值则整个消失而不是把整部剧打不开。
-  Object.assign(asset, sanitizePublicMetadata(parsed));
+  const progress = readReleaseProgress(parsed, episodes.length);
+  if (progress === null) return reject('malformed');
+  Object.assign(asset, sanitizePublicMetadata(parsed), progress);
   return accept(asset);
 }
 
@@ -165,6 +182,9 @@ export function itemFromAsset(asset: TitleAsset, coverUrl?: string): ContentItem
   if (asset.releaseYear !== undefined) item.releaseYear = asset.releaseYear;
   if (asset.region !== undefined) item.region = asset.region;
   if (asset.language !== undefined) item.language = asset.language;
+  if (asset.releaseStatus !== undefined) item.releaseStatus = asset.releaseStatus;
+  if (asset.lastSyncedEpisode !== undefined) item.lastSyncedEpisode = asset.lastSyncedEpisode;
+  if (asset.lastSyncedAt !== undefined) item.lastSyncedAt = asset.lastSyncedAt;
   return item;
 }
 

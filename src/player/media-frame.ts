@@ -35,7 +35,10 @@ export function applyMediaFrame(target: HTMLElement, rect: ContentRect): void {
 /** `<video>` 由内核自己创建，这里只读不造；解码尺寸未就绪即视为未知。 */
 function videoSizeOf(container: HTMLElement): MediaBox | null {
   const video = container.querySelector('video') as HTMLVideoElement | null;
-  if (video === null) return null;
+  if (video === null) {
+    const width = Number(container.dataset.nativeVideoWidth), height = Number(container.dataset.nativeVideoHeight);
+    return width > 0 && height > 0 ? { width, height } : null;
+  }
   if (!(video.videoWidth > 0) || !(video.videoHeight > 0)) return null;
   return { width: video.videoWidth, height: video.videoHeight };
 }

@@ -117,17 +117,17 @@ describe('客户端搜索冷启动', () => {
     expect(cloud.suggestions).not.toHaveBeenCalled();
   });
 
-  it('SQLite 真不可用才回落；搜索与补全都尝试本机初始化后正常返回云端结果', async () => {
+  it('SQLite 不可用时本机搜索返回空，由独立联网补充接续；补全仍可回落', async () => {
     const sqlite = sqliteOf(new loaded.DatabaseSync(':memory:'));
     sqlite.isConnected = async () => false;
     const open = vi.fn(async () => { throw new Error('本机无端侧 SQLite'); });
     sqlite.open = open;
     const cloud = remote();
     const api = createLocalSearchApi({ index: createSearchIndex({ sqlite }), localItems: () => [item], remote: cloud });
-    expect(await api.search({ q: '战神' })).toEqual({ items: [], page: 1 });
+    expect(await api.search({ q: '战神' })).toEqual({ items: [], page: 1, hasMore: false });
     expect(await api.suggestions('战神')).toEqual({ query: '战神', suggestions: [] });
     expect(open).toHaveBeenCalledTimes(2);
-    expect(cloud.search).toHaveBeenCalledTimes(1);
+    expect(cloud.search).not.toHaveBeenCalled();
     expect(cloud.suggestions).toHaveBeenCalledTimes(1);
   });
 

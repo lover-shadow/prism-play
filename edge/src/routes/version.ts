@@ -25,5 +25,8 @@ import { originOf } from '../http/serialize';
 export async function handleVersion(request: Request, env: Env, _clock: Clock): Promise<Response> {
   const release = await readVersionRelease(env.KV, originOf(request));
   if (release === null) return configUnavailableResponse();
-  return jsonResponse(release, 200, publicConfigHeaders());
+  const metadata = env.CF_VERSION_METADATA;
+  return jsonResponse({ ...release, ...(metadata ? {
+    service: { buildId: metadata.id, deployedAt: metadata.timestamp }
+  } : {}) }, 200, publicConfigHeaders());
 }

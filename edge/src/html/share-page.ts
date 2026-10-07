@@ -255,6 +255,7 @@ export function renderSharePage(input: SharePageInput): string {
     '  <noscript class="noscript">本页面需要启用 JavaScript 才能向剧集清单取得这一集的播放源；没有脚本时播放与下载提示仍然保留入口，但不会自动载入影音。</noscript>',
     '</div>',
     renderPlayerScript(playerConfig(input)),
+    '<p><a href="/privacy">隐私与统计设置</a></p>',
     '</body>',
     '</html>'
   ].join('\n');

@@ -18,8 +18,8 @@ export function orientationOf(width: number, height: number): AspectOrientation 
 
 /** 从播放器容器里取那颗真正的 `<video>`：ArtPlayer 自己创建它，我们只读不造。 */
 export function probeStageOrientation(stage: HTMLElement | null): AspectOrientation | null {
-  const video = stage?.querySelector('video') as HTMLVideoElement | null;
-  if (video === null) return null;
+  const video = stage?.querySelector('video') as HTMLVideoElement | null | undefined;
+  if (!video) return stage === null ? null : orientationOf(Number(stage.dataset.nativeVideoWidth), Number(stage.dataset.nativeVideoHeight));
   return orientationOf(video.videoWidth, video.videoHeight);
 }
 

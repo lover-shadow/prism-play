@@ -7,6 +7,9 @@ routes = [
   { pattern = "play.prismos.org/*", zone_name = "prismos.org" }
 ]
 
+[version_metadata]
+binding = "CF_VERSION_METADATA"
+
 # Scheduled Cron 使用 UTC：每日 04:00 / 16:00 UTC（北京时间 12:00 / 次日 00:00），分栏目轮询健康巡检与测速。
 [triggers]
 crons = ["0 4,16 * * *"]
@@ -28,8 +31,14 @@ id = "7a8d672743d6462f8d2ae13d9416f0da"
 binding = "APK_BUCKET"
 bucket_name = "prism-play-releases"
 
+[[r2_buckets]]
+binding = "DISCOVERY_BUCKET"
+bucket_name = "prism-play-discovery"
+
 [vars]
 JWT_KID = "p2026"
+SEARCH_DISCOVERY_ENABLED = "true"
+ANALYTICS_ENABLED = "true"
 APK_PUBLIC_BASE_URL = "https://pub-8736c44ed0664684b20530e52f7717ca.r2.dev"
 # 敏感密钥已由 wrangler secret 管道以加密方式注入云端，严禁明文入库：
 # JWT_PRIVATE_KEY_JWK / PRIVATE_SESSION_SECRET / PROXY_SIGNING_SECRET

@@ -87,13 +87,27 @@ function termsOf(columnText: string): string[] {
 function coversTerms(grams: readonly string[], terms: readonly string[]): boolean {
   if (grams.length === 0 || terms.length === 0) return false;
   return grams.every((gram) =>
-    terms.some((term) => term === gram || (!isCjkChar(gram.charAt(0) as string) && gram.length >= 2 && term.startsWith(gram)))
+    terms.some((term) => term === gram || (isCjkChar(gram.charAt(0) as string)
+      ? gram.length > 2 && term.includes(gram)
+      : gram.length >= 2 && term.startsWith(gram)))
   );
+}
+
+export interface CompiledCoverage { normalized: string; tokens: string[] }
+export function normalizeCoverage(value: string): string {
+  return value.normalize('NFKC').toLowerCase().replace(/\s+/g, '');
+}
+export function compileCoverage(value: string): CompiledCoverage {
+  return { normalized: normalizeCoverage(value), tokens: indexTokens(value) };
+}
+/** Reusable precision predicate for a generation's precompiled display terms. */
+export function coversCompiled(query: CompiledCoverage, target: CompiledCoverage): boolean {
+  return query.normalized !== '' && (target.normalized.includes(query.normalized) || coversTerms(query.tokens, target.tokens));
 }
 
 /** Against a display string from an authoritative column (`content_items.title`, `content_aliases.alias`). */
 export function covers(query: string, text: string): boolean {
-  return coversTerms(indexTokens(query), indexTokens(text));
+  return coversCompiled(compileCoverage(query), compileCoverage(text));
 }
 
 /** Against a pre-tokenised `public_search_fts` column, whose terms are already space-separated. */

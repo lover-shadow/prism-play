@@ -16,6 +16,9 @@
 .prism-player-host__stage { flex: none; width: 100%; background: var(--player-bg); }
 /* 选集面板的宿主槽位：紧跟舞台之后，非全屏时走正文流（视频下方），浮动态则由 `player.css` 把它摘成 fixed。 */
 .prism-player-host__sheet { flex: none; }
+.prism-season-switcher { padding: var(--space-2); color: var(--fg); }
+.prism-season-switcher select { display: block; width: 100%; margin-top: var(--space-1); }
+.prism-drawer > .prism-season-switcher { flex: none; }
 
 /* ==========================================================================
    沉浸全屏态 —— 唯一权威（SPEC §1.2.0，AC-19 / AC-20 / AC-21）

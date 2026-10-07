@@ -6,6 +6,14 @@
 
 ---
 
+## 2026-10-07 变更记录：新增发现与端侧按需播放
+
+- 搜索仅取得并共享保存剧目卡片，不以完整媒体清单为卡片展示条件；不在搜索时逐集取流或解密。
+- 新作品详情按需取得真实分集编号。provider_s1原生线路允许仅含providerId与native描述符，无需mediaUrl；普通线路仍须真实地址。编号在Android运行时按集取流、处理密钥及播放。
+- 保留既有目录和有效地址，不因查询缓存过期而全库重抓。定时任务不续跑旧搜索逐集取流任务，S1目录更新只获取编号。
+- `/api/version`可返回service.buildId/deployedAt（真实部署元数据），android字段仍是官网APK公告。本机版本从Android宿主读取，不硬编码或提前更新公告。
+- 详细施工与待验收证据见`docs/plans/2026-10-07-search-cards-and-device-playback.md`；本记录不代表部署或真机验收已通过。
+
 ## 1. 产品定义
 - **一句话描述**：基于 Capacitor 7 现代全栈容器与 Cloudflare Serverless 边缘云脑构建的工业级“大视界”全景流媒体终端（`play.prismos.org`）。
 - **目标用户**：私域高净值观影用户、通勤碎片追剧群体与多端影音发烧友。
@@ -242,7 +250,7 @@ CREATE TABLE IF NOT EXISTS local_following (
 
 v2.6增量以 `D:/DEV/prism-play/docs/04-spec/SPEC-v2.6.3-REPAIR.md` R26-01～12 与 `REPAIR-v2.6.2-PLAN.md` 追踪；2026-10-05首页与播放器增量以本文件 HP-01～12 追踪，均不改变 AC-01～30 历史编号。旧AC矩阵不得作为R26/HP通过证明。新规则、局部业务实现、全量回归、浏览器、真机与生产状态分别登记；三轨架构、私密双准入和核销安全边界不变。
 
-- **R26-01/02 搜索与事实**：完整公开快照 hydrate 必须发送全量索引 feed，search/suggestions 在判 fallback 前等待 init/queued sync，核验 revision 与实际公开 count；索引未就绪不能冒充零结果或默认联网。目录、搜索/补全/related、详情、分享、海报使用同 generation 公开事实，禁止旧 anime ID 或两集截断、禁止有 workFacts 时回读旧公开 D1。来源覆盖以待证矩阵调查，不能将 provider_m3 部分合集不足推广为全部来源结论。
+- **R26-01/02 搜索与事实**：完整公开快照 hydrate 必须发送全量索引 feed，search/suggestions 在判 fallback 前等待 init/queued sync，核验 revision 与实际公开 count；索引未就绪不能冒充零结果；2026-10-06 起，完整查询默认自动联网补充，无论本机是否命中，不以索引失败作为触发依据。目录、搜索/补全/related、详情、分享、海报使用同 generation 公开事实，禁止旧 anime ID 或两集截断、禁止有 workFacts 时回读旧公开 D1。来源覆盖以待证矩阵调查，不能将 provider_m3 部分合集不足推广为全部来源结论。
 - **HP-01～03 播放与宿主**：显式ended与真实源代次为自然切集依据；热门榜参与返回Layer；点击即显示无元信息加载宿主，所有异步提交受打开代次约束。
 - **HP-04～07 首页、刷新与榜单**：启动默认综合首页，固定展示顺序首页/精彩短剧/电影仓库/纪录片/动漫；四个真实频道ID和60条目录传输分页不变。推荐比例、发现刷新、曝光及先分类后排名按HP表执行；旧7/7/6 AC-28不适用于新首页。
 - **HP-08～10 视觉**：非全屏不显示画面内悬浮条；全屏透明紧凑控制层、底栏背景与内容一起收窄、海报密度与Ai剧角标按HP执行。底栏宽度/间距试验不得冒充最终视觉验收。
@@ -255,6 +263,25 @@ v2.6增量以 `D:/DEV/prism-play/docs/04-spec/SPEC-v2.6.3-REPAIR.md` R26-01～12
 - **R26-12 管线**：每日新完整 fact pack/目录/bundle/内部publicSearch/manifest 同代发布，blobs先校验上传，再切manifest指针，并配套Worker；禁止单独部署搜索Worker。内部投影描述为 `{schema:1,count,key,bytes,sha256}`，key=`library/search/{sha256}.json`，上限16 MiB；对象为 `{schema:1,revision,entries:[{item,aliases,pinyin,tags}]}`，仅公开同代事实，hash/bytes/count/频道总数一致且返回前复核workFacts，不新增公网路由或响应字段。现代workFacts代缺失/损坏投影一律503，不能回旧D1；仅真实无workFacts旧代可兼容。provider_s1目录/分集元数据不是可播证明，空lines不得发布；公开player解析候选仍须真实完整线路及健康证据。旧publisher拒覆盖不算日更完成。私密资源真实隔离、CI secrets/备份分别另批，不发布private objects，不自动Git或云上线。
 - **三轨直接冲突收敛**：底栏3键【精选/追剧/我的】，搜索Overlay，分享仅播放器内；公开目录60条/分片（搜索分页不变）；海报512 MiB、目录20 MiB。公开按作详情多线路直连为受控例外，私密双准入/逐资源校验不因此放宽。
 - **状态**：本地seed本轮统计20,163条、“末世”短剧5/AI3仅为seed样本；旧库约70部与另一来源多集、云搜索旧ID/两集、后台来源调查均待复核，不承诺来源数量。
+
+### 10.1.1 真实来源搜索与共享发现（2026-10-06 已批准执行，待实现/验收）
+
+ADR-006 已 Accepted。本节替代旧冻结、只查不存、仅零命中手动补充口径；不改变私密双准入、纯词法边界或运营后台既有目标。
+
+- **端侧**：提交完整查询先显示本机公开结果，默认自动联网补充，无论有无命中；输入法组合/逐键建议不直接触发真实来源搜索。结果纵向三列，全部去重结果可通过继续滚动/加载更多到达；显示准确已展示/已加载计数，不把首批数、单页数或未知总数写成全量总数。本机/联网补充及真实匹配标签清晰，可信题材标签仍按 HP-12，不显示上游品牌。
+- **云端**：真实搜索受配置白名单与逐跳 SSRF 校验限制的公开来源，保留独立限流/超时、日志脱敏和同词并发合并。查询键须含规范化查询、频道/标签过滤、public 边界及来源配置版本；并发合并的跨实例范围需实测。核验公开作品身份、可信映射、完整集表/季数与真实可用线路后，幂等共享持久保存 facts 和发现索引；不能同名即合并、空线路入可播库或等待起播才保存。
+- **两种生命周期**：关键词查询缓存仅复用新鲜核验结果；共享永久剧库不随关键词 TTL 到期删除。过期须重验、更新新集/新季与线路/撤片事实，持久存在不等于永久可播。真实完成且无结果才短暂负缓存（≤5分钟），超时/限流/来源或核验失败不是无结果，不写成功空集缓存；保留本机结果并提示补充失败/可重试。
+- **静态基底 + 共享发现增量**：不每搜重写全量 manifest。静态基底仍按同 generation 完整校验发布，已核验发现以独立持久增量追加/更新；搜索、详情、海报、分享复核所读基底/增量的版本和当前公开可见性。此为受控新事实层，不允许回旧公开 D1 掩盖损坏。客户端按稳定作品 ID/版本去重合并，数据与同步进度原子提交，重启/整包升级/同步失败不误删发现；删除只依据明确撤片/删除事实，整包不含该作品不是删除证明。
+- **契约兼容与隔离**：`GET /api/search` 保留 `items/page`、pageSize≤20与可选hasMore（缺省未知）；增可选discoveryPage（1～200）及响应discoveryPending/discoveryFailed/retryAfterSeconds。App按等待秒数自动同词同页poll直到pending结束，切词取消旧poll及迟到响应；成功partial保留已有结果，不伪装empty或确认无结果。public/private/exclude查询、缓存、索引、持久层和日志严格隔离；响应元数据/错误/日志零外部品牌，日志零原始URL/响应/上游域名；仅已批准的播放清单 mediaUrl 运行时例外不扩大。
+- **发现同步与Schema**：`GET /api/search/discoveries?after=&limit=`使用独立seq cursor（初始0），limit默认60/max100，返回changes[{seq,workId,operation:upsert|withdraw,updatedAt,card?}],cursor,hasMore；updatedAt为Unix秒，card为可选公开ContentItem。不可复用catalog revision。0005发现五表、0006 jobqueries/jobs两表，总业务37表（不含FTS影子表）；D1存metadata/任务，独立DISCOVERY_BUCKET无r2.dev，R2存事实/cursor。永久剧库metadata与播放事实24小时刷新分离，查询TTL不删metadata；当前基线disabled/private不能被发现覆盖，不回旧公开D1掩盖事实损坏。verify_contracts由主会话更新，本轮不改源码/执行迁移。
+- **授权与验收**：必要云端施工/CI/独立验收 APK 已获准；正式官网 APK 与 OTA 仅验收后发布。本次仅七文件文档局部修改，不执行源码/云/权限/Git。G0检查契约门禁；G1验证真实来源与身份/线路/限流/脱敏/并发，G2验证共享持久增量/新季/故障/撤片和客户端原子合并，G3验证三列全部可达/计数/标签/重启与整包升级，G4取得验收证据后正式发布。并行未完工导致门禁失败应如实报告，不修无关代码、不把历史通过当本轮通过。
+
+### 10.1.2 native manifest 与原生播放事实同步（2026-10-06，未完成 Stage A）
+
+- **限定字段**：`EpisodeLine` / `PlaybackLine` 保留必填 `providerId:string` / `mediaUrl:string`，新增 `native?: {kind:'s1-cenc',videoId:string}`，仅 provider_s1 可带。videoId 为1～32位 ASCII 数字字符串（`^[0-9]{1,32}$`），不转数字、保留前导零。native 严格只有 kind/videoId 两键，unknown-field reject，包括 key/cencKeyHex（即使 null）、任意额外键、错误 kind/类型/长度、显式 null/undefined；不能删除 native 后冒充普通明文线路。闭集只针对 native 对象，不把整份响应所有层级说成已严格拒绝未知字段。
+- **实际主链与密钥边界**：work manifest / 私有 R2 discovery fact 按作投影，不是 D1 episode 旧 playback。本作身份仍为 workId + episodeNumber；私有 R2 是访问权限属性，不放宽个人探索隔离。native mediaUrl 只是来源候选；原生桥的来源输入仅 vid（videoId，会话/进度控制参数另计），Android runtime resolver 获取实时地址/key，key 不返回 JS，不写 manifest、事实、响应、缓存或日志。Web/native cast 对 native 线路诚实拒绝，不以普通直连/投屏规则宣称 CENC 可播；无 native 的合法普通线路不受此特例扩大影响。
+- **事实与未完成项**：Android 本地 CENC DataSource + ExoPlayer 单集已获 Master 播放正常反馈；完整 HUD 集成代码已写/编译但未真机通过。云端授权绑定的播放解析 handle 尚未实现，Stage A 未完成；旧生产 fact 无 native，需刷新，本轮未部署。manifest 支持1～32位，而当前 Java bridge/resolver 仅1～20位，21～32位原生执行仍待接齐，不能宣称全范围可播。单集反馈不证明完整 HUD、后台、授权云链或发布完成。
+- **authority 与裁定范围**：AGENTS 仍为 authority，本节仅收窄 §4/§5/§7 历史“全部 ArtPlayer/旧 playback”和 AC-24 全线路投屏描述为普通无 native 线路；native 特例不重写历史 AC 编号、不扩张阶段授权。FLAG_SECURE 仍限 AC-02 个人探索频道/播放，退出解除，不扩大到其他内容。私密双准入、零落盘与 G0→G4 门禁保持。OpenAPI、ADR、index、专门 CENC 计划由主会话负责同步；本次五份文档同步不等于机读契约或任一整体门禁通过，未完成 todos 保留。
 
 ### 10.2 通用边界（未被本轮替代者继续有效）
 
@@ -332,9 +359,24 @@ npm test
 
 **剩余不由文档推断的输入**：Cloudflare 套餐/模型额度（此前只读资源列表为空，当前未重新核验），真实合法片单/流与权限范围、Android 真机与发布凭据，以及私密 HLS 逐请求携带当次会话的可行性。没有这些输入不阻止合成数据下的阶段 1 核心代码，但阻止实资源绑定、内容公开发布和最终验收。工程工作包应各自保留失败复试路径，不把后续阶段门禁提前标为已通过。
 
+## 12.3 运营后台增量目标契约（2026-10-05，planned，未签署验收）
+
+关联 `ADMIN-ANALYTICS-AND-COUPON-SPEC-AND-PLAN.md`；用户已授权继续后台实施。本节为 additive 目标，不改 App F/AC-01～30、HP 编号、既有端点/表/视图计数或历史门禁结论。计划顶部的“仅计划”是历史授权快照：已有部分本地数据/认证模块，不代表完整接线、浏览器验证或部署；后台 G0 未签署，G1～G4 不据此标绿。
+
+- **隔离与认证**：同源 `/admin` 页面及 `/api/admin/*` 由 fetch 前置、按段匹配的独立 guard 处理，在公共 CORS/OPTIONS 之前返回；不改 App `routeRequest/withCors`、JWT、私密准入、缓存或 Cookie 行为。口令以 PBKDF2-SHA256 哈希/盐/参数存 `ADMIN_PASSWORD_HASH`，参数须经 Workers CPU 验证；OTP/Cloudflare Access 未实现，不作为已具备保护。
+- **会话与防护**：至少256位随机 opaque 会话，D1 仅存 SHA-256 摘要与 CSRF 摘要；`__Host-prism_admin_session` 为 Secure/HttpOnly/SameSite=Strict/Path=/、无 Domain，12小时绝对到期，每次请求查 D1，登出删除，认证版本轮换全失效。缺配置/DB故障 fail closed。登录及写操作校验精确 Origin，登录 JSON ≤8 KiB，已登录 POST 还需会话绑定 CSRF；GET 无副作用。管理响应 no-store、不开放 CORS，安全头及限流按关联计划§2.3；不接受 App JWT。
+- **目标接口**：GET `/admin`（登录页/受保护后台）、`/api/admin/session`、`dashboard`、`coupons`、`coupons/{id}`、`operations`；POST `/api/admin/login`、`logout`、`coupons/generate`、`coupons/{id}/reveal|confirm-stock|dispatch|revoke`。GET 不登录、不登出、不揭示全码。详情 id 为 SHA-256(code) opaque 标识，列表返回 id/掩码，全码不进 URL、日志或 localStorage。独立 `AdminError` 见 API-SPEC，不扩 App 闭合错误码。
+- **资产一致性**：generate/reveal/confirm-stock/dispatch/revoke 必带 requestId；同请求同载荷重试幂等，复用不同载荷或状态竞争返回409；条件写、资产与成功审计同 D1 事务，零行更新整批回滚，不先查后无条件写。新码 Q/B/Y/S、12位 crypto 随机载荷并兼容既有兑换格式、ACTIVE+IDLE，1～100张/批、备注≤200字符；A只读历史。UNKNOWN 旧库存人工 confirm-stock 后才可 IDLE；仅 IDLE、未 REVOKED、device_count=0 可 dispatch，复制/reveal 不代表分发。REVOKED 仅停止继续核销，**不撤回已有设备会员权限**。
+- **统计与运维边界**：页面访问请求仅合法公开页 GET 200；下载仅校验 APK 存在后的302“下载触发”，不是完成/安装。可选同意 Cookie UV 为浏览器标识去重，不是用户人数，不能自动关联 APK/device_id；无标识单列，私密/后台/404/API不计。operations 只读授权设备、失败样本、android OTA；无成功样本不能算健康率，**一期无 OTA 写发布**。隐私、缓存、清理及转化交集口径按关联计划§2.1～2.4和静态页增量执行。
+
+后台独立待验项：会话到期/撤销/轮换、Origin/CSRF/无CORS/fail closed，真实D1并发/回滚/requestId冲突，全码脱敏与双标签409，Cookie同意/撤回及统计失败不阻断前台，浏览器黄金/异常路径及全量 App 无回归。静态契约同步不是这些行为通过或生产发布授权。
+
 ## 13. 变更记录
 | 日期 | 变更内容 | 原因 | 影响范围 |
 | :--- | :--- | :--- | :--- |
+| 2026-10-06（native事实同步） | 新增§10.1.2，EpisodeLine/PlaybackLine保留providerId/mediaUrl并增key-free native；provider_s1限定、1～32位数字字符串、native未知字段严格拒绝；实际work manifest/私有R2 discovery fact，原生vid/runtime key不返JS、Web/native cast拒绝 | 单集Master反馈与完整HUD编译/未真机通过分离；授权绑定handle未实现，Stage A未完成，旧生产fact待刷新、未部署；当前Java仅1～20位执行缺口保留 | 仅本次五份限定文档；AGENTS authority、AC-02 FLAG_SECURE及G0→G4不扩大；OpenAPI/ADR/index/专门CENC计划由主会话同步，原todos保留 |
+| 2026-10-06（真实搜索与共享发现） | ADR-006 Accepted；新增§10.1.1，本机先显/默认自动联网（有无命中均补充）、三列全可达/准确计数标签、真实来源核验后共享持久保存、查询新鲜缓存/并发合并/短负缓存、静态全量基底+独立发现增量、重启整包不误删、新集新季更新；GET /api/search 可选hasMore | 用户明确批准执行，替代冻结/只查不存/零命中手点；必要云/CI/独立验收APK获准，官网APK/OTA验收后；本次仅文档，不宣称部署验收 | ADR006、正本、云SPEC、PRD、UIUX、API-SPEC/OpenAPI局部同步：新增GET /api/search/discoveries独立seq，discoveryPage及pending/failed/retry轮询，0005/0006共37业务表，D1 metadata/R2事实cursor、无r2.dev独立bucket、基线disabled/private不可覆盖、metadata与24小时播放事实刷新分离；保留全部运营修改；verify_contracts由主会话更新，本次不宣称发布 |
+| 2026-10-05（后台增量目标） | 新增§12.3同源独立后台guard、哈希口令/12小时D1 opaque会话、Origin/CSRF/no-CORS/no-store、卡密requestId事务/幂等/409与opaque详情ID、AdminError、浏览器UV/下载触发和OTA只读边界 | 用户授权继续后台实施后同步目标契约；局部源码不等于完整实现，后台G0未签署、无部署 | SPEC、云/静态页SPEC、PRD、UIUX、API-SPEC；OpenAPI由主任务另行同步，不改App AC及既有计数 |
 | 2026-10-04（执行事实同步） | 完整读取已新增following-store/watch-time/settings-support及publicSearch generation/manifest/打包日更模块；补同库local_following DDL与created_at、独立收藏清理/无云sync、两项Preference标量/private零计；允许host注入旧已确认contact/reward资源并披露历史权益文字；内部投影同代blobs→pointer+Worker配套、现代缺投影503 | 用户已授权计划与完整修复；本次仅更新文档，不触碰业务/权限/AGENTS/Git写操作；纠正“全部未实现”和虚构云QR前置条件 | 正本、修复SPEC/计划、PRD/UIUX/API-SPEC/OpenAPI；局部实现不等于R26全完成，历史1040通过后新全量及浏览器/原生/生产仍待验 |
 | 2026-10-04（v2.6修复契约） | §10.1关联R26-01～12；纠正F-02/视图/AC-06、07左亮右音，AC-20系统栏恢复、AC-21浮层优先；同步公开60条分片/三Tab/512 MiB及同代搜索，定义倍速、重复分类刷新、频道热榜、持久追剧、二维码与真实观看提醒；创建修复计划及增量SPEC | 用户授权仅写文档；源码冷启搜索接线缺口与seed已只读核实，来源/云响应/真机/日更待证，不改2.6.2 tag、不自动Git/部署 | 正本、PRD、UIUX、API-SPEC、OpenAPI、三轨SPEC；R项全部待实现/待验收，旧30项不作本轮通过证明 |
 | 2026-09-30 | 创立 `D:\DEV\prism-play` 并冻结 v2.0.0 Spec | 品牌升维为《光影Play》，全面采用方案 B (Capacitor 7 + TS + ArtPlayer + Cloudflare) | 全局基线 |

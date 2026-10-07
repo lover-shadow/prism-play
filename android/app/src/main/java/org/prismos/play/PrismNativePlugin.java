@@ -279,17 +279,17 @@ public final class PrismNativePlugin extends Plugin {
         }
     }
 
-    /**
-     * The only channel from a notification button to the media element. The script comes solely from
-     * PlaybackService's own action constants, so no caller-supplied text reaches the evaluator.
-     */
     private void onNotificationCommand(String action) {
         WebView webView = getBridge() == null ? null : getBridge().getWebView();
-        if (webView == null) {
-            return;
-        }
+        if (webView == null) return;
+        String mapped = PlaybackService.ACTION_TOGGLE.equals(action) ? "toggle"
+                : PlaybackService.ACTION_NEXT.equals(action) ? "next"
+                : PlaybackService.ACTION_PREVIOUS.equals(action) ? "previous" : action;
+        if (!mapped.equals("toggle") && !mapped.equals("next") && !mapped.equals("previous")
+                && !mapped.equals(PlaybackService.COMMAND_FOCUS_LOST)
+                && !mapped.equals(PlaybackService.COMMAND_FOCUS_REGAINED)) return;
         final String script = "window.PrismNativeMedia && window.PrismNativeMedia.onNotificationAction('"
-                + action + "')";
+                + mapped + "')";
         webView.post(() -> webView.evaluateJavascript(script, null));
     }
 

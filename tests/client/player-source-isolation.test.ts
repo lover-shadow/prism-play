@@ -117,6 +117,12 @@ describe('player source instance isolation', () => {
     expect(h.player.state()).toMatchObject({ episodeId: 12, phase: 'ready', lineIndex: 0, positionSeconds: 0 });
   });
 
+  it('renders a cover URL as an attribute rather than injecting markup', () => {
+    const h = setup({ detail: detailOf({ coverUrl: 'https://media.example.test/cover" /><input data-injected="yes' }) });
+    expect(h.root.querySelector('[data-injected]')).toBeNull();
+    expect(h.root.querySelector('.prism-player__backdrop-img')).not.toBeNull();
+    h.player.destroy();
+  });
   it('destroys a pending instance after destroy without applying a source', async () => {
     const h = isolated(true); const loading = h.player.load(11); await flush();
     h.player.destroy(); h.pending[0].resolve(h.instances[0].live); await loading;

@@ -16,12 +16,20 @@ export interface EdgeSecrets {
    * replay a signed URL inside its window but cannot extend or retarget it (API-SPEC §六).
    */
   PROXY_SIGNING_SECRET: string;
+  ADMIN_PASSWORD_HASH?: string;
+  ADMIN_AUTH_VERSION?: string;
+  ANALYTICS_HASH_SECRET?: string;
+  ANALYTICS_ENABLED?: string;
 }
 
 export interface Env extends EdgeSecrets {
   DB: D1Database;
   KV: KVNamespace;
   APK_BUCKET?: R2Bucket;
+  DISCOVERY_BUCKET?: R2Bucket;
+  CF_VERSION_METADATA?: { id: string; timestamp: string; tag?: string };
+  SEARCH_DISCOVERY_ENABLED?: string;
+  SEARCH_DISCOVERY_CONFIG?: string;
   /**
    * Public base of the R2 bucket, used only to build the 302 target of `/dl/latest/android`. Unset
    * until the supervision agent attaches a domain to `prism-play-releases`; then no artifact and no

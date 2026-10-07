@@ -1,4 +1,5 @@
 import type { ContentItem, TitleDetail } from '../../../edge/src/types/api';
+import { isNativeDescriptor } from '../../../edge/src/library/title-asset';
 import { PUBLIC_METADATA_FIELDS, sanitizePublicMetadata } from '../../../edge/src/library/metadata-policy.mjs';
 
 /** Client-only identity: episodeNumber is local to a work, NEVER a D1 content_episodes id. */
@@ -32,7 +33,9 @@ export function adaptTitleDetail(value: unknown, workId: string): TitleDetail {
     if (manifest) {
       if (!Array.isArray(entry.lines) || entry.lines.some((line: unknown) => !record(line)
         || typeof line.providerId !== 'string' || line.providerId === ''
-        || typeof line.mediaUrl !== 'string' || !/^https?:\/\//i.test(line.mediaUrl))) throw new Error('Invalid episode lines');
+        || ('native' in line ? !isNativeDescriptor(line.native, line.providerId) ||
+          (line.mediaUrl !== undefined && (typeof line.mediaUrl !== 'string' || !/^https?:\/\//i.test(line.mediaUrl)))
+          : typeof line.mediaUrl !== 'string' || !/^https?:\/\//i.test(line.mediaUrl)))) throw new Error('Invalid episode lines');
     }
     return {
       episodeId: id, episodeNumber: entry.episodeNumber,

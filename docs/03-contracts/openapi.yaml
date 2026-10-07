@@ -30,9 +30,15 @@ tags:
   - name: 分享与下载
   - name: 系统
   - name: 搜索与同步
+  - name: 运营后台
 
 components:
   securitySchemes:
+    AdminSession:
+      type: apiKey
+      in: cookie
+      name: __Host-prism_admin_session
+      description: 后台独立的12小时服务端会话；不接受App JWT。写操作还须精确Origin及X-CSRF-Token，所有响应no-store且不反射CORS。
     BearerAuth:
       type: http
       scheme: bearer
@@ -50,6 +56,53 @@ components:
         该凭据**不落盘**：客户端仅驻内存，冷启动/完全退出即失效；缺失时所有私密数据一律不返回。
 
   schemas:
+    AdminError:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          enum: [VALIDATION_ERROR, UNAUTHENTICATED, FORBIDDEN, CONFLICT, RATE_LIMITED, UNAVAILABLE, NOT_FOUND, METHOD_NOT_ALLOWED]
+    AdminSessionResponse:
+      type: object
+      required: [csrf, expiresAt]
+      properties:
+        csrf:
+          type: string
+        expiresAt:
+          type: integer
+          description: Unix秒绝对到期时间
+    AdminGenerateRequest:
+      allOf:
+        - $ref: '#/components/schemas/AdminCouponMutation'
+        - type: object
+          required: [requestId, tier, count]
+    AdminRevokeRequest:
+      allOf:
+        - $ref: '#/components/schemas/AdminCouponMutation'
+        - type: object
+          required: [requestId, reason]
+    AdminCouponMutation:
+      type: object
+      required: [requestId]
+      properties:
+        requestId:
+          type: string
+          minLength: 8
+          maxLength: 100
+        note:
+          type: string
+          maxLength: 200
+        reason:
+          type: string
+          maxLength: 200
+        tier:
+          type: string
+          enum: [Q, B, Y, S]
+        count:
+          type: integer
+          minimum: 1
+          maximum: 100
     ChannelItem:
       type: object
       required: [id, name, order, categories]
@@ -133,6 +186,19 @@ components:
         episodeCount:
           type: integer
           example: 68
+        releaseStatus:
+          type: string
+          enum: [finished, ongoing]
+          description: 仅在上游有明确完结或连载证据时出现；缺省未知，不按集数猜测
+        lastSyncedEpisode:
+          type: integer
+          minimum: 0
+          maximum: 5000
+          description: 最近完整成功同步的集数，必须与对应事实清单长度一致
+        lastSyncedAt:
+          type: integer
+          minimum: 0
+          description: 最近完整成功同步时间（Unix秒），与lastSyncedEpisode成对出现
         isPrivate:
           type: boolean
           example: false
@@ -195,14 +261,32 @@ components:
     EpisodeLine:
       type: object
       description: 一条可切换播放线路（SPEC-CLOUD-REFACTOR v2 §3.2）。真实上游播放地址只存在于剧集清单，不进目录分片；providerId 为抽象代号，严禁品牌名（AGENTS.md §二.1）。
-      required: [providerId, mediaUrl]
+      required: [providerId]
+      anyOf:
+        - required: [mediaUrl]
+        - required: [native]
+          properties:
+            providerId:
+              enum: [provider_s1]
       properties:
         providerId:
           type: string
           example: provider_m1
         mediaUrl:
           type: string
-          description: 上游直连播放地址（实测 CORS `*` 开放，App 与分享页直连，不经云端转发）
+          description: 普通线路的上游直连地址；存在 native 描述子时该地址不得直接交给 Web 播放器或投屏设备
+        native:
+          type: object
+          additionalProperties: false
+          description: 仅 provider_s1 可携带的非密钥原生解析身份。密钥在原生运行时获取，不进入清单或缓存；Web 不支持该线路。
+          required: [kind, videoId]
+          properties:
+            kind:
+              type: string
+              enum: [s1-cenc]
+            videoId:
+              type: string
+              pattern: '^[0-9]{1,32}$'
 
     TitleEpisodeEntry:
       type: object
@@ -639,6 +723,15 @@ components:
       type: object
       required: [android]
       properties:
+        service:
+          type: object
+          description: Cloudflare 实际服务部署标识，与官网 APK 公告版本不同
+          required: [buildId, deployedAt]
+          properties:
+            buildId:
+              type: string
+            deployedAt:
+              type: string
         android:
           type: object
           required: [versionCode, versionName, downloadUrl]
@@ -768,7 +861,21 @@ paths:
     get:
       tags: [搜索与同步]
       summary: 公开目录关键词/拼音/模糊词法检索
-      description: 本期专注词法搜索（精确剧名、拼音缩写、错字纠偏与题材同类关联）。现代workFacts代候选来自内部同代publicSearch并逐项复核事实，缺失或损坏投影/事实返回503，不回旧D1；D1全文索引仅用于真实无workFacts旧代兼容。混合排序每请求先精确/别名，再拼音/首字母，再模糊纠偏，按内容ID去重；page为尽力分页，客户端跨页去重。无新公网投影路由。
+      description: >-
+        本期纯词法搜索；2026-10-06已批准真实来源搜索，ADR-006 Accepted，未部署/验收。
+        App完整查询先显本机结果、默认自动联网补充，无论有无命中；不逐键穿透。
+        云端真实搜索受控公开来源，保留白名单/逐跳SSRF/限流/超时，响应元数据与错误及日志零品牌，日志无原始URL/响应/上游域名；private/exclude不入公开查询/缓存/索引/日志/持久层。
+        查询缓存/同词并发合并包含规范化查询、频道/标签、public边界及来源配置版本，分页不串，跨实例范围待验；只复用新鲜核验结果，过期重验。
+        核验公开身份、可信作品映射、完整集数/季数与可用线路后共享持久保存facts/发现索引，不等起播；永久剧库与关键词缓存不同，TTL到期不删作品，新集新季/线路失效/撤片持续更新。
+        静态全量基底同代publicSearch/workFacts复核，独立共享发现增量复核版本与当前公开flags，不每搜改整个manifest；缺失或损坏事实503，不回旧公开D1掩盖损坏，D1全文仅真实旧代兼容。
+        成功确认无结果才短负缓存不超过5分钟，超时/限流/来源或核验失败不写成功空集；保留本机结果并提示补充失败；pending可返回200等待态，成功partial保留结果，只有已结束失败且无可用结果时返回503，不用200空集冒充确认无结果。
+        每请求精确/别名优先，再拼音/首字母，再模糊纠偏，稳定作品ID去重；page尽力分页，客户端跨页去重。
+        客户端纵向三列全可达/加载更多，准确已展示/已加载计数与真实标签，未知总数不伪造；hasMore可选且缺省不是false。
+        客户端基底与发现按稳定ID/版本原子合并数据和同步进度，重启/整包升级不误删，仅明确撤片/删除事实才移除。
+        发现同步使用GET /api/search/discoveries的独立seq游标，不复用catalog revision；D1仅存发现metadata/任务，R2存事实与cursor，使用无r2.dev的独立DISCOVERY_BUCKET。
+        当前基线disabled/private裁决不可被发现覆盖；永久剧库metadata与24小时刷新播放事实分离，持久存在不代表永久可播。
+        pending时App按retryAfterSeconds自动同词同页轮询直到pending结束，切词取消；成功partial保留已有结果，不能伪装成功empty或确认无结果。
+        必要云/CI/独立验收APK获准，官网APK/OTA验收后；本文档同步不证明部署或发布。
       parameters:
         - name: q
           in: query
@@ -798,9 +905,16 @@ paths:
             minimum: 1
             maximum: 20
             default: 20
+        - name: discoveryPage
+          in: query
+          description: 可选真实来源发现页；轮询须保持同词同页，不与目录分片页或发现seq混用。
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
       responses:
         '200':
-          description: 检索结果列表
+          description: 检索结果列表；允许partial/pending，不能据此宣称确认无结果
           content:
             application/json:
               schema:
@@ -813,12 +927,129 @@ paths:
                       $ref: '#/components/schemas/SearchResult'
                   page:
                     type: integer
-        '503':
-          description: 当前公开generation的搜索投影或事实缺失/损坏；不得回旧D1
+                  hasMore:
+                    type: boolean
+                    description: 可选；true表示当前查询及过滤下仍有下一页，false表示已确认无下一页；缺省表示未知，不是false，客户端继续旧分页兼容。不是总数或联网核验成功的证明。
+                  discoveryPending:
+                    type: boolean
+                    description: 发现仍在处理；App自动同词同页轮询直到false，切词取消旧轮询及迟到响应。
+                  discoveryFailed:
+                    type: boolean
+                    description: 发现失败标记；保留已有partial结果并提示失败/重试，不把失败缓存为成功empty。
+                  retryAfterSeconds:
+                    type: integer
+                    description: 下一次同词同页轮询的等待秒数；不是查询缓存或播放事实TTL。
+        '429':
+          description: 公开搜索独立限流，使用既有RATE_LIMITED错误码，不作为无结果或负缓存。
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: 当前公开搜索投影/事实缺失或损坏，或真实来源搜索/核验失败且无可用结果；不得回旧D1或以成功空集冒充无结果。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/search/discoveries:
+    get:
+      tags: [搜索与同步]
+      summary: 共享公开发现增量（独立seq游标）
+      description: >-
+        after为独立seq cursor，不是catalog revision；返回公开upsert/withdraw，不返回private/exclude元数据或私密墓碑。
+        当前基线disabled/private裁决不得被发现覆盖；card为可选公开卡片，不含播放地址或内部R2事实句柄。
+        D1存metadata，独立DISCOVERY_BUCKET存事实/cursor且无r2.dev；数据与客户端cursor同事务幂等提交，整包不含作品不是删除证明。
+      parameters:
+        - name: after
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 60
+      responses:
+        '200':
+          description: 按独立seq同步公开发现变更
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [changes, cursor, hasMore]
+                properties:
+                  changes:
+                    type: array
+                    items:
+                      type: object
+                      required: [seq, workId, operation, updatedAt]
+                      properties:
+                        seq:
+                          type: integer
+                        workId:
+                          type: string
+                        operation:
+                          type: string
+                          enum: [upsert, withdraw]
+                        updatedAt:
+                          type: integer
+                          description: Unix秒
+                        card:
+                          $ref: '#/components/schemas/ContentItem'
+                  cursor:
+                    type: integer
+                    description: 本页同步进度；下次作为after，不与catalog revision混用。
+                  hasMore:
+                    type: boolean
+  /api/titles/{titleId}/episodes/{episodeNumber}/native-playback:
+    get:
+      tags: [内容]
+      summary: 按权威清单复核原生播放线路
+      description: 复用作品详情准入，每次读取服务端权威作品清单；仅接受line参数，不接受videoId或额外参数。只返回非密钥身份，响应no-store。本接口不是签名凭据；原生强制调用尚待接入。
+      parameters:
+        - name: titleId
+          in: path
+          required: true
+          schema: {type: string}
+        - name: episodeNumber
+          in: path
+          required: true
+          schema: {type: integer, minimum: 1, maximum: 9999999}
+        - name: line
+          in: query
+          required: true
+          schema: {type: integer, minimum: 0, maximum: 9999}
+      responses:
+        '200':
+          description: 已准入权威线路的非密钥身份
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [workId, episodeNumber, lineIndex, native, checkedAt]
+                properties:
+                  workId: {type: string}
+                  episodeNumber: {type: integer}
+                  lineIndex: {type: integer}
+                  checkedAt: {type: integer}
+                  native:
+                    type: object
+                    additionalProperties: false
+                    required: [kind, videoId]
+                    properties:
+                      kind: {type: string, enum: [s1-cenc]}
+                      videoId: {type: string, pattern: '^[0-9]{1,32}$'}
+        '404':
+          description: 未知、未准入、线路不匹配或参数非法，同构错误响应
+        '503':
+          description: 权威清单配置或事实不可用
   /api/titles/{titleId}/related:
     get:
       tags: [搜索与同步]
@@ -1445,3 +1676,512 @@ paths:
           description: 公开内容的代理签名失效或请求目标不在白名单（不得泄露上游位置）
         "404":
           description: 目标不存在、已撤片，或私密内容未获当次双重授权；响应体不区分原因
+
+  /api/admin/login:
+    post:
+      tags:
+      - 运营后台
+      summary: login
+      description: 2026-10-05 后台增量目标契约，局部模块已实现，未部署。独立会话、CSRF、精确Origin、no-store，无跨域凭据。
+      security: []
+      responses:
+        '200':
+          description: 成功；下载指标仅触发，UV仅浏览器去重，停止核销不撤回已有授权
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminSessionResponse'
+        '400':
+          description: 参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminError'
+        '401':
+          description: 无有效后台会话
+        '403':
+          description: Origin或CSRF拒绝
+        '409':
+          description: 资产竞争或幂等载荷冲突
+        '429':
+          description: 限流
+        '503':
+          description: 配置或数据库不可用
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - password
+              properties:
+                password:
+                  type: string
+                  maxLength: 1024
+  /api/admin/session:
+    get:
+      tags:
+      - 运营后台
+      summary: session
+      description: 2026-10-05 后台增量目标契约，局部模块已实现，未部署。独立会话、CSRF、精确Origin、no-store，无跨域凭据。
+      security:
+      - AdminSession: []
+      responses:
+        '200':
+          description: 成功；下载指标仅触发，UV仅浏览器去重，停止核销不撤回已有授权
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminSessionResponse'
+        '400':
+          description: 参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminError'
+        '401':
+          description: 无有效后台会话
+        '403':
+          description: Origin或CSRF拒绝
+        '409':
+          description: 资产竞争或幂等载荷冲突
+        '429':
+          description: 限流
+        '503':
+          description: 配置或数据库不可用
+  /api/admin/logout:
+    post:
+      tags:
+      - 运营后台
+      summary: logout
+      description: 2026-10-05 后台增量目标契约，局部模块已实现，未部署。独立会话、CSRF、精确Origin、no-store，无跨域凭据。
+      security:
+      - AdminSession: []
+      responses:
+        '200':
+          description: 成功；下载指标仅触发，UV仅浏览器去重，停止核销不撤回已有授权
+        '400':
+          description: 参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminError'
+        '401':
+          description: 无有效后台会话
+        '403':
+          description: Origin或CSRF拒绝
+        '409':
+          description: 资产竞争或幂等载荷冲突
+        '429':
+          description: 限流
+        '503':
+          description: 配置或数据库不可用
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      parameters:
+      - in: header
+        name: X-CSRF-Token
+        required: true
+        schema:
+          type: string
+  /api/admin/dashboard:
+    get:
+      parameters:
+        - in: query
+          name: days
+          schema: {type: integer, enum: [7, 30], default: 7}
+      tags:
+      - 运营后台
+      summary: dashboard
+      description: 2026-10-05 后台增量目标契约，局部模块已实现，未部署。独立会话、CSRF、精确Origin、no-store，无跨域凭据。
+      security:
+      - AdminSession: []
+      responses:
+        '200':
+          description: 成功；下载指标仅触发，UV仅浏览器去重，停止核销不撤回已有授权
+        '400':
+          description: 参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminError'
+        '401':
+          description: 无有效后台会话
+        '403':
+          description: Origin或CSRF拒绝
+        '409':
+          description: 资产竞争或幂等载荷冲突
+        '429':
+          description: 限流
+        '503':
+          description: 配置或数据库不可用
+  /api/admin/coupons:
+    get:
+      parameters:
+        - in: query
+          name: page
+          schema: {type: integer, minimum: 1, maximum: 999999, default: 1}
+        - in: query
+          name: limit
+          schema: {type: integer, enum: [20, 50], default: 20}
+        - in: query
+          name: tier
+          schema: {type: string, enum: [Q, A, B, Y, S]}
+        - in: query
+          name: status
+          schema: {type: string, enum: [UNUSED, ACTIVE, REVOKED]}
+        - in: query
+          name: dispatch
+          schema: {type: string, enum: [UNKNOWN, IDLE, DISPATCHED]}
+      tags:
+      - 运营后台
+      summary: coupons
+      description: 2026-10-05 后台增量目标契约，局部模块已实现，未部署。独立会话、CSRF、精确Origin、no-store，无跨域凭据。
+      security:
+      - AdminSession: []
+      responses:
+        '200':
+          description: 成功；下载指标仅触发，UV仅浏览器去重，停止核销不撤回已有授权
+        '400':
+          description: 参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminError'
+        '401':
+          description: 无有效后台会话
+        '403':
+          description: Origin或CSRF拒绝
+        '409':
+          description: 资产竞争或幂等载荷冲突
+        '429':
+          description: 限流
+        '503':
+          description: 配置或数据库不可用
+  /api/admin/coupons/generate:
+    post:
+      tags:
+      - 运营后台
+      summary: coupons/generate
+      description: 2026-10-05 后台增量目标契约，局部模块已实现，未部署。独立会话、CSRF、精确Origin、no-store，无跨域凭据。
+      security:
+      - AdminSession: []
+      responses:
+        '200':
+          description: 成功；下载指标仅触发，UV仅浏览器去重，停止核销不撤回已有授权
+        '400':
+          description: 参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminError'
+        '401':
+          description: 无有效后台会话
+        '403':
+          description: Origin或CSRF拒绝
+        '409':
+          description: 资产竞争或幂等载荷冲突
+        '429':
+          description: 限流
+        '503':
+          description: 配置或数据库不可用
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminGenerateRequest'
+      parameters:
+      - in: header
+        name: X-CSRF-Token
+        required: true
+        schema:
+          type: string
+  /api/admin/coupons/{id}:
+    get:
+      tags:
+      - 运营后台
+      summary: coupons/{id}
+      description: 2026-10-05 后台增量目标契约，局部模块已实现，未部署。独立会话、CSRF、精确Origin、no-store，无跨域凭据。
+      security:
+      - AdminSession: []
+      responses:
+        '200':
+          description: 成功；下载指标仅触发，UV仅浏览器去重，停止核销不撤回已有授权
+        '400':
+          description: 参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminError'
+        '401':
+          description: 无有效后台会话
+        '403':
+          description: Origin或CSRF拒绝
+        '409':
+          description: 资产竞争或幂等载荷冲突
+        '429':
+          description: 限流
+        '503':
+          description: 配置或数据库不可用
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        description: 卡密摘要，不是明文激活码
+  /api/admin/coupons/{id}/reveal:
+    post:
+      tags:
+      - 运营后台
+      summary: coupons/{id}/reveal
+      description: 2026-10-05 后台增量目标契约，局部模块已实现，未部署。独立会话、CSRF、精确Origin、no-store，无跨域凭据。
+      security:
+      - AdminSession: []
+      responses:
+        '200':
+          description: 成功；下载指标仅触发，UV仅浏览器去重，停止核销不撤回已有授权
+        '400':
+          description: 参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminError'
+        '401':
+          description: 无有效后台会话
+        '403':
+          description: Origin或CSRF拒绝
+        '409':
+          description: 资产竞争或幂等载荷冲突
+        '429':
+          description: 限流
+        '503':
+          description: 配置或数据库不可用
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        description: 卡密摘要，不是明文激活码
+      - in: header
+        name: X-CSRF-Token
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminCouponMutation'
+  /api/admin/coupons/{id}/confirm-stock:
+    post:
+      tags:
+      - 运营后台
+      summary: coupons/{id}/confirm-stock
+      description: 2026-10-05 后台增量目标契约，局部模块已实现，未部署。独立会话、CSRF、精确Origin、no-store，无跨域凭据。
+      security:
+      - AdminSession: []
+      responses:
+        '200':
+          description: 成功；下载指标仅触发，UV仅浏览器去重，停止核销不撤回已有授权
+        '400':
+          description: 参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminError'
+        '401':
+          description: 无有效后台会话
+        '403':
+          description: Origin或CSRF拒绝
+        '409':
+          description: 资产竞争或幂等载荷冲突
+        '429':
+          description: 限流
+        '503':
+          description: 配置或数据库不可用
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        description: 卡密摘要，不是明文激活码
+      - in: header
+        name: X-CSRF-Token
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminCouponMutation'
+  /api/admin/coupons/{id}/dispatch:
+    post:
+      tags:
+      - 运营后台
+      summary: coupons/{id}/dispatch
+      description: 2026-10-05 后台增量目标契约，局部模块已实现，未部署。独立会话、CSRF、精确Origin、no-store，无跨域凭据。
+      security:
+      - AdminSession: []
+      responses:
+        '200':
+          description: 成功；下载指标仅触发，UV仅浏览器去重，停止核销不撤回已有授权
+        '400':
+          description: 参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminError'
+        '401':
+          description: 无有效后台会话
+        '403':
+          description: Origin或CSRF拒绝
+        '409':
+          description: 资产竞争或幂等载荷冲突
+        '429':
+          description: 限流
+        '503':
+          description: 配置或数据库不可用
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        description: 卡密摘要，不是明文激活码
+      - in: header
+        name: X-CSRF-Token
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminCouponMutation'
+  /api/admin/coupons/{id}/revoke:
+    post:
+      tags:
+      - 运营后台
+      summary: coupons/{id}/revoke
+      description: 2026-10-05 后台增量目标契约，局部模块已实现，未部署。独立会话、CSRF、精确Origin、no-store，无跨域凭据。
+      security:
+      - AdminSession: []
+      responses:
+        '200':
+          description: 成功；下载指标仅触发，UV仅浏览器去重，停止核销不撤回已有授权
+        '400':
+          description: 参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminError'
+        '401':
+          description: 无有效后台会话
+        '403':
+          description: Origin或CSRF拒绝
+        '409':
+          description: 资产竞争或幂等载荷冲突
+        '429':
+          description: 限流
+        '503':
+          description: 配置或数据库不可用
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        description: 卡密摘要，不是明文激活码
+      - in: header
+        name: X-CSRF-Token
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminRevokeRequest'
+  /api/admin/operations:
+    get:
+      tags:
+      - 运营后台
+      summary: operations
+      description: 2026-10-05 后台增量目标契约，局部模块已实现，未部署。独立会话、CSRF、精确Origin、no-store，无跨域凭据。
+      security:
+      - AdminSession: []
+      responses:
+        '200':
+          description: 成功；下载指标仅触发，UV仅浏览器去重，停止核销不撤回已有授权
+        '400':
+          description: 参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminError'
+        '401':
+          description: 无有效后台会话
+        '403':
+          description: Origin或CSRF拒绝
+        '409':
+          description: 资产竞争或幂等载荷冲突
+        '429':
+          description: 限流
+        '503':
+          description: 配置或数据库不可用
+
+  /privacy:
+    get:
+      tags: [分享与下载]
+      summary: 隐私与统计选择页面
+      security: []
+      responses:
+        '200':
+          description: 不设置访客标识的no-store HTML
+  /api/analytics/consent:
+    post:
+      tags: [分享与下载]
+      summary: 明确同意或撤回浏览器去重
+      security: []
+      description: 精确HTTPS Origin；GPC/DNT拒绝标识；撤回删除标识与去重记录，保留匿名聚合。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              additionalProperties: false
+              properties:
+                action: {type: string, enum: [agree, revoke]}
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: {type: string, enum: [agree, revoke]}
+      responses:
+        '200': {description: 已处理选择}
+        '400': {description: 参数错误}
+        '403': {description: 隐私或Origin拒绝}
+        '413': {description: 超过8KiB}
+        '503': {description: 未完成操作，不能宣称删除成功}

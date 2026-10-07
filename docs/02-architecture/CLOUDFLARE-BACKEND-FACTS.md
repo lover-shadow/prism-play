@@ -23,6 +23,7 @@
 │    • 服务名称：prism-play-edge                                                   │
 │    • 兼容性日期：2026-09-01                                                      │
 │    • 绑定路由：play.prismos.org/*                                                │
+│    • 核心路由划分：App API 走 /api/*，静态页面走 / 与 /dl 与 /s/*，管理中枢走 /admin 与 /api/admin/* │
 │    • 运行节点：亚太 APAC（主要调度大阪 KIX / 香港 HKG / 首尔 ICN 机房）           │
 │    • 性能实测：冷启 ~4ms，全球边缘延迟平均 ≤15ms                                  │
 ├──────────────────────────────────────────────────────────────────────────────────┤
@@ -30,9 +31,9 @@
 │    • 数据库名称：prism-play-db                                                   │
 │    • Database UUID：e54f7f0b-1be7-4d40-89bd-b91c8faf576b                         │
 │    • 存储格式：SQLite 分布式复制实例（亚太 APAC 主节点）                          │
-│    • 表结构规模：22 张真实业务表 + 5 张 FTS5 全文索引影子表（0001+0002 迁移）    │
-│    • 当前数据规模：8,874 部全量作品（短剧 4,066/电影 2,234/动漫 1,350/纪录 1,224） │
-│    • 核心扩展：客观 HotScore、AI剧标定、多端断点同步与偏好画像                   │
+│    • 表结构规模：30 张真实业务表 + 5 张 FTS5 全文索引影子表（0001~0004 增量迁移全覆盖） │
+│    • 核心领域：内容与频道账本、会员与设备绑定、多端同步画像、线路健康遥测、运营后台与分析 │
+│    • 当前数据规模：20,163 部全量聚合片单分片承载于 R2，D1 纯作为轻量核心账本与分析枢纽│
 ├──────────────────────────────────────────────────────────────────────────────────┤
 │ 4. 键值极速缓存 (KV)                                                             │
 │    • 空间名称：prism-play-kv                                                     │
@@ -58,6 +59,10 @@
 | **客户端配对公钥** | 端侧内置 | `x: "QdLReD6QICQGapTQbPaSyOjwwsOmEdoddIy4Nb8Ay84"` | 内置于 `src/core/identity/offline-grant.ts`。客户端仅凭公钥可离线 14 天验签档位，无法伪造授权。 |
 | **`PRIVATE_SESSION_SECRET`** | 云端密文 | `544553542d414243442d454647482d30313233` | 个人探索会话 HMAC 密钥。用户在免责弹窗点击同意后签发短时会话凭据 `X-Private-Session`。**内存级，冷启动即焚**。 |
 | **`PROXY_SIGNING_SECRET`** | 云端密文 | `30313233343536373839616263646566` | 受控媒体防盗链签名密钥。通过 AES-256-GCM 封装流媒体切片句柄，带 `exp` 与 `sig` 防重放与防外发。 |
+| **`ADMIN_PASSWORD_HASH`** | 云端密文 | `pbkdf2-sha256:100000:<salt>:<hash>` | **管理员口令哈希**。10 万次 PBKDF2-SHA256 迭代计算，严防弱口令与彩虹表攻击；明文口令保存在项目根目录 `admin-access.local`。 |
+| **`ADMIN_AUTH_VERSION`** | 云端密文 | `1`（正整数数值字符串） | **管理员会话全局版本门禁**。递增此值可强制全网已颁发的所有存量 `__Host-prism_admin_session` 会话瞬间失效。 |
+| **`ANALYTICS_HASH_SECRET`** | 云端密文 | 256 位随机十六进制串 | **访客分析标识单向签名密钥**。服务端通过 HMAC-SHA256 生成 `visitor_hash`，数据库绝不保存原始 `p_vid` Cookie 明文。 |
+| **`ANALYTICS_ENABLED`** | 纯文本变量 | `"true"` / `"false"` | **边缘统计写入全局熔断开关**。配置为 `"false"` 时，系统跳过所有异步聚合写与 Cookie 植入，作为防写放大紧急安全网。 |
 
 ---
 
@@ -76,7 +81,16 @@ D1 物理建表定义位于 `edge/migrations/0001_initial_schema.sql`，全量�
 - **`devices` (激活设备表)**：终端设备 ID、激活档位、最后活跃时间；
 - **`cloud_watch_history` (多端观看历史表)**：以 `(coupon_code, content_id)` 为复合主键，记录会员在手机/TV/PC间接力续播的最新分集与时间戳；
 - **`cloud_user_profile` (多端偏好画像表)**：以 `coupon_code` 为主键，记录多端共享的 21 题材偏好得分向量 JSON 与总播放次数；
-- **`public_search_fts` (FTS5 虚拟全文检索表)**：中文 CJK 原生倒排分词索引表，纯 SQLite 词法计算，无需外部 AI 大模型。
+- **`public_search_fts` (FTS5 虚拟全文检索表)**：中文 CJK 原生倒排分词索引表，纯 SQLite 词法计算，无需外部 AI 大模型；
+- **`line_health_signals` (线路健康遥测表 · 0003 增量)**：客户端播放失败（timeout / http_error / decode_error）自动上报账本，服务端只写不读；
+- **`analytics_daily` (每日访问与转化聚合表 · 0004 增量)**：以 `(day, surface, channel, terminal)` 为复合主键，原子累加页面访问与下载触发；
+- **`analytics_visitors` (匿名访客档案表 · 0004 增量)**：仅在用户同意后以 `visitor_hash`（HMAC 摘要）为主键记录首访日与首访渠道；
+- **`analytics_visitor_days` (按日去重事实表 · 0004 增量)**：以 `(day, visitor_hash, surface)` 记录按日页面浏览与下载触发布尔事实，支撑跨日去重 UV 与转化率交集；
+- **`admin_sessions` (后台管理会话表 · 0004 增量)**：以 `token_hash` 为主键，记录 12 小时到期的管理员会话与绑定的 CSRF 摘要；
+- **`admin_login_limits` (管理员登录防爆破限流表 · 0004 增量)**：按来源 IP 哈希记录 15 分钟窗口内的失败尝试与锁定到期时间；
+- **`coupon_batches` (卡密批次生产台账表 · 0004 增量)**：以唯一 `request_id` 记录每批卡密生成指令，保证网络重试绝对幂等；
+- **`admin_audit_logs` (运营敏感操作审计日志表 · 0004 增量)**：记录卡密生成、全码查看、确认库存、确认分发及停止核销的不可篡改流水；
+- **`card_coupons` 扩展字段 (`0004` 增量)**：扩展 `batch_id`、`dispatch_status` (`UNKNOWN`/`IDLE`/`DISPATCHED`)、`dispatch_note`、`dispatched_at`、`dispatch_request_id`，实现分发状态与核销状态解耦。
 
 ### 2. 数据库级三大刚性安全约束 (CHECK 铁律)
 1. **私密内容物理封死外发 (R-1 彻底闭环)**：
@@ -91,12 +105,14 @@ D1 物理建表定义位于 `edge/migrations/0001_initial_schema.sql`，全量�
    WHERE code = ? AND status IN ('UNUSED','ACTIVE') AND device_count < max_devices;
    ```
    *作用：D1 无交互式事务，通过 `device_count < 10` 条件更新返回的受影响行数决定第 11 台设备熔断拒绝，杜绝并发超兑。*
-3. **防 SSRF 来源白名单校验**：
-   受控代理在发起中继请求前，必须执行：
+3. **卡密手动分发与认领原子对账 (NOT NULL Trip-Wire 约束)**：
    ```sql
-   SELECT DISTINCT upstream_url FROM source_providers WHERE healthy = 1;
+   -- 分发更新与审计插入置于同一 D1 batch 内，未命中则触发 NOT NULL 回滚
+   UPDATE card_coupons
+   SET dispatch_status = 'DISPATCHED', dispatch_note = ?, dispatched_at = ?, dispatch_request_id = ?, updated_at = ?
+   WHERE code = ? AND dispatch_status = 'IDLE' AND device_count = 0 AND status <> 'REVOKED';
    ```
-   *作用：未在 `source_providers` 中登记备案的外部域名（如恶意内网 IP 或未经授权图床）一律直接 403 阻断。*
+   *作用：确保只有空闲、未绑定且未作废的卡密才能被标记分发，多人争抢同一卡密时仅一人成功，败者整批回滚且不残留虚假成功审计。*
 
 ---
 
@@ -106,10 +122,10 @@ D1 物理建表定义位于 `edge/migrations/0001_initial_schema.sql`，全量�
 - **计时口径**：**Cloudflare 严格以 UTC（世界协调时）计时**；
   - `04:00 UTC` = **北京时间 12:00（中午）**；
   - `16:00 UTC` = **北京时间 00:00（午夜次日）**；
-- **每日 2 次巡检执行逻辑 (`edge/src/ingest/cron.ts`)**：
-  1. 遍历 `source_providers` 中的可用播放源，按栏目分批发起轻量 HEAD / GET 测速探针；
-  2. 记录 `latency_ms` 延迟，对超时或返回 4xx/5xx 的故障源置 `healthy = 0` 软下线，实现多源热备自动容灾；
-  3. 执行 `pruneExpiredRevocations`：自动清理 `private_session_revocations` 撤销表中过期的会话墓碑，保持轻量高效；
+- **每日 2 次巡检执行逻辑 (`edge/src/index.ts` -> `scheduled`)**：
+  1. 遍历 `source_providers` 中的可用播放源，按栏目分批发起轻量 HEAD / GET 测速探针并更新延迟；
+  2. 执行 `pruneExpiredRevocations`：自动清理 `private_session_revocations` 撤销表中过期的会话墓碑；
+  3. 执行 `cleanupAnalytics`：自动执行按主键索引的限量数据留存清理（90天去重明细、180天访客、365天统计与审计、过期管理员会话、24小时限流窗口），单表单次硬顶 1,000 行，零写风暴；
   4. **绝不抓取或存储任何视频文件实体**，仅流转地址与必要元数据。
 
 ---
@@ -137,6 +153,21 @@ D1 物理建表定义位于 `edge/migrations/0001_initial_schema.sql`，全量�
   - 为子分片（`.ts` / `.m4s`）动态签署相同生命周期的签名子 URL；
   - 完美支持 HTTP Range (206 Partial Content) 断点拖拽快进快退，无内存堆积。
 
+### 3. 管理后台与全链路分析路由隔离模型
+为了在单一 Worker 内交付管理控制台，同时 100% 避免破坏 App 前台的 CORS 与凭据管道，系统采用前置硬路由拦截模型：
+- **前置拦截点 (`edge/src/index.ts` -> `default.fetch`)**：
+  在进入公共 `routeRequest` 与 `withCors` 之前，优先判断路径是否以 `/admin`、`/api/admin` 开头，直接分发至 `handleAdminRequest`；
+- **同源严格防护**：
+  管理请求绝不套用 `withCors`，绝不向外部跨域反射任何 `Access-Control-Allow-*` 响应头，绝不接收任何 App Bearer JWT；
+- **安全头体系**：
+  所有管理响应统一注入：
+  ```http
+  Cache-Control: no-store
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'
+  ```
+
 ---
 
 ## 六、 常用运维命令与数据操作手册 (Runbook)
@@ -160,18 +191,36 @@ npx wrangler tail
 
 ### 2. D1 数据库在线管理与查询 (Remote D1)
 ```bash
-# 查询当前数据库表列表
+# 查询当前数据库表列表 (30 张业务表)
 npx wrangler d1 execute prism-play-db --remote --command "SELECT name FROM sqlite_master WHERE type='table';"
 
 # 查询全部频道及当前片单统计
 npx wrangler d1 execute prism-play-db --remote --command "SELECT channel_id, count(*) as count FROM content_items GROUP BY channel_id;"
 
-# 查看最近生成的预制卡密状态
-npx wrangler d1 execute prism-play-db --remote --command "SELECT code, tier, tier_name, status, device_count, max_devices FROM card_coupons LIMIT 10;"
+# 查看卡密库存分发状态统计
+npx wrangler d1 execute prism-play-db --remote --command "SELECT tier, status, dispatch_status, count(*) as count FROM card_coupons GROUP BY tier, status, dispatch_status;"
 
-# 查看当前健康的播放源与封面 CDN
-npx wrangler d1 execute prism-play-db --remote --command "SELECT id, name, channel_id, upstream_url, latency_ms, healthy FROM source_providers;"
+# 查看最近管理员敏感操作审计日志
+npx wrangler d1 execute prism-play-db --remote --command "SELECT id, action, target_hash, datetime(created_at, 'unixepoch', '+8 hours') as bj_time FROM admin_audit_logs ORDER BY id DESC LIMIT 10;"
+
+# 查看近 7 天每日访问与下载统计
+npx wrangler d1 execute prism-play-db --remote --command "SELECT day, sum(requests) as req, sum(downloads) as dl FROM analytics_daily GROUP BY day ORDER BY day DESC LIMIT 7;"
 ```
+
+### 3. 管理员口令与运营应急维护
+- **本地口令凭据获取**：读取工程根目录 `D:\DEV\prism-play\admin-access.local`。
+- **全网管理员会话一键失效**：
+  ```bash
+  cd D:\DEV\prism-play\edge
+  npx wrangler secret put ADMIN_AUTH_VERSION
+  # 输入新的版本号（如 2）并确认
+  ```
+- **生产数据库灾备书签回滚 (Time-Travel Restore)**：
+  ```bash
+  cd D:\DEV\prism-play\edge
+  npx wrangler d1 time-travel restore prism-play-db --bookmark=000000aa-00000002-000050fb-6181c2a3c9b29b64c4a1c8ec99dc6aae
+  ```
+- **详细运营与卡密发卡 SOP 手册**：详见《光影Play管理后台与卡密运维操作手册》(`docs/04-spec/ADMIN-OPERATION-MANUAL.md`)。
 
 ### 3. 如何在云端快速上架一部新剧目 (SQL 样板)
 ```sql

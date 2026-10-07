@@ -84,7 +84,10 @@ export const createArtEngine: EngineFactory = async ({ container, theme, poster,
     toggleControls: () => art.controls.toggle(),
     playbackRate: () => art.video.playbackRate,
     setPlaybackRate: (rate) => { art.video.playbackRate = rate; },
-    setSource: (u, m) => { destroyHls(); lastFailure = null; art.type = m === 'video/mp4' ? 'mp4' : 'm3u8'; art.url = u; void art.play().catch(() => {}); },
+    setSource: (u, m) => {
+      if (u === undefined) throw new Error('网页播放缺少媒体地址');
+      destroyHls(); lastFailure = null; art.type = m === 'video/mp4' ? 'mp4' : 'm3u8'; art.url = u; void art.play().catch(() => {});
+    },
     failureCode: () => lastFailure,
     on: (event, handler) => {
       const name = `video:${event}`;

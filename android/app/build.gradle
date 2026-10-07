@@ -30,8 +30,13 @@ android {
         // API 33 POST_NOTIFICATIONS prompt apply to us; both are handled in PlaybackService
         // and PrismNativePlugin, and both are device-checklist items, not assumed behaviour.
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 21604
-        versionName "2.6.4"
+        versionCode 21605
+        versionName "2.6.5"
+        buildConfigField "boolean", "PLAYBACK_PROBE", project.findProperty('playbackProbe') == 'true' ? 'true' : 'false'
+        if (project.findProperty('playbackProbe') == 'true') {
+            applicationIdSuffix ".probe"
+            versionNameSuffix "-playback-probe"
+        }
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
@@ -69,6 +74,10 @@ android {
         }
     }
 
+    buildFeatures {
+        buildConfig true
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_21
         targetCompatibility JavaVersion.VERSION_21
@@ -88,6 +97,8 @@ dependencies {
     implementation "androidx.core:core:$androidxCoreVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation "androidx.media:media:1.7.0"
+    implementation "androidx.media3:media3-exoplayer:1.5.1"
+    implementation "androidx.media3:media3-ui:1.5.1"
     // [re-apply after cap add] Domain 1 keystore-backed credential store; see root file for the
     // deprecation note that explains why this artifact is still pinned at 1.1.0.
     implementation "androidx.security:security-crypto:$androidxSecurityCryptoVersion"

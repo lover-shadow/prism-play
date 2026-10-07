@@ -13,11 +13,14 @@ import { handleApkDownload, handleDownloadLanding, handlePortal } from './routes
 import { handleStaticAsset } from './routes/assets';
 import { handleMonetizationConfig } from './routes/monetization';
 import { handlePlayback } from './routes/playback';
+import { handleNativePlayback } from './routes/native-playback';
 import { handlePrivateSessions } from './routes/private-sessions';
 import { handleProxy } from './routes/proxy';
 import { handleRedeem } from './routes/redeem';
 import { handleRelated } from './routes/related';
 import { handleSearch } from './routes/search';
+import { runScheduledDiscoveryRefresh, refreshOpenedPublicWork } from './search/scheduled-discovery';
+import { handleSearchDiscoveries } from './routes/search-discovery';
 import { handleSearchSuggestions } from './routes/search-suggestions';
 import { handleShare } from './routes/share';
 import { handleSources } from './routes/sources';
@@ -25,6 +28,10 @@ import { handleTitles } from './routes/titles';
 import { handleUserSync } from './routes/user-sync';
 import { handleTelemetryLines } from './routes/telemetry';
 import { handleVersion } from './routes/version';
+import { handleAdminRequest, isAdminPath } from './routes/admin-request';
+import { collectAnalytics, analyticsFailure } from './analytics/collect';
+import { cleanupAnalytics } from './analytics/cleanup';
+import { handleAnalyticsConsent, privacyPage } from './routes/analytics-consent';
 
 type RouteHandler = (request: Request, env: Env, clock: Clock) => Promise<Response>;
 
@@ -48,7 +55,9 @@ const ROUTES: readonly Route[] = [
   { pattern: ['api', 'catalog', 'changes'], allow: ['GET'], handle: handleChanges },
   { pattern: ['api', 'catalog'], allow: ['GET'], handle: handleCatalog },
   { pattern: ['api', 'search', 'suggestions'], allow: ['GET'], handle: handleSearchSuggestions },
+  { pattern: ['api', 'search', 'discoveries'], allow: ['GET'], handle: handleSearchDiscoveries },
   { pattern: ['api', 'search'], allow: ['GET'], handle: handleSearch },
+  { pattern: ['api', 'titles', '{titleId}', 'episodes', '{episodeNumber}', 'native-playback'], allow: ['GET'], handle: handleNativePlayback },
   { pattern: ['api', 'titles', '{titleId}', 'related'], allow: ['GET'], handle: handleRelated },
   { pattern: ['api', 'titles', '{titleId}'], allow: ['GET'], handle: handleTitles },
   { pattern: ['api', 'episodes', '{episodeId}', 'playback'], allow: ['GET'], handle: handlePlayback },
@@ -135,10 +144,18 @@ export async function runScheduledWork(env: Env, clock: Clock = systemClock): Pr
 }
 
 export default {
-  async fetch(request: Request, env: Env, _ctx: RequestContext): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: RequestContext): Promise<Response> {
+    const path = new URL(request.url).pathname;
+    if (isAdminPath(path)) return handleAdminRequest(request, env, systemClock);
+    if (path === '/api/analytics/consent') return handleAnalyticsConsent(request, env, systemClock);
+    if (path === '/privacy') return request.method === 'GET' ? privacyPage() : new Response(null, { status: 405 });
     const origin = request.headers.get('Origin');
     try {
-      return await routeRequest(request, env, systemClock);
+      const response = await routeRequest(request, env, systemClock);
+      if (env.SEARCH_DISCOVERY_ENABLED === 'true' && env.DISCOVERY_BUCKET && /^\/api\/titles\/[^/]+$/.test(path) && response.status === 200) {
+        ctx.waitUntil(refreshOpenedPublicWork(request, response.clone(), env, systemClock).catch(() => { console.error('opened work refresh failed'); }));
+      }
+      return collectAnalytics(request, response, env, systemClock, ctx);
     } catch (error) {
       // A thrown defect must not answer 200 or leak a stack trace to the client.
       console.error('unhandled edge failure', request.method, new URL(request.url).pathname, error);
@@ -148,5 +165,9 @@ export default {
 
   async scheduled(_controller: ScheduledController, env: Env, ctx: RequestContext): Promise<void> {
     ctx.waitUntil(runScheduledWork(env, systemClock));
+    if (env.SEARCH_DISCOVERY_ENABLED === 'true' && env.DISCOVERY_BUCKET) {
+      ctx.waitUntil(runScheduledDiscoveryRefresh(env, systemClock).catch(() => { console.error('discovery refresh failed'); }));
+    }
+    if (env.ANALYTICS_ENABLED === 'true') ctx.waitUntil(cleanupAnalytics(env, systemClock).catch(() => analyticsFailure('analytics_write_failed')));
   }
 };

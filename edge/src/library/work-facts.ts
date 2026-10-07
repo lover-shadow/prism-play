@@ -46,27 +46,75 @@ function parseFact(raw: unknown, id: string): WorkFact | null {
     first_published_at: asset.firstPublishedAt ?? null, updated_at: 0, episode_count: numbers.size
   } };
 }
-export async function readWorkFact(env: Env, manifest: CatalogManifest, id: string): Promise<FactRead> {
-  if (!isSafeWorkId(id)) return { status: 'absent' };
-  const hash = await factsHash(new TextEncoder().encode(id));
-  const leaf = Object.keys(manifest.workFacts!.packs).filter((p) => hash.startsWith(p)).sort((a, b) => b.length - a.length)[0];
-  if (leaf === undefined) return { status: 'absent' };
-  const declared = manifest.workFacts!.packs[leaf];
+// Shared immutable content-addressed packs: 32 packs / 8 MiB encoded, including inflight reservations.
+// A generation change gets a distinct key even if a publisher reuses a pack descriptor.
+const MAX_PACK_BYTES = 8 * 1024 * 1024;
+type PackSlot = { bucket: R2Bucket; bytes: number; value: Promise<Map<string, WorkFact> | null> };
+const packs = new Map<string, PackSlot>();
+const idHashes = new Map<string, Promise<string>>();
+async function workIdHash(id: string): Promise<string> {
+  let value = idHashes.get(id);
+  if (!value) {
+    if (idHashes.size >= 8192) idHashes.delete(idHashes.keys().next().value!);
+    value = factsHash(new TextEncoder().encode(id)); idHashes.set(id, value);
+    void value.catch(() => { if (idHashes.get(id) === value) idHashes.delete(id); });
+  }
+  return value;
+}
+async function loadPack(bucket: R2Bucket, declared: { key: string; bytes: number; sha256: string }, leaf: string): Promise<Map<string, WorkFact> | null> {
   try {
-    const object = await env.APK_BUCKET?.get(declared.key);
-    if (!object || object.size !== declared.bytes) return { status: 'rejected' };
+    const object = await bucket.get(declared.key);
+    if (!object || object.size !== declared.bytes) return null;
     const bytes = new Uint8Array(await object.arrayBuffer());
-    if (bytes.byteLength !== declared.bytes || bytes.byteLength > 524288 || await factsHash(bytes) !== declared.sha256) return { status: 'rejected' };
+    if (bytes.byteLength !== declared.bytes || bytes.byteLength > 524288 || await factsHash(bytes) !== declared.sha256) return null;
     const pack: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes));
-    if (!isRecord(pack) || pack.schema !== 1 || !isRecord(pack.works)) return { status: 'rejected' };
-    let requested: WorkFact | null = null;
-    for (const [workId, raw] of Object.entries(pack.works)) {
-      if (!isSafeWorkId(workId) || !(await factsHash(new TextEncoder().encode(workId))).startsWith(leaf)) return { status: 'rejected' };
-      if (isRecord(raw) && (raw.isPrivate === true || raw.channelId === 'private')) continue;
-      const fact = parseFact(raw, workId);
-      if (fact === null) return { status: 'rejected' };
-      if (workId === id) requested = fact;
+    if (!isRecord(pack) || pack.schema !== 1 || !isRecord(pack.works)) return null;
+    const facts = new Map<string, WorkFact>(), entries = Object.entries(pack.works);
+    // Every work (including skipped private works) must still belong to the declared hash leaf.
+    for (let start = 0; start < entries.length; start += 32) {
+      const batch = entries.slice(start, start + 32);
+      if (batch.some(([id]) => !isSafeWorkId(id))) return null;
+      const hashes = await Promise.all(batch.map(([id]) => workIdHash(id)));
+      for (let i = 0; i < batch.length; i++) {
+        const [workId, raw] = batch[i]!;
+        if (!hashes[i]!.startsWith(leaf)) return null;
+        if (isRecord(raw) && (raw.isPrivate === true || raw.channelId === 'private')) continue;
+        const fact = parseFact(raw, workId);
+        if (fact === null) return null;
+        facts.set(workId, fact);
+      }
     }
-    return requested === null || requested.row.enabled !== 1 ? { status: 'absent' } : { status: 'ok', fact: requested };
+    return facts;
+  } catch { return null; }
+}
+export async function readWorkFact(env: Env, manifest: CatalogManifest, id: string, includeDisabled = false): Promise<FactRead> {
+  if (!isSafeWorkId(id) || !manifest.workFacts) return { status: 'absent' };
+  try {
+    const hash = await workIdHash(id);
+    // Validated manifests disallow overlapping leaves, so no per-candidate sorting is necessary.
+    let leaf: string | undefined;
+    for (let length = 2; length <= hash.length; length++) {
+      const prefix = hash.slice(0, length);
+      if (Object.prototype.hasOwnProperty.call(manifest.workFacts.packs, prefix)) leaf = prefix;
+    }
+    if (leaf === undefined) return { status: 'absent' };
+    const declared = manifest.workFacts.packs[leaf], bucket = env.APK_BUCKET;
+    if (!bucket) return { status: 'rejected' };
+    const key = JSON.stringify([manifest.revision, manifest.publicSearch?.sha256, leaf, declared.key, declared.sha256, declared.bytes]);
+    let slot = packs.get(key);
+    if (!slot || slot.bucket !== bucket) {
+      if (declared.bytes < 1 || declared.bytes > 524288) return { status: 'rejected' };
+      while (packs.size >= 32 || [...packs.values()].reduce((n, p) => n + p.bytes, 0) + declared.bytes > MAX_PACK_BYTES) {
+        const first = packs.keys().next().value; if (first === undefined) break; packs.delete(first);
+      }
+      slot = { bucket, bytes: declared.bytes, value: loadPack(bucket, declared, leaf) };
+      packs.set(key, slot);
+      const current = slot;
+      void slot.value.then((value) => { if (value === null && packs.get(key) === current) packs.delete(key); });
+    }
+    const facts = await slot.value;
+    if (facts === null) return { status: 'rejected' };
+    const fact = facts.get(id);
+    return !fact || (!includeDisabled && fact.row.enabled !== 1) ? { status: 'absent' } : { status: 'ok', fact };
   } catch { return { status: 'rejected' }; }
 }

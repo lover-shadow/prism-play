@@ -282,6 +282,7 @@ export function renderLandingPage(input: LandingPageInput): string {
     featuresBlock(),
     footBlock(release),
     '</div>',
+    '<p><a href="/privacy">隐私与统计设置</a></p>',
     '</body>',
     '</html>'
   ].join('\n');

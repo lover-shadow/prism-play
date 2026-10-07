@@ -134,6 +134,8 @@ export interface LocalSearchApiDeps {
   localItems: () => readonly ContentItem[];
   /** 端侧索引不可用（Web 宿主没有 SQLite）时的云端回落；本地可用时一次请求都不发（§A-6.4）。 */
   remote?: SearchApi;
+  /** 在线公共结果先持久合并再喂索引；保存失败必须向调用方传播。 */
+  onOnlineItems?: (items: readonly ContentItem[]) => Promise<void>;
 }
 
 /**
@@ -168,13 +170,18 @@ export function createLocalSearchApi(deps: LocalSearchApiDeps): SearchApi {
   return {
     localFirst: true,
     async search(input): Promise<SearchResponse> {
-      const found = await resolved(normalizeQuery(input.q), input.pageSize ?? SEARCH_RESULT_LIMIT);
-      if (fallBack()) return await remote?.search(input) ?? { items: [], page: 1 };
-      return { items: found.map((entry) => entry.result), page: input.page ?? 1 };
+      const page = Math.max(1, Math.floor(input.page ?? 1) || 1);
+      const size = Math.min(SEARCH_RESULT_LIMIT, Math.max(1, Math.floor(input.pageSize ?? 20) || 20));
+      const end = page * size;
+      const found = await resolved(normalizeQuery(input.q), end + 1);
+      return { items: found.slice(end - size, end).map((entry) => entry.result), page, hasMore: found.length > end };
     },
     async searchOnline(input): Promise<SearchResponse> {
-      if (remote === undefined) return { items: [], page: input.page ?? 1 };
-      return await remote.search(input);
+      if (remote === undefined) return { items: [], page: input.page ?? 1, hasMore: false };
+      const response = await remote.search(input);
+      const items = response.items.filter((entry) => !isPrivateSubject(entry.item));
+      await deps.onOnlineItems?.(items.map((entry) => entry.item));
+      return { ...response, items };
     },
     async suggestions(q): Promise<SuggestionsResponse> {
       const query = normalizeQuery(q);

@@ -22,6 +22,7 @@ import { applyTheme, readThemePreference, writeThemePreference, type PreferenceS
 import { attempt, band, button, glyphInto, make, readyBand, rowLine, stateBand, type Band, type ViewState } from './history-view';
 import { createDiagnosticsBand } from './diagnostics-band';
 import { createCatalogStatusBand, type CatalogStatusDeps } from './catalog-status';
+import { createRuntimeVersionBand, type RuntimeVersionSource } from './runtime-version';
 import './views.css';
 
 /** 注入的短时凭据持有者：必须与 `PrismApiClient.bindSessionHolder` 绑的是同一个 RAM holder。 */
@@ -51,6 +52,7 @@ export interface SettingsViewDeps extends CatalogStatusDeps {
   cache?: SettingsCachePort;
   supportAssets?: SupportAssets;
   apiBaseUrl?: string;
+  runtimeVersions?: RuntimeVersionSource;
   /** 可注入便于测试；默认 `bridgeSource()`，避免把 Web 宿主说成原生能力已生效。 */
   bridgeSourceOf?: () => BridgeSource;
   now?(): number;
@@ -101,6 +103,7 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
   ota.head.append(button('检查更新', () => void checkVersion(), { icon: 'refresh', cls: 'pv-btn-ghost', el: 'ota-check' }));
   const diagController = createDiagnosticsBand({ apiBaseUrl: deps.apiBaseUrl ?? '', nativeSource: nativeOnly, paintRows });
   const catalogController = createCatalogStatusBand(deps);
+  const versions = deps.runtimeVersions ? createRuntimeVersionBand(deps.runtimeVersions) : null;
   const ratesController = createPlaybackPreferencesBand(deps.prefs);
   const cacheController = createSettingsCacheBand(deps.cache);
   const supportController = createSupportBand(deps.root, deps.supportAssets);
@@ -264,6 +267,7 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
     await paintPrivateSection();
     await Promise.all([ratesController.reload(), cacheController.reload()]);
     await diagController.paint(); catalogController?.paint();
+    if (versions) { deps.root.prepend(versions.wrap); void versions.refresh(); }
     // 视图级五态：loading → ready；偏好域不可读则整视图 error（其余态在各分区上如实呈现）。
     deps.root.dataset.state = theme.ok ? 'ready' : 'error';
   }
@@ -271,7 +275,7 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
     async mount(): Promise<void> { await reload(); },
     reload,
     destroy(): void {
-      disposed = true; catalogController?.destroy();
+      disposed = true; catalogController?.destroy(); versions?.destroy();
       ratesController.destroy(); cacheController.destroy(); supportController?.destroy();
       const hadSession = deps.tokens.read() !== null;
       closeDialog();

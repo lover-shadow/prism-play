@@ -70,9 +70,8 @@ describe('搜索视图：空态与热词（AC-16）', () => {
     expect(chips.map((chip) => chip.textContent)).toEqual(['战神之龙王归来', '甜宠小娘子']);
     (chips[1] as HTMLElement).click();
     await vi.advanceTimersByTimeAsync(0);
-    expect(calls.search).toEqual([{ q: '甜宠小娘子' }]);
+    expect(calls.search).toEqual([{ q: '甜宠小娘子', page: 1, pageSize: 20 }]);
   });
-
   it('没有注入热词时承认没有，且不编造任何词条', async () => {
     const { view, root } = setup({ hotWords: [] });
     await view.mount();
@@ -83,7 +82,6 @@ describe('搜索视图：空态与热词（AC-16）', () => {
     await bare.view.mount();
     expect(bare.root.querySelectorAll('[data-el="hot-word"]').length).toBe(0);
   });
-
   it('空输入与超长输入都不发请求，输入框不被截断', async () => {
     const { view, root, calls } = setup();
     await view.mount();
@@ -121,7 +119,6 @@ describe('搜索视图：输入法组合与防抖补全（AC-16）', () => {
     await vi.advanceTimersByTimeAsync(300);
     expect(calls.suggestions).toEqual(['zhan shen']);
   });
-
   it('补全按防抖窗口只发一次，并以 trim 后的词查询', async () => {
     const { view, root, calls } = setup();
     await view.mount();
@@ -134,7 +131,6 @@ describe('搜索视图：输入法组合与防抖补全（AC-16）', () => {
     await fireInput(root, '  战神之  ');
     expect(calls.suggestions).toEqual(['战神', '战神之']);
   });
-
   it('补全最多十条且每条标明命中类型', async () => {
     const many = Array.from({ length: 12 }, (_, index): SearchSuggestion => ({ text: `候选 ${index}`, type: 'title' }));
     const { view, root } = setup({ suggestions: many });
@@ -146,7 +142,6 @@ describe('搜索视图：输入法组合与防抖补全（AC-16）', () => {
     expect(items[0].textContent).toContain('剧名');
     expect(pick(root, 'search-suggest')?.textContent).toContain('最多显示 10 条');
   });
-
   it('类型标签逐一对应，纠错与拼音不混为一谈', async () => {
     const mixed: SearchSuggestion[] = [
       { text: '战神之龙王归来', type: 'title' }, { text: '龙王归来', type: 'alias' },
@@ -159,7 +154,6 @@ describe('搜索视图：输入法组合与防抖补全（AC-16）', () => {
     const labels = mixed.map((entry) => ({ title: '剧名', alias: '别名', pinyin: '拼音', category: '分类', correction: '纠错建议' })[entry.type]);
     for (const label of labels) expect(pick(root, 'search-suggest')?.textContent).toContain(label);
   });
-
   it('补全为空显示 empty，网络失败进入 disabled 并提示需联网', async () => {
     const empty = setup({ suggestions: [] });
     await empty.view.mount();
@@ -204,13 +198,12 @@ describe('搜索视图：结果分组与合规边界（AC-16 / AC-02 / M-5）', 
     cards[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(calls.opened).toEqual(['d_a']);
   });
-
   it('服务端返回 400 时按契约文案显示，不静默截断', async () => {
     const { view, root, calls } = setup({ searchError: new ApiError('VALIDATION_ERROR', 400, 'q 超长') });
     await view.mount();
     await fireInput(root, '战神');
     await submit(root);
-    expect(calls.search).toEqual([{ q: '战神' }]);
+    expect(calls.search).toEqual([{ q: '战神', page: 1, pageSize: 20 }]);
     expect(stateOf(root, 'search-results')).toBe('error');
     expect(root.textContent).toContain('VALIDATION_ERROR（400）');
     const rate = setup({ searchError: new ApiError('RATE_LIMITED', 429, '频繁') });
@@ -219,7 +212,6 @@ describe('搜索视图：结果分组与合规边界（AC-16 / AC-02 / M-5）', 
     await submit(rate.root);
     expect(stateOf(rate.root, 'search-results')).toBe('error');
   });
-
   it('零结果给出频道/标签去处与可点的公开热词', async () => {
     const { view, root, calls } = setup({ results: [], hotWords: ['甜宠'] });
     await view.mount();
@@ -232,9 +224,8 @@ describe('搜索视图：结果分组与合规边界（AC-16 / AC-02 / M-5）', 
     expect(calls.browse).toEqual([{}]);
     (root.querySelector('[data-el="zero-word"]') as HTMLElement).click();
     await vi.advanceTimersByTimeAsync(0);
-    expect(calls.search).toEqual([{ q: '不存在词' }, { q: '甜宠' }]);
+    expect(calls.search).toEqual([{ q: '不存在词', page: 1, pageSize: 20 }, { q: '甜宠', page: 1, pageSize: 20 }]);
   });
-
   it('公开结果渲染时 DOM 内不出现任何私密字样，混入的私密条目也被丢弃', async () => {
     const publicOnly = setup({ results: [{ item: itemOf('d_public'), matchType: 'exact' }] });
     await publicOnly.view.mount();
@@ -257,7 +248,34 @@ describe('搜索视图：结果分组与合规边界（AC-16 / AC-02 / M-5）', 
     expect(polluted.root.innerHTML).not.toContain('深夜私语的秘密');
     expect(polluted.root.querySelectorAll('[data-el="result-card"]').length).toBe(1);
   });
-
+  it('旧查询的延迟结果不会覆盖新查询，销毁后延迟结果不重建 DOM', async () => {
+    const root = document.createElement('div');
+    document.body.replaceChildren(root);
+    const pending = new Map<string, (response: SearchResponse) => void>();
+    const api: SearchApi = {
+      search: ({ q }) => new Promise((resolve) => { pending.set(q, resolve); }),
+      suggestions: async (q) => ({ query: q, suggestions: [] })
+    };
+    const racing = createSearchView({ api, root, onOpenTitle: () => undefined });
+    await racing.mount();
+    await fireInput(root, '旧词');
+    await submit(root);
+    await fireInput(root, '新词');
+    await submit(root);
+    pending.get('新词')!({ items: [{ item: itemOf('d_new'), matchType: 'exact' }], page: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    pending.get('旧词')!({ items: [{ item: itemOf('d_old'), matchType: 'exact' }], page: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(root.querySelectorAll('[data-el="result-card"]').length).toBe(1);
+    expect(root.innerHTML).toContain('d_new');
+    expect(root.innerHTML).not.toContain('d_old');
+    await fireInput(root, '退出前');
+    await submit(root);
+    racing.destroy();
+    pending.get('退出前')!({ items: [{ item: itemOf('d_late'), matchType: 'exact' }], page: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(root.children.length).toBe(0);
+  });
   it('界面没有任何大模型暗示，loading 与 destroy 边界正确', async () => {
     const { view, root, calls } = setup({ results: [{ item: itemOf('d_a'), matchType: 'exact' }] });
     await view.mount();
@@ -274,6 +292,6 @@ describe('搜索视图：结果分组与合规边界（AC-16 / AC-02 / M-5）', 
     expect(root.children.length).toBe(0);
     await vi.advanceTimersByTimeAsync(1_000);
     expect(calls.suggestions).toEqual(['战神']);
-    expect(calls.search).toEqual([{ q: '战神' }]);
+    expect(calls.search).toEqual([{ q: '战神', page: 1, pageSize: 20 }]);
   });
 });

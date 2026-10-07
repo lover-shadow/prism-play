@@ -28,10 +28,11 @@ export const LINE_SWITCH_GUARD_MS = 1_200;
 
 /** 交给内核的一跳：地址、类型、第几条线路（null = 代理回退链）与已按真实时长夹过的续播秒数。 */
 export interface Surface {
-  url: string;
+  url?: string;
   mimeType?: string;
   lineIndex: number | null;
   durationSeconds: number;
+  native?: { kind: 's1-cenc'; videoId: string };
 }
 
 export type LineOutcome =
@@ -73,7 +74,7 @@ export function createLineRunner(deps: LineRunnerDeps): LineRunner {
     (seconds > 0 ? (duration > 0 ? clamp(seconds, 0, duration) : seconds) : 0);
 
   const hopSurface = (hop: NonNullable<ReturnType<LineFallback['reset']>>): Surface =>
-    ({ url: hop.url, mimeType: hop.mimeType, lineIndex: hop.index, durationSeconds: 0 });
+    ({ url: hop.url, mimeType: hop.mimeType, lineIndex: hop.index, durationSeconds: 0, native: hop.line.native });
 
   return {
     active: () => lineIndex !== null,

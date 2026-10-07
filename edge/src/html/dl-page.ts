@@ -65,6 +65,7 @@ function shell(rawTitle: string, body: string): string {
     body,
     '  <p class="fineprint">本页面仅提供下载指引，不索取任何个人信息，也不读取你的设备标识。</p>',
     '</main>',
+    '<p><a href="/privacy">隐私与统计设置</a></p>',
     '</body>',
     '</html>'
   ].join('\n');

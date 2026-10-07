@@ -170,6 +170,7 @@ const BODY: readonly string[] = [
   '    var rows = wanted && Array.isArray(wanted.lines) ? wanted.lines : [];',
   '    var urls = [];',
   '    for (var j = 0; j < rows.length; j += 1) {',
+  '      if (rows[j] && rows[j].native) { continue; }',
   '      var candidate = rows[j] && rows[j].mediaUrl;',
   '      if (typeof candidate === "string" && candidate.length <= config.urlLimit && ABSOLUTE.test(candidate)) { urls.push(candidate); }',
   '    }',

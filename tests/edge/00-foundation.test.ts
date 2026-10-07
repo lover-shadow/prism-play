@@ -13,7 +13,8 @@ describe('Stage 1 foundation: in-memory D1 stand-in', () => {
     // + 0003 瘦身的账本补充表 line_health_signals
     // + 0004 运营后台与分析新增的 analytics_daily / analytics_visitors / analytics_visitor_days /
     //   admin_sessions / admin_login_limits / coupon_batches / admin_audit_logs（additive，不 DROP 旧表）。
-    expect(tables.length - ftsShadow.length).toBe(30);
+    expect(tables.length - ftsShadow.length).toBe(38);
+    expect(tables).toEqual(expect.arrayContaining(['discovery_works', 'discovery_jobs', 'discovery_job_queries', 'discovery_cards']));
     expect(ftsShadow.length).toBe(5);
   });
 

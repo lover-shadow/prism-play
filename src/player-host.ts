@@ -17,6 +17,7 @@ import { createHostLayer, hostErrorFor, type HostLayer } from './player/host-lay
 import type { OverlayState } from './player/hud';
 import type { PlayerHost, PlayerHostDeps } from './player/host-contract';
 import './player/player-host.css';
+import { createSeasonSwitcher } from './player/season-switcher';
 
 export type { PlayerHost, PlayerHostApi, PlayerHostDeps } from './player/host-contract';
 
@@ -82,22 +83,22 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
   }
   /** 失败必须停在层内给出出口；但代次已被抢走时旧结果一个节点都不许留下（不得复活画面）。 */
   function refuse(host: HostLayer, mine: number, retry: () => void, kind: OverlayState): false {
-    if (mine !== opening || layer !== host) { host.destroy(); return false; }
+    if (mine !== opening || layer !== host) { if (layer !== host) host.destroy(); return false; }
     host.showState(kind);
     host.onRetry(retry);
     return false;
   }
   /** 旧代次拿到了结果：只拆自己那块（可能早已脱离文档的）节点，绝不改当前层的共享状态。 */
   function discard(host: HostLayer): false {
-    if (layer === host) close();
-    else host.destroy();
+    if (layer !== host) host.destroy();
     return false;
   }
-  async function open(contentId: string, resume?: WatchHistoryRow): Promise<boolean> {
-    close();
+  async function open(contentId: string, resume?: WatchHistoryRow, retainStage = false): Promise<boolean> {
+    const retained = retainStage ? layer : null;
+    close(retained !== null);
     const mine = opening;
     // §3.1：创建与挂载都发生在第一个 await 之前——"点了没反应"就是旧实现的用户面缺陷本体。
-    const host = createHostLayer({ mount: deps.mount, onClose: () => close() });
+    const host = retained ?? createHostLayer({ mount: deps.mount, onClose: () => close() });
     layer = host;
     host.showState('loading');
     keyup = (event: KeyboardEvent) => {
@@ -193,6 +194,12 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
       { beforeMenuOpen: () => void player?.dismissOverlay() }
     );
     detailBodyRef = detailBody;
+    const seasons = createSeasonSwitcher(loaded.item, deps.seriesItems?.() ?? [], (id) => { void open(id, undefined, true); });
+    if (seasons) {
+      detailBody.attachSeasonSwitcher(seasons);
+      const drawerSeasons = createSeasonSwitcher(loaded.item, deps.seriesItems?.() ?? [], (id) => { void open(id, undefined, true); });
+      if (drawerSeasons) host.sheet.querySelector('.prism-drawer')?.prepend(drawerSeasons);
+    }
     host.shell.append(detailBody.body);
     const cast = document.createElement('button'); cast.type = 'button'; cast.className = 'prism-player__button';
     cast.dataset.prismUi = 'cast'; cast.setAttribute('aria-label', '投屏'); cast.innerHTML = icon('cast', { size: 20 });
@@ -202,7 +209,7 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
     // load 在途期间被关掉/被抢占时如实报 false：调用方不该拿到一个"成功但已经没有层"的结果。
     return mine === opening && layer === host;
   }
-  function close(): void {
+  function close(retainStage = false): void {
     opening++;
     watchVideo?.destroy(); watchVideo = null;
     void deps.runtime?.watch?.setScope('unknown');
@@ -211,11 +218,8 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
     keyup = null;
     if (unregisterBack !== null) unregisterBack(); unregisterBack = null;
     if (resizeHandler !== null) window.removeEventListener('resize', resizeHandler); resizeHandler = null;
-    isFullscreen = false;
-    // 会话拆除必须把方向锁一并交还：留着锁横屏，用户退出播放器后手机会一直不肯回转。
-    videoAspect = null;
-    void fullscreenPolicy(false);
-    detailBodyRef?.destroy(); detailBodyRef = null;
+    if (!retainStage) { isFullscreen = false; videoAspect = null; void fullscreenPolicy(false); }
+    detailBodyRef?.body.remove(); detailBodyRef?.destroy(); detailBodyRef = null;
     const instance = player;
     const report = instance !== null && detail !== null ? exitReportOf(detail, instance.state()) : null; // §1.9.3 节点 ①：必须在 `detail`/内核归 null 之前定格
     player = null;
@@ -227,9 +231,10 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
       instance.destroy();
       deps.onPrivacyChange(false);
       if (report !== null) deps.onExit?.(report);
-      deps.onClose?.();
+      if (!retainStage) deps.onClose?.();
     }
-    host?.destroy();
+    if (retainStage && host) { host.stage.replaceChildren(); host.sheet.replaceChildren(); }
+    else host?.destroy();
   }
   function step(offset: number): void {
     if (detail === null || player === null) return;

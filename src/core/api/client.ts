@@ -22,6 +22,7 @@ import { logger } from '../diagnostics';
 import { createPosterUrls } from '../poster-urls';
 import { isPrivateSubject } from '../storage/storage-domains';
 import { adaptTitleDetail } from './title-detail';
+import type { DiscoveryChangesResponse } from '../discovery-sync';
 
 /**
  * Typed client for the edge contract. DTOs are imported from `edge/src/types/api.ts` on purpose: one
@@ -139,8 +140,14 @@ export class PrismApiClient {
     return this.get(`/api/catalog/changes${queryString({ after, limit })}`);
   }
 
-  search(input: { q: string; channel?: string; tag?: string; page?: number; pageSize?: number }): Promise<SearchResponse> {
+  search(input: { q: string; channel?: string; tag?: string; page?: number; pageSize?: number; discoveryPage?: number }): Promise<SearchResponse> {
     return this.get(`/api/search${queryString(input)}`);
+  }
+
+  discoveryChanges(after: number, limit?: number): Promise<DiscoveryChangesResponse> {
+    const headers = this.headers();
+    delete headers['X-Private-Session']; // Public-only log, even during an admitted private session.
+    return this.request(`/api/search/discoveries${queryString({ after, limit })}`, { headers });
   }
 
   suggestions(q: string): Promise<SuggestionsResponse> {
@@ -174,6 +181,13 @@ export class PrismApiClient {
 
   playback(episodeId: number): Promise<PlaybackInfo> {
     return this.get(`/api/episodes/${episodeId}/playback`);
+  }
+
+  nativePlayback(workId: string, episodeNumber: number, lineIndex: number): Promise<{
+    workId: string; episodeNumber: number; lineIndex: number; native: { kind: 's1-cenc'; videoId: string }; checkedAt: number;
+  }> {
+    return this.request(`/api/titles/${encodeURIComponent(workId)}/episodes/${episodeNumber}/native-playback${queryString({ line: lineIndex })}`,
+      { headers: this.headers(), cache: 'no-store' });
   }
 
   monetization(): Promise<MonetizationConfig> {

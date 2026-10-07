@@ -106,6 +106,12 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".PrismPlaybackProbeActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Material.NoActionBar"
+            android:windowSoftInputMode="adjustResize" />
+
         <!-- @capacitor/filesystem.getUri() answers through this provider; see header note 1. -->
         <provider
             android:name="androidx.core.content.FileProvider"

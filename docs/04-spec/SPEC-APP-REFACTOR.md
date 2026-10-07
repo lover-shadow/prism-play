@@ -68,7 +68,7 @@ npm run verify:acceptance  # 30 项验收矩阵（AC-01~30）
 ```jsonc
 { "workId","title","channelId","isPrivate":false,
   "episodes":[ { "episodeNumber","title","durationSeconds",
-                 "lines":[ { "providerId","mediaUrl" } ] } ],
+                 "lines":[ { "providerId","mediaUrl","native?": { "kind":"s1-cenc","videoId":"数字字符串" } } ] } ],
   "generatedAt" }
 ```
 **播放地址 `mediaUrl` 仅在打开剧目时经此接口获得**，不进入目录分片、不进入启动库。实际响应另含 `item`；客户端在 API 边界校验 `item.id` / `workId` / 频道 / 私密标记一致性、剧集编号与线路，再适配内部详情。
@@ -79,6 +79,16 @@ npm run verify:acceptance  # 30 项验收矩阵（AC-01~30）
 - 私密原有效高级授权 + 当次手动开启双准入不变，仅内存 + 服务端短时凭据，冷启动/完全退出失效。服务端只能证明收到显式开启请求，不能验证真实点击；不得宣称绝对不可绕过。本次不发布任何 private objects，公开 bucket 风险须确认后再另行批准私密发布。
 
 ---
+
+### 2.2.1 native 清单与原生实现边界（2026-10-06）
+
+`EpisodeLine` / `PlaybackLine` 保持必填 providerId/mediaUrl，新增 `native?: {kind:'s1-cenc',videoId:string}`，仅 provider_s1 可带。videoId 为1～32位 ASCII 数字字符串（`^[0-9]{1,32}$`），保留前导零；native 严格只有 kind/videoId，unknown-field reject，包括 key/cencKeyHex（即使 null）、错误类型/kind/长度及显式 null/undefined，不能抹掉 native 后降级明文播放。严格闭集仅指 native 对象，不扩大为整个响应所有层级。公开缓存可保留无 key 的 native 身份，私密仍仅内存 no-store；不进入目录分片或启动库。
+
+实际消费主链为 work manifest / 私有 R2 discovery fact 的按作投影，不是旧 D1 episode playback。native mediaUrl 只是来源候选；原生桥的来源输入仅 vid（videoId，会话/进度控制参数另计），Android runtime resolver 获取实时地址/key，key 不返回 JS、不缓存或记录。Web 不支持该 native 播放路径；Web/native cast 必须诚实拒绝 native 线路，普通无 native 线路仍按 A-7。
+
+Android 本地 CENC DataSource + ExoPlayer 单集已获 Master 播放正常反馈；完整 HUD 集成代码已写/编译，尚未真机通过。云端授权绑定播放解析 handle 尚未实现，Stage A 未完成；旧生产 fact 无 native，需要刷新，本轮未部署。只同步限定管线事实，不把单集反馈当完整 HUD/后台/投屏/生产验收；当前 Java bridge/resolver 仅接受1～20位 vid，21～32位 manifest 合法身份仍有原生执行兼容缺口，须待后续接齐，不能宣称全范围可播。
+
+裁定范围：AGENTS 保持 authority，G0→G4 依赖及私密双准入不变；A-7 旧“全线路 ArtPlayer 直连/全部可投屏/不做原生层”仅被上述 provider_s1 native 特例收窄。FLAG_SECURE 仍限定正本 AC-02 个人探索频道/播放，不扩大到其他内容；本次不改权限、代码或机读契约，OpenAPI 等主会话同步前不标 G0 全绿。
 
 ## 三、施工任务清单
 
@@ -171,9 +181,9 @@ npm run verify:acceptance  # 30 项验收矩阵（AC-01~30）
 
 1. **明文策略维持关闭（2026-10-04 集成裁定，取代原"改 true"计划）**：对已入库上游媒体全量审计，**零** http:// m3u8/切片（魔都播放列表与分片均 https），直连播放不需要放宽明文；`usesCleartextTraffic` 与 `network_security_config.xml` base-config 均保持 `false`（G3 期 H1 签署的 TLS-only 姿态不变）。未来若某源出现 http 切片，凭证据为该主机加 scoped domain-config，不得翻全局开关。
 2. 打开剧目详情时拉取并校验 §2.2 按作清单；仅公开详情允许按缓存策略本地缓存，私密仅内存。起播直接以 `lines[0].mediaUrl` 交给 ArtPlayer/Hls.js（上游 CORS `*` 已实测）；本作 local numeric id 不得调用旧 playback/proxy fallback，空线路明确报错。
-3. **本阶段不实现原生 OkHttp 拦截层**：直连已满足需求；拦截层仅作为"未来某源加 Referer 防盗链"的预留设计，不在本 Track 施工范围（避免范围蔓延）。
-4. `lines[0]` 起播失败 → 自动切 `lines[1]`（≤2 次）；全失败 → 记录遥测信号（A-8）并显示可重试状态。
-5. DLNA 投屏：将当前 `mediaUrl` 直接派发电视端（电视无 CORS 限制）。
+3. **普通线路不实现通用原生 OkHttp 拦截层**：该限制不排除本次限定的 provider_s1 本地 CENC DataSource + ExoPlayer；不扩展为任意来源代理或 Referer 拦截能力。
+4. `lines[0]` 起播失败 → 自动切 `lines[1]`（≤2 次）；全失败 → 记录遥测信号（A-8）并显示可重试状态。带 native 的线路不执行第2项 ArtPlayer/Hls.js 直连，而由原生 runtime resolver 取流。
+5. DLNA 投屏：仅不带 native 的合法普通 `mediaUrl` 可派发电视端；Web/native cast 对 native 线路诚实拒绝，不能以电视无 CORS 限制冒充 CENC 支持。
 
 **验收（真机待闭环）**: AC-A7-1 真机起播、拖动续传正常；AC-A7-2 播放期间云端无流媒体转发请求；AC-A7-3 TLS-only 维持且无未经批准的全局 cleartext 放行；AC-A7-4 首线路失败自动切第二条；新详情空线路不得触发旧代理请求。
 
@@ -235,7 +245,7 @@ A-1 依赖 A-3 的 Overlay 存在（Layer 注册），故 A-3 先于 A-1 收口�
 - 海报零分享按钮；分享仅在播放器内。
 - 底栏 3 键【精选/追剧/我的】；搜索为全屏 Overlay 兼榜单容器。
 - 折叠搜索栏下隐上现；深滚回顶 + 顶部双击退出 Toast。
-- 视频直连上游；本阶段不做原生拦截层。
+- 普通视频直连上游，不做通用原生拦截层；provider_s1 native 线路按 A-7 与 §2.2.1 使用限定 CENC 原生管线。
 - 榜单端侧本地计算（hitsTotal / firstPublishedAt / isAi），断网可用。
 - 搜索 recommendations / candidates / results 三态互斥；海报统一 API origin；内容目录更新由用户手动检查。
 
@@ -253,6 +263,7 @@ A-1 依赖 A-3 的 Overlay 存在（Layer 注册），故 A-3 先于 A-1 收口�
 
 | 日期 | 变更 | 状态/边界 |
 | :--- | :--- | :--- |
+| 2026-10-06 | §2.2/§2.2.1、A-7及§六同步native字段与限定原生CENC特例 | provider_s1、1～32位数字字符串、native严格unknown-field reject且无key；work manifest/私有R2 fact、vid/runtime key不返JS、Web/native cast拒绝。单集Master反馈已取得，完整HUD已写/编译但未真机通过；授权绑定handle未实现，Stage A未完成，旧fact待刷新、未部署，Java仅1～20位缺口待接齐。AGENTS/FLAG_SECURE不扩大，原todos保留，机读等由主会话同步。 |
 | 2026-10-03 | v2 审计后重写 | 原任务基线保留 |
 | 2026-10-04 | A-7 明文策略改为 TLS-only | 保留集成裁定，真机播放与切线待验 |
 | 2026-10-04 | 详情 API 边界校验、episodeNumber 本作 local numeric id 且禁止旧 proxy fallback；海报 API origin；搜索三态；A-10 用户手动检查内容更新；同步公开 facts 同代规则与私密发布边界 | 本次仅局部修订两份既有 SPEC，不修改代码/CI/Git/云端，不声称生产交付完成 |

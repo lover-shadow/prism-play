@@ -89,10 +89,10 @@ describe('GET /api/search — SPEC §12.1 fixed query set', () => {
     expect(body.items.find((entry) => entry.item.id === 'd_longwang')?.item.episodeCount).toBe(3);
   });
 
-  it('an alias reports `alias`, and only for the work carrying that alias', async () => {
+  it('a title substring takes priority over the same alias', async () => {
     const { body } = await search(await catalog(), '龙王归来');
-    expect(matchTypeOf(body, 'd_longwang')).toBe('alias');
-    expect(idsOf(body)).not.toContain('m_longwang');
+    expect(matchTypeOf(body, 'd_longwang')).toBe('exact');
+    expect(matchTypeOf(body, 'm_longwang')).toBe('exact');
   });
 
   it('pinyin initials and full pinyin both report `pinyin`', async () => {

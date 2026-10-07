@@ -45,7 +45,7 @@ describe('public work facts: one verified source for titles/share/poster', () =>
     expect(title).not.toContain('旧 D1 标题'); expect(share).toContain('精确第七集');
     expect(f.calls).toEqual([`${origin}/real.jpg`]);
     expect(result[2].headers.get('ETag')).toBe('"img-d_fact-fact-v2"');
-    expect(f.gets).toHaveLength(3); expect(new Set(f.gets).size).toBe(1);
+    expect(f.gets).toHaveLength(1); expect(new Set(f.gets).size).toBe(1);
     expect((await handleShare(new Request(`https://app.invalid/s/${id}?ep=1`), f.env, f.env.clock)).status).toBe(404);
   });
   it.each([{ enabled: false }, { isPrivate: true }, { channelId: 'private' }])('hides disabled/private entries %j', async (flags) => {

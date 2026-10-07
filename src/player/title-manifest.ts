@@ -85,8 +85,18 @@ export function parseTitleManifest(value: unknown): TitleManifest | null {
       if (candidate === null || typeof candidate !== 'object') return null;
       const line = candidate as Record<string, unknown>;
       if (typeof line.providerId !== 'string' || line.providerId === '') return null;
-      if (typeof line.mediaUrl !== 'string' || !/^https?:\/\//i.test(line.mediaUrl)) return null;
-      lines.push({ providerId: line.providerId, mediaUrl: line.mediaUrl });
+      if (line.mediaUrl !== undefined && (typeof line.mediaUrl !== 'string' || !/^https?:\/\//i.test(line.mediaUrl))) return null;
+      if ('native' in line) {
+        const native = line.native as Record<string, unknown> | null;
+        if (line.providerId !== 'provider_s1' || !native || typeof native !== 'object' || Array.isArray(native) ||
+          Object.keys(native).length !== 2 || Object.keys(native).some((key) => key !== 'kind' && key !== 'videoId') ||
+          native.kind !== 's1-cenc' || typeof native.videoId !== 'string' || !/^\d{1,32}$/.test(native.videoId)) return null;
+        lines.push({ providerId: line.providerId, ...(line.mediaUrl === undefined ? {} : { mediaUrl: line.mediaUrl as string }),
+          native: { kind: 's1-cenc', videoId: native.videoId } });
+      } else {
+        if (typeof line.mediaUrl !== 'string') return null;
+        lines.push({ providerId: line.providerId, mediaUrl: line.mediaUrl });
+      }
     }
     episodes.push({
       episodeNumber: episode.episodeNumber as number,

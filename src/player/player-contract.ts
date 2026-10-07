@@ -18,7 +18,12 @@ import type { Clock, SleepMode } from './sleep-timer';
 
 export type PlayerPhase = 'idle' | 'loading' | 'ready' | 'ended' | 'error' | 'destroyed';
 /** Missing title manifests fall back to the existing playback endpoint. */
-export interface PlayerApi { playback(episodeId: number): Promise<PlaybackInfo>; title(titleId: string): Promise<TitleDetail>; titleManifest?(workId: string): Promise<TitleManifest> }
+export interface PlayerApi {
+  playback(episodeId: number): Promise<PlaybackInfo>; title(titleId: string): Promise<TitleDetail>; titleManifest?(workId: string): Promise<TitleManifest>;
+  nativePlayback?(workId: string, episodeNumber: number, lineIndex: number): Promise<{
+    workId: string; episodeNumber: number; lineIndex: number; native: { kind: 's1-cenc'; videoId: string }; checkedAt: number;
+  }>;
+}
 export interface PlayerFailure { kind: PlayerErrorKind | 'media' | 'progress-blocked'; message: string }
 
 export interface PrismPlayerOptions {

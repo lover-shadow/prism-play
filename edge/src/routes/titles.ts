@@ -9,7 +9,9 @@ import { originOf, publicCoverProxyUrl, signedCoverProxyUrl } from '../http/seri
 import type { TitleAsset, TitleRead } from '../library/title-asset';
 import { readTitleAt, titleAssetResponse } from '../library/title-asset';
 import { readPrivateManifest, readPublicManifest } from '../library/manifest';
-import { readWorkFact } from '../library/work-facts';
+import { publicDiscoveryContext, readPublicFact } from '../search/public-facts';
+import { readDiscoveryConfig } from '../search/discovery-config';
+import { resolveCardDetail } from '../search/discovery-cards';
 import { isKeySafeWorkId, privateTitleKey, stablePrivateTitleKey, stableTitleKey, titleKey } from '../library/paths';
 import { findTitleAssetFromDb } from '../db/content-repo';
 import { undifferentiatedNotFound } from './catalog';
@@ -137,26 +139,38 @@ export async function handleTitles(request: Request, env: Env, clock: Clock): Pr
   if (manifest === null) return configUnavailableResponse();
 
   if (manifest.workFacts !== undefined) {
-    const read = await readWorkFact(env, manifest, titleId);
+    const read = await readPublicFact(env, manifest, titleId, clock.nowSeconds());
     if (read.status === 'rejected') return configUnavailableResponse();
     if (read.status === 'ok') return publicTitleResponse(titleAssetResponse(read.fact.asset, read.fact.asset.hasCover ? publicCoverProxyUrl(origin, titleId) : undefined));
-    return await servePrivateTitle(request, env, clock, bucket, titleId, origin);
-  }
-  const publicRead = await readTitleWithFallback(bucket, titleKey(manifest.revision, titleId), stableTitleKey(titleId), titleId);
-  if (publicRead.status === 'ok') {
-    if (publicRead.asset.isPrivate) {
-      // §2.2 隔离被 CI 破坏了：私密清单出现在公开前缀。不服务、不降级，继续走私密门，
-      // 于是未准入的调用方看到的仍是那份与"未知剧目"逐字节相同的 404。
-      console.error('private title stored under the public prefix', titleId);
-    } else {
-      const asset: TitleAsset = publicRead.asset;
-      return publicTitleResponse(titleAssetResponse(asset, asset.hasCover ? publicCoverProxyUrl(origin, titleId) : undefined));
+  } else {
+    const publicRead = await readTitleWithFallback(bucket, titleKey(manifest.revision, titleId), stableTitleKey(titleId), titleId);
+    if (publicRead.status === 'ok') {
+      if (publicRead.asset.isPrivate) {
+        console.error('private title stored under the public prefix', titleId);
+      } else {
+        const asset: TitleAsset = publicRead.asset;
+        return publicTitleResponse(titleAssetResponse(asset, asset.hasCover ? publicCoverProxyUrl(origin, titleId) : undefined));
+      }
+    } else if (publicRead.status === 'rejected') {
+      return assetIntegrityFailure(titleKey(manifest.revision, titleId), publicRead.reason);
     }
-  } else if (publicRead.status === 'rejected') {
-    return assetIntegrityFailure(titleKey(manifest.revision, titleId), publicRead.reason);
   }
 
-  if (env.DB !== undefined) {
+  if (env.SEARCH_DISCOVERY_ENABLED === 'true' && env.DISCOVERY_BUCKET) {
+    try {
+      const context = publicDiscoveryContext(env, manifest, () => clock.nowSeconds());
+      const serverConfig = readDiscoveryConfig(env);
+      const onDemandAsset = await resolveCardDetail(context, titleId, serverConfig.providers);
+      if (onDemandAsset) {
+        return publicTitleResponse(titleAssetResponse(onDemandAsset, onDemandAsset.hasCover ? publicCoverProxyUrl(origin, titleId) : undefined));
+      }
+    } catch {
+      console.error('[titles] on-demand detail resolution failed');
+      return configUnavailableResponse();
+    }
+  }
+
+  if (manifest.workFacts === undefined && env.DB !== undefined) {
     const d1Asset = await findTitleAssetFromDb(env.DB, titleId, clock.nowSeconds());
     if (d1Asset !== null && !d1Asset.isPrivate) {
       return publicTitleResponse(titleAssetResponse(d1Asset, d1Asset.hasCover ? publicCoverProxyUrl(origin, titleId) : undefined));

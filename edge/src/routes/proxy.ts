@@ -1,4 +1,6 @@
-import { factsManifest, readWorkFact } from '../library/work-facts';
+import { factsManifest } from '../library/work-facts';
+import { readPublicFact, discoveryCoverOrigins, publicDiscoveryContext } from '../search/public-facts';
+import { readDiscoveryCard } from '../search/discovery-cards';
 import type { Clock } from '../core/clock';
 import type { Env } from '../types/env';
 import type { ContentRow } from '../db/content-repo';
@@ -23,15 +25,7 @@ import { assertAllowedTarget, globalFetcher, openUpstream, UpstreamFetchFailure,
 const FORWARDED_REQUEST_HEADERS = ['Range'] as const;
 
 /** Response headers we may echo. Everything else — `Set-Cookie`, `Location`, `Server` — is dropped. */
-const FORWARDABLE_RESPONSE_HEADERS = [
-  'Content-Type',
-  'Content-Length',
-  'Content-Range',
-  'Accept-Ranges',
-  'Cache-Control',
-  'ETag',
-  'Last-Modified'
-] as const;
+const FORWARDABLE_RESPONSE_HEADERS = ['Content-Type', 'Content-Length', 'Content-Range', 'Accept-Ranges', 'Cache-Control', 'ETag', 'Last-Modified'] as const;
 
 /** Multi-segment on purpose (指令包 §四.4): never collapse this to a single `{path}` parameter. */
 export const PROXY_PATH_PATTERN = /^\/proxy\/([^/]+)\/([^/]+)$/;
@@ -221,9 +215,15 @@ async function servePoster(request: Request, env: Env, clock: Clock, url: URL, h
   let row: ContentRow | null;
   let coverOrigins: readonly string[] | undefined;
   if (manifest?.workFacts !== undefined) {
-    const read = await readWorkFact(env, manifest, handle);
+    const stored = await readDiscoveryCard(publicDiscoveryContext(env, manifest, () => clock.nowSeconds()), handle);
+    if (stored?.candidate.coverTargetUrl) {
+      const relayed = await relay({ request, env, fetcher, targetUrl: stored.candidate.coverTargetUrl, isPrivate: false, coverOrigins: discoveryCoverOrigins(env) });
+      relayed.headers.set('Cache-Control', `public, max-age=${PUBLIC_POSTER_MAX_AGE_SECONDS}`);
+      return relayed;
+    }
+    const read = await readPublicFact(env, manifest, handle, clock.nowSeconds());
     if (read.status === 'rejected') refusal('SERVICE_UNAVAILABLE', 503);
-    if (read.status === 'ok') { row = read.fact.row; coverOrigins = manifest.coverOrigins; }
+    if (read.status === 'ok') { row = read.fact.row; coverOrigins = handle.startsWith('discovery_') ? discoveryCoverOrigins(env) : manifest.coverOrigins; }
     else {
       if (!(await privateAdmitted(request, env, clock))) refusal('NOT_FOUND', 404);
       row = await findContentRow(env.DB, handle);

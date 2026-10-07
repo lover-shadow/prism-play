@@ -1,10 +1,3 @@
-/**
- * 第 3 域（公开缓存）的检索半边 — 端侧 SQLite FTS5 本地索引（SPEC-APP-REFACTOR §A-6；AC-A6-1/2/3）。
- *
- * 快照已落盘，检索就必须断网可用：本模块只读端侧快照、只写端侧 SQLite，一次网络请求都不发。SQLite 表面沿用
- * `history-store.ts` 的注入范式（最小 `SqliteLike` 切片），jsdom 与真机同一份代码；库名单立 `prism_search.db`——它和海报一样属可重建缓存，而 Android 备份只白名单 prism_local.db，索引因此不进备份、换机后由快照重建。
- * 私密红线（AC-02-5）：剧名会写进磁盘，所以写入口一律先过 `isPrivateSubject`（与 `assertWritable` 同一个咽喉点谓词），被剔除的条目数目如实回报。精度（SPEC §11 陷阱二）：unicode61 不给汉字分词，入 FTS 列的是 gram 序列（单字 + 相邻二字 + 整串），FTS5 只负责召回，命中与否由 `local_search_doc` 的原文做覆盖校验——与云端 `stageRecall` + `covers()` 同款分工：只共享一个汉字的标题不算命中，未命中就返回空数组并如实报状态。
- */
 import { pinyin } from 'pinyin-pro';
 import type { CatalogChange, ContentItem, MatchType } from '../../../edge/src/types/api';
 import type { SqliteLike, SqliteStatement, SqliteValue } from './history-store';
@@ -16,7 +9,7 @@ export type { SqliteLike, SqliteStatement, SqliteValue } from './history-store';
 export const SEARCH_DATABASE = 'prism_search.db';
 export const SEARCH_FTS_TABLE = 'local_search_fts';
 export const SEARCH_DOC_TABLE = 'local_search_doc';
-/** AC-A6-1：本地检索一次最多 50 条，与云端 `pageSize` 上限同口径。召回预算与写入分块见下。 */
+/** 默认索引查询50条；分页请求可扩展到实际文档数，门面单页最多50条。 */
 export const SEARCH_RESULT_LIMIT = 50;
 const RECALL_LIMIT = 120, WRITE_CHUNK = 60, QUERY_MAX_CHARS = 80, SYNOPSIS_INDEX_CHARS = 200;
 
@@ -68,7 +61,7 @@ const FTS_STAGES: readonly Stage[] = [
 export interface LocalSearchDoc { content_id: string; doc_id: number; title: string; pinyin: string; initials: string; category: string; synopsis: string }
 export interface SearchHit { contentId: string; matchType: MatchType; title: string; category: string; initials: string }
 /** §A-6.2 的数据流载荷：全量快照落地只给 `items`（重建），增量批次给 `changes`（按 content_id 幂等）。 */
-export interface SnapshotFeed { items: readonly ContentItem[]; changes?: readonly CatalogChange[]; revision: number }
+export interface SnapshotFeed { items: readonly ContentItem[]; changes?: readonly CatalogChange[]; discoveries?: readonly ContentItem[]; revision: number }
 export interface IndexReport { indexed: number; removed: number; rejected: number; revision: number; replaced: boolean; skipped: boolean; error: string | null }
 /** `available` 为假时调用方必须如实回落云端，而不是把"索引没就绪"冒充成"目录里没有"。 */
 export interface SearchIndexStatus { available: boolean; docs: number; revision: number; indexedAt: number; error: string | null }
@@ -217,8 +210,8 @@ export function createSearchIndex(deps: SearchIndexDeps): SearchIndex {
     return { ...EMPTY_REPORT, indexed: rows.length, rejected, revision: feed.revision, replaced: true };
   }
   /** 增量批次只碰这批条目：下架墓碑走删除，改写走幂等替换，其余索引行原样留着。 */
-  async function applyChanges(changes: readonly CatalogChange[], revision: number): Promise<IndexReport> {
-    if (state.revision === revision) return { ...EMPTY_REPORT, revision, skipped: true };
+  async function applyChanges(changes: readonly CatalogChange[], revision: number, discovery = false): Promise<IndexReport> {
+    if (!discovery && state.revision === revision) return { ...EMPTY_REPORT, revision, skipped: true };
     const docs = admitted(changes.filter((change) => change.operation === 'upsert').map((change) => change.item));
     const doomed = [...new Set(changes.filter((change) => change.operation === 'delete').map((change) => change.contentId))];
     const set = await replaceStatements(doomed, docs.map((item, index) => docOf(item, nextDocId + index)));
@@ -231,6 +224,7 @@ export function createSearchIndex(deps: SearchIndexDeps): SearchIndex {
     const job = pending.then(async (): Promise<IndexReport> => {
       try {
         await ensureReady();
+        if (feed.discoveries !== undefined) return await applyChanges(feed.discoveries.map((item) => ({ operation: 'upsert', contentId: item.id, item, revision: state.revision })), state.revision, true);
         return feed.changes === undefined ? await rebuild(feed) : await applyChanges(feed.changes, feed.revision);
       } catch (error) {
         ready = false; failure = describeError(error);
@@ -249,7 +243,8 @@ export function createSearchIndex(deps: SearchIndexDeps): SearchIndex {
     } catch {
       return []; // 本机没有可用 SQLite：空结果 + status() 里的实话，视图据此回落云端而不是冒充空目录。
     }
-    const cap = Math.min(SEARCH_RESULT_LIMIT, Math.max(1, Math.floor(limit) || SEARCH_RESULT_LIMIT));
+    const cap = Math.min(state.docs, Math.max(1, Math.floor(limit) || SEARCH_RESULT_LIMIT));
+    const recallLimit = Math.min(state.docs, Math.max(RECALL_LIMIT, cap * 4));
     const terms = indexTokens(asked);
     const expression = matchExpression(terms);
     const latin = terms.every((term) => !isCjk(term));
@@ -257,6 +252,7 @@ export function createSearchIndex(deps: SearchIndexDeps): SearchIndex {
     const seen = new Set<string>();
     const take = (matchType: MatchType, docs: LocalSearchDoc[]): void => {
       for (const doc of docs) {
+        if (hits.length >= cap) return;
         if (seen.has(doc.content_id)) continue;
         seen.add(doc.content_id);
         hits.push({ contentId: doc.content_id, matchType, title: doc.title, category: doc.category, initials: doc.initials });
@@ -269,7 +265,7 @@ export function createSearchIndex(deps: SearchIndexDeps): SearchIndex {
     for (const stage of FTS_STAGES) {
       if (hits.length >= cap) break;
       if (stage.latinOnly === true && (!latin || asked.replace(/\s+/g, '').length < 2)) continue;
-      const recalled = await sqlite.queryResult<{ content_id?: string }>(SEARCH_DATABASE, RECALL_SELECT, [`${stage.column}: ${expression}`, RECALL_LIMIT]);
+      const recalled = await sqlite.queryResult<{ content_id?: string }>(SEARCH_DATABASE, RECALL_SELECT, [`${stage.column}: ${expression}`, recallLimit]);
       const ids = recalled.map((row) => textOf(row.content_id)).filter((id) => id !== '' && !seen.has(id));
       if (ids.length === 0) continue;
       const byId = new Map((await rowsOf(inList(DOC_BY_IDS, ids.length), [...ids])).map((doc) => [doc.content_id, doc]));
@@ -279,20 +275,23 @@ export function createSearchIndex(deps: SearchIndexDeps): SearchIndex {
     return hits;
   }
   /** 清缓存即清索引：本机 SQLite 不可用时只归零内存态，绝不让【清理缓存】因此失败。 */
-  async function clear(): Promise<void> {
-    state = { revision: 0, docs: 0, indexedAt: 0 };
-    nextDocId = 1;
-    try {
-      await ensureReady();
-      await sqlite.executeSet(SEARCH_DATABASE, [{ statement: FTS_CLEAR, values: [] }, { statement: DOC_CLEAR, values: [] }, { statement: STATE_UPSERT, values: [0, 0, now()] }], true);
-    } catch {
-      ready = false;
-    }
+  function clear(): Promise<void> {
+    const job = pending.then(async () => {
+      try {
+        await ensureReady();
+        await sqlite.executeSet(SEARCH_DATABASE, [{ statement: FTS_CLEAR, values: [] }, { statement: DOC_CLEAR, values: [] }, { statement: STATE_UPSERT, values: [0, 0, now()] }], true);
+      } catch {
+        ready = false;
+      }
+      state = { revision: 0, docs: 0, indexedAt: 0 };
+      nextDocId = 1;
+    });
+    pending = job.catch(() => undefined);
+    return job;
   }
   async function close(): Promise<void> {
     if (!ready) return;
     await sqlite.close(SEARCH_DATABASE); ready = false;
   }
-
   return { init: ensureReady, status: (): SearchIndexStatus => ({ available: ready && failure === null, docs: state.docs, revision: state.revision, indexedAt: state.indexedAt, error: failure }), sync, search, clear, close };
 }

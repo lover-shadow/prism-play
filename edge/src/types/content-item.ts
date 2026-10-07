@@ -21,6 +21,9 @@ export interface ContentItem {
   /** 清洗后的真实列表摘要，最多 SYNOPSIS_MAX_CODE_POINTS 个 Unicode 码点；无摘要时省略字段。 */
   synopsis?: string;
   episodeCount?: number;
+  releaseStatus?: 'finished' | 'ongoing';
+  lastSyncedEpisode?: number;
+  lastSyncedAt?: number;
   enabled?: boolean;
   shareable?: boolean;
   /** AI 短剧/漫剧形式标记（CLOUD-SYNC-JIT-PIPELINE-SPEC §3.3）；缺省即 0。 */

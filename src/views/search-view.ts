@@ -1,35 +1,22 @@
 /**
- * 搜索视图（SPEC §7 / AC-16 / M-5 + SPEC-APP-REFACTOR A-3：全屏 Overlay 的内容主体）。
- *
- * 输入即防抖补全（**200ms**，≤10 条并标明命中类型），回车或点击才发整词检索，结果按 `matchType` 分组且
- * 每组都显示命中理由；`q > 80` 先在本地按契约拒绝（VALIDATION_ERROR / 400），既不截断也不发请求，服务端真
- * 返回 400 时同样落到这条文案。输入法组合期间（compositionstart…compositionend）绝不发查询，否则拼音未
- * 上屏就乱搜。热词只由调用方注入，未注入就承认「暂无本地热词」，绝不凭空编造。
- *
- * A-6 定案：数据源换成端侧 SQLite FTS5——本视图不知道也不该知道数据来自哪张表，它只认 `api`。注入的门面把
- * `localFirst` 置真，本机命中与本机没命中才不会被说成"需联网"；`searchOnline` 存在时才给「联网补充检索」
- * 那颗按钮，且必须由用户点下去才发请求。没接索引的宿主（Web 构建）拿到的还是原样的云端门面，一条文案都不必改。
- *
- * 合规边界：本视图不写任何存储——检索记录只住内存（`search-history.ts`，冷启动即清空），结果只渲染公开条目
- * （`isPrivateSubject` 再挡一道），且从不把 `channelId` 写进 DOM——【个人探索】这个字不该出现在这里。
- * 共享 DOM / 五态基元来自 `history-view`（§10 单文件 ≤300 行的取舍）。
+ * 搜索 Overlay：200ms 补全、输入法保护、80 字契约拒绝；热词仅由宿主注入。
+ * 整词检索并行读取本机与联网首屏，各自20条分页；按内容ID合并，线上刷新元数据。
+ * 状态与请求绑定查询代次；仅渲染公开条目，检索记录仅在内存，DOM不暴露频道ID。
  */
 import type { ContentItem, MatchType, SearchResponse, SearchSuggestionType, SuggestionsResponse } from '../../edge/src/types/api';
 import { MATCH_TYPES } from '../../edge/src/types/api';
 import { ApiError } from '../core/api/client';
-import { isPrivateSubject } from '../core/storage/storage-domains';
+import { applySearchPage, createSearchPoll, type SearchInput, type SearchSource } from './search-poll';
 import { attempt, band, button, coverInto, errorCopy, glyphInto, isNetworkError, make, readyBand, stateBand } from './history-view';
 import { createRankingsRail } from './rankings-rail';
 import { createSearchHistoryBand, createSearchHistoryLedger } from './search-history';
 import './views.css';
-
+import { groupSeries } from '../core/series'; import { createSeriesCard } from './series-card';
 export interface SearchApi {
-  search(input: { q: string; channel?: string; tag?: string; page?: number; pageSize?: number }): Promise<SearchResponse>;
+  search(input: SearchInput): Promise<SearchResponse>;
   suggestions(q: string): Promise<SuggestionsResponse>;
-  /** A-6：端侧 FTS5 门面把这里置 true——视图据此不再宣称"检索需联网"，零结果也只提示可联网补充。 */
   localFirst?: boolean;
-  /** 显式「联网补充检索」的真实落点：宿主没接云端就不渲染这颗按钮，不留假开关。 */
-  searchOnline?(input: { q: string; channel?: string; tag?: string; page?: number; pageSize?: number }): Promise<SearchResponse>;
+  searchOnline?(input: SearchInput): Promise<SearchResponse>;
 }
 export interface BrowseTarget {
   channel?: string;
@@ -39,44 +26,42 @@ export interface SearchViewDeps {
   api: SearchApi;
   root: HTMLElement;
   onOpenTitle(contentId: string): void;
-  /** 本地公开热词：只接受调用方注入，本视图不生成、不缓存、不落盘。 */
   hotWords?: string[];
-  /** 零结果与「返回视界」的去处：由宿主切到【精选】对应频道/标签。 */
   onBrowse?: (target: BrowseTarget) => void;
-  /** 端侧榜单数据源（本机公开快照）；未注入即整块榜单区不渲染，不做空壳榜单。 */
   localItems?: () => readonly ContentItem[];
-  /** Overlay 的关闭动作：未注入（仍当普通视图用）时保留「返回视界」口径。 */
   onClose?: () => void;
   debounceMs?: number;
 }
 export interface SearchView {
   mount(): Promise<void>;
-  /** 供宿主键盘快捷键与 Overlay 打开动画聚焦输入框。 */
   focus(): void;
   destroy(): void;
 }
-
 const MAX_QUERY_LENGTH = 80;
 const SUGGESTION_LIMIT = 10;
 const NETWORK_COPY = '网络不可用：词法检索需联网，点播同样需联网；本机只留有公开目录与海报。';
 const TOO_LONG_COPY = `查询词超过 ${MAX_QUERY_LENGTH} 字：按契约以 VALIDATION_ERROR（400）拒绝，未截断、未发送请求。`;
 const IDLE_COPY = '输入剧名、别名、拼音首字母或关键词即可开始检索；本期为词法检索。';
 /** A-6：端侧索引命中失败是"本机目录里没有"，不是"检索失败"，两者文案必须分开。 */
-const LOCAL_ZERO_COPY = '本机公开目录未命中：可换个写法（别名、拼音首字母），或回【精选】按频道与标签浏览。联网补充需手动点击，本机不会自动发出请求。';
-/** 命中类型 → 界面理由文案（与闭集 enum 同构：新增类型会在编译期被要求补齐）。 */
+const LOCAL_ZERO_COPY = '本机公开目录未命中：可换个写法（别名、拼音首字母），或回【精选】按频道与标签浏览。';
+const PAGE_SIZE = 20;
+type Source = SearchSource;
+type Session = { ticket: number; query: string; sources: Source[] };
 const MATCH_LABEL: Readonly<Record<MatchType, string>> = {
   exact: '剧名精确命中', alias: '别名命中', pinyin: '拼音首字母或全拼命中', fuzzy: '模糊或纠错命中', related: '题材同类命中'
 };
 const SUGGESTION_LABEL: Readonly<Record<SearchSuggestionType, string>> = {
   title: '剧名', alias: '别名', pinyin: '拼音', category: '分类', correction: '纠错建议'
 };
-
 export function createSearchView(deps: SearchViewDeps): SearchView {
   const debounceMs = deps.debounceMs ?? 200;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let composing = false;
   let disposed = false;
   let generation = 0;
+  let session: Session | null = null;
+  const poll = createSearchPoll();
+  const moreButton = button('加载更多', () => { if (session !== null) void loadPages(session); }, { el: 'search-more' });
   let mode: 'recommendations' | 'candidates' | 'results' = 'recommendations';
   const quick = band('猜你想搜', 'search-hot', '本地公开热词，只来自调用方注入');
   const suggest = band('补全建议', 'search-suggest');
@@ -96,7 +81,6 @@ export function createSearchView(deps: SearchViewDeps): SearchView {
   input.setAttribute('autocomplete', 'off');
   glyphInto(heading, 'search', 20);
   const head = make('div', 'pv-head');
-  // Overlay 形态给「关闭」，普通视图形态保留「返回视界」：两种宿主都不留无处可去的死屏。
   head.append(heading, deps.onClose === undefined
     ? button('返回视界', () => void deps.onBrowse?.({}), { icon: 'arrowLeft', cls: 'pv-btn-ghost' })
     : button('关闭', () => deps.onClose?.(), { icon: 'close', cls: 'pv-btn-ghost', el: 'search-close' }));
@@ -104,8 +88,7 @@ export function createSearchView(deps: SearchViewDeps): SearchView {
   deps.root.classList.add('pv-view', 'srch-view');
   deps.root.append(head, form, suggest.wrap, results.wrap, quick.wrap, historyBand.wrap);
   suggest.wrap.hidden = results.wrap.hidden = true;
-
-  // 榜单区：有本地快照读面才存在（AC-A3-3 断网可用就建立在这块完全不联网的前提上）。
+  results.wrap.tabIndex = -1;
   let rail: ReturnType<typeof createRankingsRail> | null = null;
   if (deps.localItems !== undefined) {
     const railHost = make('div', 'srch-rail-host');
@@ -123,9 +106,7 @@ export function createSearchView(deps: SearchViewDeps): SearchView {
     const railHost = deps.root.querySelector<HTMLElement>('[data-el="rank-host"]');
     if (railHost !== null) railHost.hidden = mode !== 'recommendations';
   }
-
   const currentQuery = (): string => input.value.trim();
-  /** 空白词只承认「还没输入」；超长词按契约本地拒绝——两者都不发请求，也都不截断输入。 */
   function rejectLocalQuery(query: string): string | null {
     if (query.length === 0) return '请输入剧名、别名或拼音首字母后再检索（未发送任何请求）。';
     return query.length > MAX_QUERY_LENGTH ? TOO_LONG_COPY : null;
@@ -179,89 +160,110 @@ export function createSearchView(deps: SearchViewDeps): SearchView {
     readyBand(suggest, [list, make('p', 'pv-hint', `最多显示 ${SUGGESTION_LIMIT} 条公开词法补全。`)]);
   }
   function resultCard(item: ContentItem, reason: string): HTMLElement {
-    const card = make('button', 'pv-rail-card');
-    const poster = make('span', 'pv-rail-poster');
+    const card = make('button', 'srch-result-card');
+    const poster = make('span', 'srch-result-poster');
     card.type = 'button';
     card.dataset.el = 'result-card';
     card.dataset.contentId = item.id;
     card.setAttribute('aria-label', `${item.title}：${reason}`);
     coverInto(poster, item.coverUrl, item.title, 'image', 16);
-    card.append(poster, make('span', 'pv-rail-label', item.title), make('span', 'pv-meta', `${item.category} · ${reason}`));
+    card.append(poster, make('span', 'srch-result-title', item.title), make('span', 'pv-meta', `${item.category} · ${reason}`));
     card.addEventListener('click', () => deps.onOpenTitle(item.id));
     return card;
   }
-  /** 按 matchType 分组；同名异剧各自保留（绝不按标题去重，AC-16 末条）。 */
-  function paintGroups(items: SearchResponse['items']): void {
+  function paintResults(active: Session): void {
+    const focusedMore = document.activeElement === moreButton || document.activeElement === results.wrap;
+    const merged = new Map<string, { entry: SearchResponse['items'][number]; local: boolean }>();
+    for (const source of active.sources) {
+      for (const entry of source.items) merged.set(entry.item.id, { entry, local: !source.online && deps.api.localFirst === true });
+    }
     const groups: Node[] = [];
+    const series = groupSeries([...merged.values()].map(({ entry }) => entry.item));
+    const groupType = (group: typeof series[number]): MatchType => MATCH_TYPES.find((type) => group.items.some((item) => merged.get(item.id)?.entry.matchType === type)) ?? 'related';
     for (const type of MATCH_TYPES) {
-      const bucket = items.filter((entry) => entry.matchType === type);
+      const selected = series.filter((group) => groupType(group) === type);
+      const bucket = selected.flatMap((group) => group.items.map((item) => merged.get(item.id)!));
       if (bucket.length === 0) continue;
-      const row = make('div', 'pv-rail');
-      row.append(...bucket.map((entry) => resultCard(entry.item, MATCH_LABEL[entry.matchType])));
+      const grid = make('div', 'srch-results-grid');
+      grid.append(...selected.map((group) => createSeriesCard(group, (item) => {
+        const local = merged.get(item.id)?.local, query = active.query.toLocaleLowerCase();
+        const reason = type !== 'fuzzy' || !local ? MATCH_LABEL[type]
+          : item.title.toLocaleLowerCase().includes(query) ? '剧名关键词命中'
+          : item.synopsis?.toLocaleLowerCase().includes(query) ? '简介关键词命中' : '本机模糊命中';
+        return resultCard(item, reason);
+      }, deps.onOpenTitle)));
       const group = make('section', 'srch-group');
       group.dataset.matchType = type;
-      group.append(make('h4', 'pv-band-note', `${MATCH_LABEL[type]}（${bucket.length}）`), row);
+      group.append(make('h4', 'pv-band-note', `${type === 'fuzzy' && bucket.every((hit) => hit.local) ? '本机关键词或模糊命中' : MATCH_LABEL[type]}（${bucket.length}）`), grid);
       groups.push(group);
     }
-    if (groups.length === 0) return paintZeroResult();
-    readyBand(results, groups);
-  }
-  function paintZeroResult(): void {
-    results.wrap.dataset.state = 'empty';
-    deps.root.dataset.state = 'empty';
-    const nodes: Node[] = [
-      make('p', 'pv-state pv-state-empty', deps.api.localFirst === true ? LOCAL_ZERO_COPY : '没有找到匹配的公开剧目：可换个写法（别名、拼音首字母），或回【精选】按频道与标签浏览。'),
-      button('回【精选】浏览', () => void deps.onBrowse?.({}), { icon: 'compass', cls: 'pv-btn-ghost', el: 'browse-fallback' })
-    ];
-    // 联网补充只在宿主真的接了云端时才出现，且由用户点下去才发请求（A-6：本地未命中默认不发请求）。
-    if (deps.api.localFirst === true && deps.api.searchOnline !== undefined) {
-      nodes.push(button('联网补充检索', () => void runSearch(true), { icon: 'signal', cls: 'pv-btn-ghost', el: 'search-online' }));
+    const busy = active.sources.some((source) => source.busy || source.pending);
+    const failed = active.sources.find((source) => source.error !== '');
+    const state = merged.size > 0 ? 'ready' : busy ? 'loading' : failed ? 'error' : 'empty';
+    deps.root.dataset.state = results.wrap.dataset.state = state;
+    const status = make('div', 'srch-status');
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+    for (const source of active.sources) {
+      const local = !source.online && deps.api.localFirst === true;
+      const text = source.pending ? '联网发现仍在持续；已成功结果保留，可稍后重试继续。'
+        : source.busy ? (local ? '正在检索本机公开目录…' : '联网补充中…')
+        : source.error ? `${local ? '本机检索' : '联网补充'}失败：${source.error}；已成功结果保留。`
+        : source.done && source.items.length === 0 ? (local ? LOCAL_ZERO_COPY : '联网目录未命中：可换个写法，或回【精选】浏览。') : '';
+      if (text !== '') status.append(make('p', source.error ? 'pv-state pv-state-error' : 'pv-hint', text));
     }
-    const words = hotWords();
-    if (words.length > 0) nodes.push(make('p', 'pv-hint', '也可以试试这些公开热词或标签：'), wordChips('zero-word', words));
-    results.body.replaceChildren(...nodes);
+    groups.push(status);
+    if (merged.size === 0 && !busy) groups.push(button('回【精选】浏览', () => void deps.onBrowse?.({}), { icon: 'compass', cls: 'pv-btn-ghost', el: 'browse-fallback' }), wordChips('zero-word', hotWords()));
+    const hasMore = active.sources.some((source) => source.more);
+    moreButton.disabled = active.sources.some((source) => source.busy);
+    moreButton.textContent = busy ? '正在加载…' : failed ? '重试 / 加载更多' : '加载更多';
+    if (hasMore) groups.push(moreButton);
+    results.body.replaceChildren(...groups);
+    if (focusedMore) (hasMore && !busy ? moreButton : results.wrap).focus();
   }
-  /** 本机索引与显式联网补充共用同一条落图路径：错误口径与私密剔除因此只写一次。 */
-  async function finishSearch(ticket: number, task: () => Promise<SearchResponse>): Promise<void> {
-    const result = await attempt(task);
-    if (disposed || ticket !== generation) return;
-    syncRail();
-    if (!result.ok) {
-      const network = isNetworkError(result.error);
-      const message = result.error instanceof ApiError && result.error.code === 'VALIDATION_ERROR' ? TOO_LONG_COPY : errorCopy(result.error, NETWORK_COPY);
-      deps.root.dataset.state = network ? 'disabled' : 'error';
-      return stateBand(results, network ? 'disabled' : 'error', message);
-    }
-    deps.root.dataset.state = 'ready';
-    paintGroups(result.value.items.filter((entry) => !isPrivateSubject(entry.item)));
+  async function loadPages(active: Session, only?: Source): Promise<void> {
+    if (disposed || active.ticket !== generation || (only ? only.busy : active.sources.some((source) => source.busy))) return;
+    const pending = only ? [only] : active.sources.filter((source) => source.more);
+    if (!only) for (const source of pending) source.polls = 0;
+    for (const source of pending) { source.busy = true; source.error = ''; }
+    paintResults(active);
+    await Promise.all(pending.map(async (source) => {
+      const input: SearchInput = { q: active.query, page: source.page, pageSize: PAGE_SIZE,
+        ...(source.discoveryPage === undefined ? {} : { discoveryPage: source.discoveryPage }) };
+      const result = await attempt(() => source.online ? deps.api.searchOnline!(input) : deps.api.search(input));
+      if (disposed || active.ticket !== generation || active.query !== currentQuery()) return;
+      source.busy = false;
+      if (result.ok) {
+        applySearchPage(source, result.value);
+        poll.schedule(source, result.value, () => void loadPages(active, source));
+      } else {
+        source.error = result.error instanceof ApiError && result.error.code === 'VALIDATION_ERROR' ? TOO_LONG_COPY : errorCopy(result.error, NETWORK_COPY);
+      }
+      paintResults(active);
+    }));
   }
-  async function runSearch(online = false): Promise<void> {
+  async function runSearch(): Promise<void> {
     if (disposed || composing) return;
-    clearTimer();
+    clearTimer(); poll.cancel();
     const ticket = ++generation;
     syncRail('results');
     const query = currentQuery();
     const rejection = rejectLocalQuery(query);
     if (rejection !== null) {
       deps.root.dataset.state = 'disabled';
-      syncRail();
       return stateBand(results, 'disabled', rejection);
     }
-    const task = (): Promise<SearchResponse> => online === true && deps.api.searchOnline !== undefined
-      ? deps.api.searchOnline({ q: query })
-      : deps.api.search({ q: query });
-    // 只有真的发出去的检索才进本次会话记录：本地拒绝的词一个都不记。
     historyLedger.note(query);
     historyBand.paint();
-    deps.root.dataset.state = 'loading';
-    stateBand(results, 'loading', online === true ? '正在向云端目录补充检索…' : deps.api.localFirst === true ? '正在检索本机公开目录…' : '正在检索公开目录…');
-    await finishSearch(ticket, task);
+    const source = (online: boolean): Source => ({ online, page: 1, more: true, busy: false, done: false, error: '', items: [] });
+    session = { ticket, query, sources: [source(false), ...(deps.api.searchOnline === undefined ? [] : [source(true)])] };
+    await loadPages(session);
   }
   function onInput(): void {
     if (composing) return;
     const query = currentQuery();
     ++generation;
-    clearTimer();
+    clearTimer(); poll.cancel();
     syncRail(query === '' ? 'recommendations' : 'candidates');
     if (query === '') {
       hideSuggest(IDLE_COPY, 'empty');
@@ -271,12 +273,11 @@ export function createSearchView(deps: SearchViewDeps): SearchView {
     }
     scheduleSuggestions(query);
   }
-  input.addEventListener('compositionstart', () => { composing = true; });
+  input.addEventListener('compositionstart', () => { composing = true; ++generation; clearTimer(); poll.cancel(); session = null; });
   input.addEventListener('compositionend', () => { composing = false; onInput(); });
   input.addEventListener('input', onInput);
   input.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); void runSearch(); } });
   form.addEventListener('submit', (event) => { event.preventDefault(); void runSearch(); });
-
   return {
     async mount(): Promise<void> {
       paintQuick();
@@ -288,7 +289,8 @@ export function createSearchView(deps: SearchViewDeps): SearchView {
     focus(): void { input.focus(); },
     destroy(): void {
       disposed = true;
-      clearTimer();
+      session = null;
+      clearTimer(); poll.cancel();
       rail?.destroy();
       historyBand.destroy();
       deps.root.replaceChildren();
