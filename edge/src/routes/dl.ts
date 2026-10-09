@@ -29,15 +29,9 @@ import { renderDownloadPage, type DownloadAudience } from '../html/dl-page';
 import { renderLandingPage } from '../html/landing-page';
 import { sanitizeDisplayToken } from '../html/escape';
 
-/**
- * Env already declares `APK_BUCKET` (optional). `APK_PUBLIC_BASE_URL` is NOT in
- * `edge/src/types/env.ts` and that file is frozen for me, so the R2 public domain is read through
- * this local narrow type instead. Reported to the Chief Builder: it should become a declared optional
- * string in Env plus a wrangler `[vars]` entry, provisioned by the supervision agent.
- */
+/** The APK bucket binding. The artifact is streamed straight from R2, never via a public bucket URL. */
 export interface ApkDeliveryBindings {
   APK_BUCKET?: R2Bucket;
-  APK_PUBLIC_BASE_URL?: string;
 }
 
 export type DlEnv = Env & ApkDeliveryBindings;

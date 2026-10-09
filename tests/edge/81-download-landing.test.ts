@@ -66,11 +66,10 @@ function bucketWith(keys: readonly string[]): R2Bucket {
   } as unknown as R2Bucket;
 }
 
-async function apkEnv(bucket: R2Bucket | undefined, publicBase: string | undefined): Promise<PrismTestEnv> {
+async function apkEnv(bucket: R2Bucket | undefined): Promise<PrismTestEnv> {
   const env = await createTestEnv();
   const view = env as DlEnv;
   view.APK_BUCKET = bucket;
-  view.APK_PUBLIC_BASE_URL = publicBase;
   await env.KV.put('config:version', JSON.stringify({ android: { versionCode: 21606, versionName: '2.6.6', downloadUrl: `${ORIGIN}/dl/latest/android`, artifact: { key: ANDROID_APK_KEY, sha256: HASH, bytes: 4_200_000 } } }));
   return env;
 }
@@ -159,7 +158,7 @@ describe('/dl/latest/{platform} (五.3)', () => {
   });
 
   it('404s every platform this period does not ship, pc included', async () => {
-    const env = await apkEnv(bucketWith([ANDROID_APK_KEY]), 'https://release.invalid/');
+    const env = await apkEnv(bucketWith([ANDROID_APK_KEY]));
     for (const platform of ['pc', 'windows', 'ios', 'android-tv']) {
       const response = await handleApkDownload(new Request(`${ORIGIN}/dl/latest/${platform}`), env as DlEnv, env.clock);
       expect(response.status).toBe(404);
@@ -168,7 +167,7 @@ describe('/dl/latest/{platform} (五.3)', () => {
   });
 
   it('302s to the verified same-origin artifact when it exists', async () => {
-    const env = await apkEnv(bucketWith([ANDROID_APK_KEY]), 'https://release.invalid/pub');
+    const env = await apkEnv(bucketWith([ANDROID_APK_KEY]));
     const response = await handleApkDownload(new Request(`${ORIGIN}/dl/latest/android`), env as DlEnv, env.clock);
     expect(response.status).toBe(302);
     expect(response.headers.get('Location')).toBe(`${ORIGIN}/dl/artifacts/21606/${HASH}.apk`);
@@ -178,13 +177,13 @@ describe('/dl/latest/{platform} (五.3)', () => {
 
   it("503s when the published artifact or bucket is missing", async () => {
     for (const bucket of [bucketWith([]), undefined]) {
-      const env = await apkEnv(bucket, undefined);
+      const env = await apkEnv(bucket);
       const response = await handleApkDownload(new Request(`${ORIGIN}/dl/latest/android`), env as DlEnv, env.clock);
       expect(response.status).toBe(503);
     }
   });
   it("does not depend on a public external base", async () => {
-    const env = await apkEnv(bucketWith([ANDROID_APK_KEY]), undefined);
+    const env = await apkEnv(bucketWith([ANDROID_APK_KEY]));
     expect((await handleApkDownload(new Request(`${ORIGIN}/dl/latest/android`), env as DlEnv, env.clock)).status).toBe(302);
   });
 });

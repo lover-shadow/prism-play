@@ -84,7 +84,6 @@ async function portalEnv(options: { apk?: boolean; version?: string | null }): P
     env.APK_BUCKET = { head: async () => options.apk === false ? null : { size: r.artifact.bytes, customMetadata: { sha256: r.artifact.sha256, versionCode: String(r.versionCode), versionName: r.versionName } } } as unknown as R2Bucket;
     await env.kv.put(VERSION_KV_KEY, JSON.stringify(published));
   }
-  env.APK_PUBLIC_BASE_URL = 'https://release.invalid/pub';
 
   return env;
 }
