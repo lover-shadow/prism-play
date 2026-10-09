@@ -17,6 +17,9 @@ export interface DiscoveryCandidate {
   channelId: DiscoveryChannel; category?: string; isAi?: boolean;
   episodeCount?: number; coverTargetUrl?: string; synopsis?: string;
 }
+export class IncompleteDiscoverySearch extends Error {
+  constructor(readonly candidates: DiscoveryCandidate[]) { super('discovery-search-incomplete'); }
+}
 export interface DiscoveryEpisode {
   episodeNumber: number; sourceEpisodeId?: string; title: string; durationSeconds?: number;
   mediaValidation: 'url-only-not-playback-verified';

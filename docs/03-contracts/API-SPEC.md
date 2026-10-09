@@ -1,5 +1,14 @@
 # 客户端与 Cloudflare 边缘 API 契约规范
 
+2026-10-09 系列修复r2补充：`GET /api/search/discoveries`端侧预算保持8秒；超时不提交cursor，播放让路与本地目录可用不变。`/api/search`搜索补缺预算失败时保留已成功校验卡片并返回discoveryFailed=true，不缓存完整成功；客户端pending/failed/部分分页结果不进入同进程成功缓存，失败页面不丢已取得卡片。接口与DTO不新增，公开准入校验不省略，执行收据见系列修复二合一文档。
+
+## 2026-10-09 最小闭环当前契约
+
+android新增可选artifact={key,bytes,sha256}，key为releases/android/<versionCode>/<sha256>.apk；版本读可缺，下载入口缺失或R2大小/元数据不匹配返回503。`GET /dl/latest/android`仅302到已核验同源 `/dl/artifacts/{versionCode}/{file}`，不再外域跳转。
+artifact GET完整流式200，HEAD空body，APK MIME/Content-Length/文件名正确，Accept-Ranges:none；Range/If-Range忽略，不宣称续传。官网版本/大小取同一指针。
+`GET /api/announcements?versionCode=`有效消息；Admin GET/POST `/api/admin/announcements`受现有会话/同源保护，人工全量替换/删除、读回核验。审计失败不继续发布，KV失败503，重复ID409要求对账，不宣称完整幂等状态机。
+本批新版读取真实AndroidCode只做可选提醒，失败不阻塞、播放不弹；强制升级/公告中心/Admin发布UI延期。机读正本及二合一r2同步，历史不同下载描述在本批由本节取代。
+
 > **基础域名**：`https://play.prismos.org`
 > **服务承载**：Cloudflare Workers + Cron + D1 + KV + R2
 > **认证方式**：Bearer Token（Ed25519 / EdDSA 签名的 JWT）+ 私密探索短时会话头
@@ -223,7 +232,7 @@
 依据 SPEC-v2.0 §10.1.1 / Accepted ADR-006：完整查询本机先显、默认自动联网补充，有无命中均执行，不逐键穿透。云端真实检索受控公开来源；保留白名单/逐跳SSRF/限流/超时和零品牌响应及日志（无原始URL/响应/域名）。private/exclude与public的查询、缓存、索引、持久层和日志隔离，私密双准入不变。
 
 - `GET /api/search?q=&channel=&tag=&page=&pageSize=&discoveryPage=` 保留既有参数与 `items/page`，pageSize≤20；可选discoveryPage为1～200。`hasMore:boolean`可选，缺省未知而非false；响应含discoveryPending/discoveryFailed/retryAfterSeconds，App按等待秒数自动同词同页poll直到pending结束，切词取消旧poll及迟到响应。成功partial保留已核验结果，pending/failed不等于确认无结果，不伪装成功empty。跨页稳定ID去重、准确已加载数、三列全可达，不新增total。
-- `GET /api/search/discoveries?after=&limit=`：after为独立seq cursor（初始0），limit默认60、最大100；返回 `{changes:[{seq,workId,operation:upsert|withdraw,updatedAt,card?}],cursor,hasMore}`，updatedAt为Unix秒，card为可选ContentItem，不含播放地址。与 `/api/catalog/changes` revision独立；仅公开增量，无私密元数据/墓碑，数据与cursor同事务幂等提交。
+- `GET /api/search/discoveries?after=&limit=`：after为独立seq cursor（初始0），limit默认60、最大100，但limit只是上界：服务端单页硬预算10条以守住免费档CPU预算，返回不足10且hasMore=false即已到当前游标末尾，客户端须按hasMore继续推进同一游标，游标单调不跳号；历史upsert若已撤回/过期/被基线接管则降级为withdraw返回。返回 `{changes:[{seq,workId,operation:upsert|withdraw,updatedAt,card?}],cursor,hasMore}`，updatedAt为Unix秒，card为可选ContentItem，不含播放地址。与 `/api/catalog/changes` revision独立；仅公开增量，无私密元数据/墓碑，数据与cursor同事务幂等提交。
 - 查询缓存/同词并发合并包含规范化查询、频道/标签过滤、public边界与来源配置版本，分页不串；只复用新鲜核验结果，过期重验，跨实例合并范围需举证。成功确认无结果才短负缓存≤5分钟，超时/限流/来源或核验失败不写成功空集。补充失败保留本机结果并明确失败/重试；pending可返回200等待态，成功partial保留结果；仅已结束失败且无可用结果时按既有ErrorResponse返回503，不以200空集掩盖失败或宣称确认无结果；429使用既有RATE_LIMITED。
 - 核验当前公开作品身份、可信映射、完整集表/季数与可用线路后幂等共享持久保存facts/发现索引，不等起播；共享永久剧库不随查询TTL删除。新集/新季、线路失效和撤片须重验更新，持久存在不等于永久可播。
 - 静态全量基底仍按同generation校验发布，独立共享发现增量不每搜改整个manifest；搜索/详情/海报/分享复核基底或增量的版本及公开flags，禁止旧公开D1兜底掩盖损坏。客户端稳定ID/版本原子合并数据与同步进度，重启/整包更新保留发现，只有明确撤片/删除事实才移除。发现同步使用独立seq端点，不将catalog/changes当发现同步。当前基线disabled/private不能被增量覆盖。

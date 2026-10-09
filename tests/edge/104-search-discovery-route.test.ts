@@ -90,6 +90,15 @@ describe('search discovery public route', () => {
     expect(first.items.map((hit) => hit.item.id)).toEqual(['base_9', 'new_1']);
     expect(next.items.map((hit) => hit.item.id)).toEqual(['base_9', 'new_1', 'new_2']);
   });
+  it('verifies repeated work changes once per page without dropping sequence entries', async () => {
+    mocks.changes.mockResolvedValue({ changes: [5, 6, 7].map((seq) => ({ seq, workId: 'new', operation: 'upsert', updatedAt: 100 })), cursor: 7, hasMore: false });
+    const response = await handleSearchDiscoveries(new Request('https://app.invalid/api/search/discoveries?after=4&limit=100'), env, clock);
+    const body = await response.json() as { changes: unknown[]; cursor: number };
+    expect(body.changes).toHaveLength(3);
+    expect(body.cursor).toBe(7);
+    expect(mocks.card).toHaveBeenCalledTimes(1);
+    expect(mocks.fact).toHaveBeenCalledTimes(1);
+  });
   it('changes cursor advances even for unverifiable upserts, emitting metadata-free tombstones', async () => {
     mocks.changes.mockResolvedValue({ changes: [{ seq: 5, workId: 'bad', operation: 'upsert', updatedAt: 100, card: card('bad') }], cursor: 5, hasMore: true });
     mocks.fact.mockResolvedValue({ status: 'rejected' });

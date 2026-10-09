@@ -11,7 +11,8 @@ export function createSeriesCard(group: SeriesGroup, card: (item: ContentItem) =
   const select = make('select', 'pv-input');
   select.setAttribute('aria-label', `${group.title}选择季或部`);
   for (const item of group.items) {
-    const option = make('option', '', item.title); option.value = item.id; select.append(option);
+    const text = group.labels?.[item.id] ? `${item.title} (${group.labels[item.id]})` : item.title;
+    const option = make('option', '', text); option.value = item.id; select.append(option);
   }
   root.append(make('span', 'pv-meta', `已找到 ${group.items.length} 季或部`), select,
     button('播放所选季', () => open(select.value), { cls: 'pv-btn-ghost', el: 'series-open' }));

@@ -748,13 +748,83 @@ components:
             downloadUrl:
               type: string
               example: https://play.prismos.org/dl/latest/android
+            artifact:
+              type: object
+              additionalProperties: false
+              required: [key, bytes, sha256]
+              description: 下载入口必需的已核验不可变APK；缺失时版本可读但下载503
+              properties:
+                key:
+                  type: string
+                  pattern: '^releases/android/[1-9][0-9]*/[a-f0-9]{64}\.apk$'
+                bytes:
+                  type: integer
+                  minimum: 1
+                sha256:
+                  type: string
+                  pattern: '^[a-f0-9]{64}$'
             minVersionCode:
               type: integer
-              description: 低于该版本码时客户端应提示强制更新
+              description: 预留升级策略字段；当前最小闭环仅提供可选提醒，不启用强制门禁
               example: 100
             force:
               type: boolean
               example: false
+
+    AnnouncementItem:
+      type: object
+      required: [id, revision, title, body, startsAt, endsAt]
+      properties:
+        id:
+          type: string
+          example: anno_20261008
+        revision:
+          type: integer
+          example: 1
+        title:
+          type: string
+          example: 欢迎使用光影Play全新版本
+        body:
+          type: string
+          example: 启动速度与线路调度已全面优化。
+        startsAt:
+          type: integer
+          example: 1791470000
+        endsAt:
+          type: integer
+          example: 1792000000
+
+    AnnouncementDocument:
+      type: object
+      required: [schema, revision, items]
+      description: 全量纯文本消息，UTF-8最多7KB；修改消息提高条目revision，撤下以items为空数组替换
+      properties:
+        schema: {type: integer, enum: [1]}
+        revision: {type: integer, minimum: 1}
+        items:
+          type: array
+          maxItems: 10
+          items:
+            allOf:
+              - $ref: '#/components/schemas/AnnouncementItem'
+              - type: object
+                required: [enabled]
+                properties:
+                  enabled: {type: boolean}
+                  minVersionCode: {type: integer, minimum: 1}
+                  maxVersionCode: {type: integer, minimum: 1, nullable: true}
+
+    AnnouncementsResponse:
+      type: object
+      required: [revision, items]
+      properties:
+        revision:
+          type: integer
+          example: 1
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnnouncementItem"
 
 paths:
   /api/channels:
@@ -958,6 +1028,8 @@ paths:
       description: >-
         after为独立seq cursor，不是catalog revision；返回公开upsert/withdraw，不返回private/exclude元数据或私密墓碑。
         当前基线disabled/private裁决不得被发现覆盖；card为可选公开卡片，不含播放地址或内部R2事实句柄。
+        limit 是上界而非承诺：服务端单页硬预算 10 条以守住免费档 CPU 预算，返回条数少于请求值且 hasMore=false 即已到当前游标末尾；
+        历史 upsert 若已撤回/过期/被基线接管则降级为 withdraw 返回，游标按 seq 单调推进、绝不跳号。
         D1存metadata，独立DISCOVERY_BUCKET存事实/cursor且无r2.dev；数据与客户端cursor同事务幂等提交，整包不含作品不是删除证明。
       parameters:
         - name: after
@@ -1456,6 +1528,31 @@ paths:
               schema:
                 $ref: "#/components/schemas/VersionResponse"
 
+  /api/announcements:
+    get:
+      tags: [系统]
+      summary: 获取应用内最新有效公告列表
+      parameters:
+        - name: versionCode
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: 客户端当前版本码
+      responses:
+        "200":
+          description: 成功返回有效公告列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnnouncementsResponse"
+        "400":
+          description: 参数格式无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/telemetry/lines:
     post:
       tags: [系统]
@@ -1576,7 +1673,7 @@ paths:
   /dl/latest/{platform}:
     get:
       tags: [分享与下载]
-      summary: 已发布 Android 安装包版本化下载入口（无产物返回 404）
+      summary: 已核验 Android 安装包同域下载入口
       parameters:
         - name: platform
           in: path
@@ -1586,9 +1683,41 @@ paths:
             enum: [android]
       responses:
         "302":
-          description: 仅 android，302 重定向至 Cloudflare R2 已发布的最新 APK；pc 等值返回 404
+          description: android读取版本artifact并核对R2元数据后302至同域/dl/artifacts/{versionCode}/{sha256}.apk，no-store
         "404":
-          description: 未支持的平台或尚无可用安装包
+          description: 未支持的平台
+        "503":
+          description: 版本、对象或元数据尚未核验一致
+
+  /dl/artifacts/{versionCode}/{file}:
+    parameters:
+      - name: versionCode
+        in: path
+        required: true
+        schema: {type: integer, minimum: 1}
+      - name: file
+        in: path
+        required: true
+        schema: {type: string, pattern: '^[a-f0-9]{64}\.apk$'}
+    get:
+      tags: [分享与下载]
+      summary: 不可变APK完整流式下载
+      description: Accept-Ranges:none，Range/If-Range忽略并完整200；本批不支持续传，无外域跳转
+      responses:
+        '200':
+          description: 与对象大小一致的完整APK字节，公开不可变缓存
+          content:
+            application/vnd.android.package-archive:
+              schema: {type: string, format: binary}
+        '404': {description: 非法路径或对象不存在}
+        '503': {description: 存储不可用}
+    head:
+      tags: [分享与下载]
+      summary: APK大小与类型，无响应体
+      responses:
+        '200': {description: Content-Length为完整对象大小，无body}
+        '404': {description: 非法路径或对象不存在}
+        '503': {description: 存储不可用}
 
   /:
     get:
@@ -1626,6 +1755,32 @@ paths:
                 type: string
         "404":
           description: 非白名单资产名
+
+  /robots.txt:
+    get:
+      tags: [SEO与爬虫]
+      summary: 搜索引擎爬虫协议
+      description: 规范搜索引擎网络爬虫抓取范围与站点地图索引
+      responses:
+        "200":
+          description: robots.txt 文本
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /sitemap.xml:
+    get:
+      tags: [SEO与爬虫]
+      summary: XML 站点地图
+      description: 供搜索引擎抓取的主站公开页面与下载指引 URL 索引
+      responses:
+        "200":
+          description: sitemap.xml 格式
+          content:
+            application/xml:
+              schema:
+                type: string
 
   /proxy/{kind}/{handle}:
     get:
@@ -2148,6 +2303,52 @@ paths:
           description: 限流
         '503':
           description: 配置或数据库不可用
+  /api/admin/announcements:
+    get:
+      tags:
+      - 运营后台
+      summary: announcements
+      description: 读取应用内完整公告配置文档
+      security:
+      - AdminSession: []
+      responses:
+        '200':
+          description: 成功
+        '401':
+          description: 无有效后台会话
+        '403':
+          description: Origin拒绝
+    post:
+      tags:
+      - 运营后台
+      summary: announcements
+      description: 人工全量替换并GET读回；成功只代表写入，非全员收到。KV失败503，重复认领409要求读回对账
+      security:
+      - AdminSession: []
+      parameters:
+      - in: header
+        name: X-CSRF-Token
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, confirmed, document]
+              properties:
+                requestId: {type: string, pattern: '^[A-Za-z0-9_-]{8,100}$'}
+                confirmed: {type: boolean, enum: [true]}
+                document: {$ref: '#/components/schemas/AnnouncementDocument'}
+      responses:
+        '200': {description: 已写入，传播可能延迟}
+        '400': {description: 参数错误}
+        '401': {description: 无有效后台会话}
+        '403': {description: Origin或CSRF拒绝}
+        '409': {description: 请求已认领，请读取配置核对}
+        '503': {description: 未确认写入成功，请先读回对账}
 
   /privacy:
     get:

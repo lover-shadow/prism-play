@@ -122,5 +122,10 @@ export async function handleStaticAsset(
     Vary: 'Accept-Encoding'
   };
   if (typeof object.etag === 'string' && object.etag !== '') headers.ETag = `W/"${object.etag}"`;
+  const ifNoneMatch = request.headers.get('If-None-Match');
+  if (ifNoneMatch && headers.ETag && (ifNoneMatch === headers.ETag || ifNoneMatch.includes(headers.ETag))) {
+    return new Response(null, { status: 304, headers });
+  }
+  if (request.method === 'HEAD') return new Response(null, { status: 200, headers });
   return new Response(body as ReadableStream, { status: 200, headers });
 }

@@ -21,12 +21,12 @@
 
 import type { Clock } from '../core/clock';
 import type { Env } from '../types/env';
-import { readVersionRelease } from '../config/kv-config';
+import { configUnavailableResponse, readVersionRelease } from '../config/kv-config';
 import { buildErrorResponse, HTTP_STATUS_BY_ERROR_CODE } from '../http/errors';
 import { jsonResponse } from '../http/json';
 import { originOf } from '../http/serialize';
 import { renderDownloadPage, type DownloadAudience } from '../html/dl-page';
-import { renderLandingPage, type LandingRelease } from '../html/landing-page';
+import { renderLandingPage } from '../html/landing-page';
 import { sanitizeDisplayToken } from '../html/escape';
 
 /**
@@ -43,7 +43,6 @@ export interface ApkDeliveryBindings {
 export type DlEnv = Env & ApkDeliveryBindings;
 
 /** Release key convention for the Android artifact; owned by the supervision agent's R2 provisioning. */
-export const ANDROID_APK_KEY = 'releases/android/latest.apk';
 export const ANDROID_PLATFORM = 'android';
 
 /** Denials stay `no-store`: a 404 that becomes a 302 the next minute must not be cached at the edge. */
@@ -102,85 +101,46 @@ export function platformFromPath(pathname: string): string | null {
   }
 }
 
-/**
- * The only public base we will redirect to: an absolute http(s) origin with no credentials, no query
- * and no fragment. Anything else is treated as unconfigured, because a malformed base is how a
- * redirect to an unverified host would start.
- */
-export function resolveApkLocation(rawBase: string | undefined): string | null {
-  if (rawBase === undefined || rawBase.trim() === '') return null;
-  let base: URL;
-  try {
-    base = new URL(rawBase.trim());
-  } catch {
-    return null;
-  }
-  if (base.protocol !== 'https:' && base.protocol !== 'http:') return null;
-  if (base.username !== '' || base.password !== '') return null;
-  if (base.search !== '' || base.hash !== '') return null;
-  const location = new URL(ANDROID_APK_KEY, `${base.origin}${base.pathname.replace(/\/+$/, '')}/`);
-  return location.origin === base.origin ? location.toString() : null;
+async function releaseObject(env: DlEnv, release: import("../types/api").AndroidRelease): Promise<R2Object | null> {
+  if (!env.APK_BUCKET || !release.artifact) return null;
+  const object = await env.APK_BUCKET.head(release.artifact.key), metadata = object?.customMetadata;
+  return object && object.size === release.artifact.bytes && metadata?.sha256 === release.artifact.sha256 &&
+    metadata.versionCode === String(release.versionCode) && metadata.versionName === release.versionName ? object : null;
 }
-
-async function artifactExists(bucket: R2Bucket | undefined): Promise<boolean> {
-  if (bucket === undefined) return false;
-  const object = await bucket.head(ANDROID_APK_KEY);
-  return object !== null && object !== undefined;
-}
-
-export async function handleApkDownload(
-  request: Request,
-  env: DlEnv,
-  _clock: Clock
-): Promise<Response> {
-  const platform = platformFromPath(new URL(request.url).pathname);
-  if (platform !== ANDROID_PLATFORM) return downloadNotFoundResponse();
-
-  const location = resolveApkLocation(env.APK_PUBLIC_BASE_URL);
-  if (location === null) return downloadNotFoundResponse();
-  if (!(await artifactExists(env.APK_BUCKET))) return downloadNotFoundResponse();
-
-  return new Response(null, {
-    status: 302,
-    headers: { Location: location, 'Cache-Control': 'no-store' }
-  });
-}
-
-/**
- * The portal states two facts it can actually verify: the published version (KV bulletin, the same
- * source `/api/version` answers from) and the byte length of the object in the bucket. Either may be
- * absent, and the page then says so instead of printing a number nobody configured (SPEC 10).
- */
-async function publishedRelease(kv: KVNamespace, origin: string): Promise<LandingRelease | null> {
-  const response = await readVersionRelease(kv, origin);
-  if (response === null) return null;
-  return { versionName: response.android.versionName, versionCode: response.android.versionCode };
-}
-
-async function publishedApkSizeBytes(bucket: R2Bucket | undefined): Promise<number | null> {
-  if (bucket === undefined) return null;
-  const object = await bucket.head(ANDROID_APK_KEY);
-  if (object === null || object === undefined) return null;
-  const size = (object as { size?: unknown }).size;
-  return typeof size === 'number' && Number.isFinite(size) && size > 0 ? size : null;
+export async function handleApkDownload(request: Request, env: DlEnv, _clock: Clock): Promise<Response> {
+  if (platformFromPath(new URL(request.url).pathname) !== ANDROID_PLATFORM) return downloadNotFoundResponse();
+  const origin = originOf(request), published = await readVersionRelease(env.KV, origin);
+  if (!published?.android.artifact || !await releaseObject(env, published.android)) return configUnavailableResponse();
+  const release = published.android;
+  return new Response(null, { status: 302, headers: {
+    Location: `${origin}/dl/artifacts/${release.versionCode}/${release.artifact!.sha256}.apk`, "Cache-Control": "no-store"
+  } });
 }
 
 /** One document for every visitor, so unlike `/dl` this response does not Vary on User-Agent. */
 const PORTAL_CACHE_CONTROL = 'public, max-age=300';
 
 export async function handlePortal(request: Request, env: DlEnv, _clock: Clock): Promise<Response> {
-  const origin = originOf(request);
-  const [release, apkSizeBytes] = await Promise.all([
-    publishedRelease(env.KV, origin),
-    publishedApkSizeBytes(env.APK_BUCKET)
-  ]);
-  const html = renderLandingPage({ release, apkSizeBytes });
-  return new Response(html, {
-    status: 200,
-    headers: {
-      'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': PORTAL_CACHE_CONTROL,
-      'X-Content-Type-Options': 'nosniff'
-    }
-  });
+  const published = await readVersionRelease(env.KV, originOf(request));
+  const object = published ? await releaseObject(env, published.android) : null;
+  return new Response(renderLandingPage({
+    release: published ? { versionName: published.android.versionName, versionCode: published.android.versionCode } : null,
+    apkSizeBytes: object?.size ?? null
+  }), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": PORTAL_CACHE_CONTROL, "X-Content-Type-Options": "nosniff" } });
+}
+export async function handleApkArtifact(request: Request, env: DlEnv, _clock: Clock): Promise<Response> {
+  const match = /^\/dl\/artifacts\/([1-9]\d*)\/([0-9a-f]{64})\.apk$/.exec(new URL(request.url).pathname);
+  if (!match || !Number.isSafeInteger(Number(match[1]))) return downloadNotFoundResponse();
+  if (!env.APK_BUCKET) return configUnavailableResponse();
+  const key = `releases/android/${match[1]}/${match[2]}.apk`;
+  const headers = { "Content-Type": "application/vnd.android.package-archive",
+    "Content-Disposition": `attachment; filename=prism-play-${match[1]}.apk`, "Accept-Ranges": "none",
+    "Cache-Control": "public, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff" };
+  if (request.method === "HEAD") {
+    const object = await env.APK_BUCKET.head(key);
+    return object ? new Response(null, { headers: { ...headers, "Content-Length": String(object.size) } }) : downloadNotFoundResponse();
+  }
+  const object = await env.APK_BUCKET.get(key);
+  if (!object) return downloadNotFoundResponse();
+  return new Response(object.body, { headers: { ...headers, "Content-Length": String(object.size) } });
 }

@@ -33,6 +33,7 @@ public class MainActivity extends BridgeActivity {
         // plugins.json entry, because neither is consulted for classes that live in this app module.
         registerPlugin(PrismCastPlugin.class);
         registerPlugin(PrismPlayerPlugin.class);
+        registerPlugin(PrismAuthorSupportPlugin.class);
         super.onCreate(savedInstanceState);
         applyDisplayCutoutMode();
         if (BuildConfig.PLAYBACK_PROBE) {

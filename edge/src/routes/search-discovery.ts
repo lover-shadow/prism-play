@@ -11,6 +11,7 @@ import { publicDiscoveryContext, readPublicFact } from '../search/public-facts';
 import { readDiscoveryQuery } from '../search/discovery-query';
 import { discoveryQueryKey } from '../search/discovery-query';
 import { itemFromAsset } from '../library/title-asset';
+import { factsManifest } from '../library/work-facts';
 import { configUnavailableResponse } from '../config/kv-config';
 import { jsonResponse } from '../http/json';
 import { originOf } from '../http/serialize';
@@ -97,25 +98,28 @@ export async function handleSearchDiscoveries(request: Request, env: Env, clock:
   const limit = readPagingParameter(params, 'limit', 60, 100);
   if (!limit.ok) return limit.response;
   if (env.SEARCH_DISCOVERY_ENABLED !== 'true') return jsonResponse({ changes: [], cursor: Number(raw), hasMore: false }, 200, { 'Cache-Control': 'no-store' });
-  const generation = await generationSearch(env, originOf(request));
-  if (!generation) return configUnavailableResponse();
-  const context = publicDiscoveryContext(env, generation.manifest, () => clock.nowSeconds());
+  const manifest = env.KV ? await factsManifest(env) : (await generationSearch(env, originOf(request)))?.manifest;
+  if (!manifest) return configUnavailableResponse();
+  const context = publicDiscoveryContext(env, manifest, () => clock.nowSeconds());
   const result = await readDiscoveryChanges(context, Number(raw), clock.nowSeconds(), limit.value);
   const changes: DiscoveryChangesResponse['changes'] = [];
+  const checked = new Map<string, ContentItem | null>(), origin = originOf(request);
+  async function cardFor(workId: string): Promise<ContentItem | null> {
+    const stored = await readDiscoveryCard(context, workId);
+    if (stored && publicItem(stored.item)) return originCard(stored.item, origin);
+    const read = await readDiscoveryFact(context, workId, clock.nowSeconds());
+    if (read.status !== 'ok') return null;
+    const card = itemFromAsset(read.fact.asset, read.fact.asset.hasCover ? `${origin}/proxy/img/${encodeURIComponent(workId)}` : undefined);
+    card.enabled = true; card.shareable = read.fact.shareable;
+    return publicItem(card) ? card : null;
+  }
   for (const change of result.changes) {
     if (change.operation === 'withdraw') { changes.push({ ...change, card: undefined }); continue; }
-    const stored = await readDiscoveryCard(context, change.workId);
-    if (stored && publicItem(stored.item)) {
-      changes.push({ ...change, card: originCard(stored.item, originOf(request)) });
-      continue;
-    }
-    const read = await readDiscoveryFact(context, change.workId, clock.nowSeconds());
-    if (read.status !== 'ok') {
+    if (!checked.has(change.workId)) checked.set(change.workId, await cardFor(change.workId));
+    const card = checked.get(change.workId);
+    if (!card) {
       changes.push({ seq: change.seq, workId: change.workId, operation: 'withdraw', updatedAt: change.updatedAt }); continue;
     }
-    const card = itemFromAsset(read.fact.asset, read.fact.asset.hasCover ? `${originOf(request)}/proxy/img/${encodeURIComponent(change.workId)}` : undefined);
-    card.enabled = true; card.shareable = read.fact.shareable;
-    if (!publicItem(card)) continue;
     changes.push({ ...change, card });
   }
   return jsonResponse({ ...result, changes } satisfies DiscoveryChangesResponse, 200, { 'Cache-Control': 'no-store' });

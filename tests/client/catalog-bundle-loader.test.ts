@@ -33,7 +33,7 @@ describe('整包同步与公开 local-first', () => {
     expect(await h.service.syncIncremental()).toEqual({ appliedEntries: 2, revision: 3, full: true, offline: false });
     expect(h.network).toHaveLength(1);
     expect(h.network[0]).toContain('/api/catalog/changes?after=2');
-    expect(h.assets).toEqual([{ url: `${EDGE}/assets/catalog-bundle.json`, init: { cache: 'no-store' } }]);
+    expect(h.assets).toEqual([{ url: `${EDGE}/assets/catalog-bundle.json`, init: { cache: 'no-store', signal: expect.any(AbortSignal) } }]);
     expect(h.cache.list().map((entry) => entry.id)).toEqual(['new-a', 'new-b']);
     expect(h.feeds).toHaveLength(1);
     expect(h.feeds[0]).toMatchObject({ revision: 3, items: [item('new-a'), item('new-b')] });

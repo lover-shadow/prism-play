@@ -23,7 +23,7 @@ describe('independent public discovery sync', () => {
     const restarted = await setup(s.disk);
     restarted.fetch.mockImplementation(async (after) => ({ changes: [], cursor: after, hasMore: false }));
     await restarted.sync.sync();
-    expect(restarted.fetch).toHaveBeenCalledWith(2, 100);
+    expect(restarted.fetch).toHaveBeenCalledWith(2, 100, undefined);
     expect(restarted.cache.list()).toHaveLength(2);
   });
   it('indexes only durable merged entries and advances cursor only after indexing', async () => {

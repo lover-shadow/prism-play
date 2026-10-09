@@ -1,6 +1,7 @@
 import type { CatalogChangesResponse, CatalogResponse, ChannelsResponse, ChannelItem, ContentItem } from '../../../edge/src/types/api';
 import { PUBLIC_CHANNEL_IDS } from '../../../edge/src/types/api';
 import { SearchDiscoveries } from './search-discoveries';
+import { DiscoveryJournal } from './discovery-journal';
 import { assertWritable, CATALOG_CACHE_LIMIT_BYTES, CLEARED_BY_CLEAR_CACHE, POSTER_CACHE_LIMIT_BYTES, PRESERVED_BY_CLEAR_CACHE, type WriteGuardSubject } from './storage-domains';
 import {
   CACHE_KEY_NAMESPACE, CATALOG_CHUNK_ITEMS, CATALOG_META_KEY, CATALOG_REVISION_PREFIX, CHANNELS_KEY,
@@ -54,9 +55,8 @@ export class PublicCache {
   private staged: { revision: number; channels: Map<string, StagedChannel> } | null = null;
   private topology: ChannelsResponse | null = null;
   private readonly discoveries: SearchDiscoveries;
-  private discoveryCursor = 0;
+  private readonly discoveryJournal: DiscoveryJournal;
   private discoveryEpoch = 0;
-  private readonly discoveryMetaKey = `${CACHE_KEY_NAMESPACE}discovery-sync-meta.json`;
   private pending: Promise<unknown> = Promise.resolve();
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const job = this.pending.then(operation);
@@ -70,6 +70,7 @@ export class PublicCache {
     posterCap = POSTER_CACHE_LIMIT_BYTES
   ) {
     this.discoveries = new SearchDiscoveries(disk);
+    this.discoveryJournal = new DiscoveryJournal(disk);
     this.catalogLedger = new Ledger(catalogCap);
     this.posterLedger = new Ledger(posterCap);
   }
@@ -79,19 +80,20 @@ export class PublicCache {
   hasPoster = (contentId: string, coverVersion: string): boolean => this.posterLedger.has(posterKey(contentId, coverVersion));
   list = (channelId?: string): ContentItem[] => [...new Map([...this.items.values(), ...this.discoveries.list()].map((item) => [item.id, item])).values()].filter((item) => channelId === undefined || item.channelId === channelId);
   mergeDiscoveries = (items: readonly ContentItem[]): Promise<ContentItem[]> => this.enqueue(() => this.discoveries.merge(items, this.items));
-  discoveryState = (): { cursor: number; epoch: number } => ({ cursor: this.discoveryCursor, epoch: this.discoveryEpoch });
-  applyDiscoveryChanges(changes: readonly { workId: string; operation: 'upsert' | 'withdraw'; card?: ContentItem }[], epoch: number): Promise<void> {
+  discoveryState = (): { cursor: number; epoch: number } => ({ cursor: this.discoveryJournal.cursor(), epoch: this.discoveryEpoch });
+  pendingDiscoveryIndex = () => this.discoveryJournal.receipt();
+  applyDiscoveryChanges(changes: readonly { workId: string; operation: 'upsert' | 'withdraw'; card?: ContentItem }[], epoch: number, cursor?: number): Promise<void> {
     return this.enqueue(async () => {
       if (epoch !== this.discoveryEpoch) throw new Error('Discovery cache was cleared');
-      await this.discoveries.apply(changes, this.items);
+      const receipt = cursor === undefined ? null : this.discoveryJournal.prepare(cursor, changes.map((c) => c.workId));
+      await this.discoveries.apply(changes, this.items, receipt?.write);
+      receipt?.accept();
     });
   }
   commitDiscoveryCursor(cursor: number, epoch: number): Promise<void> {
     return this.enqueue(async () => {
       if (epoch !== this.discoveryEpoch) throw new Error('Discovery cache was cleared');
-      if (!Number.isSafeInteger(cursor) || cursor < this.discoveryCursor) throw new Error('Invalid discovery cursor');
-      await this.disk.writeBatch([{ key: this.discoveryMetaKey, bytes: jsonBytes({ cursor }) }], []);
-      this.discoveryCursor = cursor;
+      await this.discoveryJournal.commit(cursor);
     });
   }
   getItem(contentId: string): ContentItem | null {
@@ -116,8 +118,7 @@ export class PublicCache {
     const orphans = (await this.disk.list(CATALOG_REVISION_PREFIX)).map((entry) => entry.key).filter((key) => !key.startsWith(keep));
     if (orphans.length > 0) await this.disk.writeBatch([], orphans);
     await this.discoveries.hydrate(this.items);
-    const discoveryMeta = decodeJson<{ cursor: number }>(await this.disk.read(this.discoveryMetaKey));
-    this.discoveryCursor = discoveryMeta !== null && Number.isSafeInteger(discoveryMeta.cursor) && discoveryMeta.cursor >= 0 ? discoveryMeta.cursor : 0;
+    await this.discoveryJournal.hydrate();
     this.topology = readTopology(await this.disk.read(CHANNELS_KEY));
   }
   /**
@@ -282,9 +283,10 @@ export class PublicCache {
     const entries = await this.disk.list(CACHE_KEY_NAMESPACE);
     const freedBytes = entries.reduce((total, entry) => total + entry.bytes, 0);
     await this.disk.writeBatch([], entries.map((entry) => entry.key));
+    this.discoveryJournal.reset();
     this.adopt({ revision: 0, chunks: 0, updatedAt: 0, partial: false });
     this.discoveries.clear(); this.staged = null;
-    this.discoveryCursor = 0; this.discoveryEpoch += 1;
+    this.discoveryEpoch += 1;
     return { removedKeys: entries.length, freedBytes, clearedDomains: CLEARED_BY_CLEAR_CACHE, preservedDomains: PRESERVED_BY_CLEAR_CACHE };
   }
 }

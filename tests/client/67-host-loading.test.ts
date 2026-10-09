@@ -100,11 +100,12 @@ describe('HP-03 点击立即进入', () => {
     expect(new Set(texts).size).toBe(1); // 三者同构：文案逐字一致，不泄露差异
   });
 
-  it('HP-03a 网络失败如实给离线口径，同样不泄露剧目身份', async () => {
+  it('HP-03a 在线网络失败给连接错误口径，同样不泄露剧目身份', async () => {
     const h = host({ titleError: new ApiError('NETWORK_ERROR', 0, '网络不可用，请检查连接后重试') });
     expect(await h.player.open('c1')).toBe(false);
     const layer = shellOf(h.mount)!;
-    expect(layer.querySelector('.prism-player__state--offline')).not.toBeNull();
+    expect(layer.querySelector('.prism-player__state--offline')).toBeNull();
+    expect(stateText(layer)).toContain('连接暂不可用');
     expect(document.body.textContent).not.toContain(PROTECTED);
     expect(layer.querySelector('[data-el="host-retry"]')).not.toBeNull();
     h.player.close();
@@ -130,6 +131,19 @@ describe('HP-03 点击立即进入', () => {
     expect(h.mount.childElementCount).toBe(0);
   });
 
+  it('closing an opening title cancels its transport signal', async () => {
+    const gate = deferred<TitleDetail>();
+    const h = host({ respondTitle: () => gate.promise });
+    const opened = h.player.open('c1');
+    await settle();
+    const signal = (h.api.title.mock.calls[0] as unknown as [string, AbortSignal])[1];
+    expect(signal.aborted).toBe(false);
+    h.player.close();
+    expect(signal.aborted).toBe(true);
+    gate.release(detailOf());
+    expect(await opened).toBe(false);
+    expect(shellOf(h.mount)).toBeNull();
+  });
   it('HP-03b 连点 A/B 只有最新一代提交，旧代迟到不复活也不留第二层', async () => {
     const first = deferred<TitleDetail>();
     const second = deferred<TitleDetail>();

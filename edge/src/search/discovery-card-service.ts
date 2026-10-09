@@ -1,4 +1,4 @@
-import type { DiscoveryProvider } from './discovery-provider';
+import { IncompleteDiscoverySearch, type DiscoveryCandidate, type DiscoveryProvider } from './discovery-provider';
 import type { DiscoveryContext } from './discovery-store';
 import { readDiscoveryCards } from './discovery-store';
 import { readDiscoveryCard, saveDiscoveryCard } from './discovery-cards';
@@ -36,7 +36,12 @@ export function createCardDiscoveryService(context: DiscoveryContext, providers:
       if (raced) return { items: await itemsFor(raced.ids, q), pending: false, failed: false, hasMore: false };
       for (const provider of providers) {
         try {
-          const candidates = await provider.search(q, page);
+          let candidates: DiscoveryCandidate[];
+          try { candidates = await provider.search(q, page); }
+          catch (error) {
+            if (!(error instanceof IncompleteDiscoverySearch)) throw error;
+            candidates = error.candidates; failed = true;
+          }
           more ||= provider.id === 'provider_m1' && candidates.length > 0;
           for (const candidate of candidates) {
             if (candidate.providerId !== provider.id || ids.includes(candidate.id)) continue;

@@ -1,6 +1,6 @@
 {
   "name": "prism-play",
-  "version": "2.6.5",
+  "version": "2.6.7",
   "description": "《光影Play》(Prism Play) - 工业级流媒体全景终端 (Capacitor 7 + Vite + TypeScript + ArtPlayer)",
   "private": true,
   "type": "module",
@@ -16,7 +16,14 @@
     "scan:p0": "python tests/scan_p0.py",
     "typecheck": "tsc -p edge/tsconfig.json",
     "test": "vitest run",
-    "test:edge": "vitest run tests/edge"
+    "test:edge": "vitest run tests/edge",
+    "release:preflight": "node edge/scripts/release-pipeline.mjs preflight",
+    "release:upload": "node edge/scripts/release-pipeline.mjs upload",
+    "release:deploy": "node edge/scripts/release-pipeline.mjs deploy-worker",
+    "release:promote": "node edge/scripts/release-pipeline.mjs promote",
+    "release:verify": "node edge/scripts/release-pipeline.mjs verify",
+    "release:rollback": "node edge/scripts/release-pipeline.mjs rollback",
+    "release": "node edge/scripts/release-pipeline.mjs all"
   },
   "dependencies": {
     "@capacitor-community/sqlite": "^7.0.3",

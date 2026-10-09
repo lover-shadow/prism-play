@@ -23,6 +23,7 @@ import { createPosterUrls } from '../poster-urls';
 import { isPrivateSubject } from '../storage/storage-domains';
 import { adaptTitleDetail } from './title-detail';
 import type { DiscoveryChangesResponse } from '../discovery-sync';
+import { budgetForRequest, readWithBudget, readWithRetry } from './retry-fetch';
 
 /**
  * Typed client for the edge contract. DTOs are imported from `edge/src/types/api.ts` on purpose: one
@@ -103,14 +104,19 @@ export class PrismApiClient {
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const targetUrl = `${this.baseUrl}${path}`;
     logger.net('api', `${init.method ?? 'GET'} ${targetUrl}`);
-    let response: Response;
+    let response: Response, text: string;
     try {
-      response = await this.fetchImpl(targetUrl, init);
+      const playbackRead = (init.method ?? 'GET') === 'GET' && /^\/api\/(?:titles\/[^/?]+(?:\/episodes\/\d+\/native-playback)?|episodes\/\d+\/playback)(?:\?|$)/.test(path);
+      if (playbackRead) ({ response, text } = await readWithRetry(this.fetchImpl, targetUrl, init));
+      else {
+        const timeoutMs = budgetForRequest(path, init.method ?? 'GET');
+        ({ response, text } = await readWithBudget(this.fetchImpl, targetUrl, init, timeoutMs));
+      }
     } catch (err) {
+      if (init.signal?.aborted) throw err;
       logger.error('api', `网络请求失败: ${init.method ?? 'GET'} ${targetUrl}`, err);
-      throw new ApiError('NETWORK_ERROR', 0, '网络不可用，请检查连接后重试');
+      throw new ApiError('NETWORK_ERROR', 0, '连接失败或请求超时，请重试');
     }
-    const text = await response.text();
     if (!response.ok) {
       logger.warn('api', `HTTP ${response.status} 响应: ${targetUrl}`, text.slice(0, 300));
       throw new ApiError(errorCodeOf(text), response.status, errorMessageOf(text));
@@ -144,18 +150,18 @@ export class PrismApiClient {
     return this.get(`/api/search${queryString(input)}`);
   }
 
-  discoveryChanges(after: number, limit?: number): Promise<DiscoveryChangesResponse> {
+  discoveryChanges(after: number, limit?: number, signal?: AbortSignal): Promise<DiscoveryChangesResponse> {
     const headers = this.headers();
     delete headers['X-Private-Session']; // Public-only log, even during an admitted private session.
-    return this.request(`/api/search/discoveries${queryString({ after, limit })}`, { headers });
+    return this.request(`/api/search/discoveries${queryString({ after, limit })}`, { headers, signal });
   }
 
   suggestions(q: string): Promise<SuggestionsResponse> {
     return this.get(`/api/search/suggestions${queryString({ q })}`);
   }
 
-  async title(titleId: string): Promise<TitleDetail> {
-    const raw = await this.get<unknown>(`/api/titles/${encodeURIComponent(titleId)}`);
+  async title(titleId: string, signal?: AbortSignal): Promise<TitleDetail> {
+    const raw = await this.request<unknown>(`/api/titles/${encodeURIComponent(titleId)}`, { headers: this.headers(), signal });
     try {
       return adaptTitleDetail(raw, titleId);
     } catch {
@@ -196,6 +202,10 @@ export class PrismApiClient {
 
   version(): Promise<VersionResponse> {
     return this.get('/api/version');
+  }
+
+  announcements(versionCode?: number): Promise<{ revision: number; items: Array<{ id: string; revision: number; title: string; body: string; startsAt: number; endsAt: number }> }> {
+    return this.get(`/api/announcements${queryString({ versionCode })}`);
   }
 
   ping(): Promise<DevicePingResponse> {

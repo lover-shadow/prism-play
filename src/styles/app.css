@@ -239,8 +239,9 @@ select {
   left: 50%;
   bottom: calc(var(--tabbar-height) + var(--safe-area-bottom) + var(--space-4));
   transform: translateX(-50%);
-  z-index: 60;
+  z-index: 300;
   max-width: min(88%, var(--container-max-mobile));
+  pointer-events: none;
   padding: var(--space-3) var(--space-4);
   background: var(--surface-raised);
   border: 1px solid var(--border-strong);

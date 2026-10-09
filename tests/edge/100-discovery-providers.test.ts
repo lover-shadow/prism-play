@@ -34,6 +34,19 @@ async function firstResult(cfg: DiscoveryConfig): Promise<DiscoveryResult> {
   return provider.resolve(candidates[0], undefined, budget);
 }
 describe('controlled discovery adapters', () => {
+  it('preserves initial search cards and signals incomplete when supplement exhausts its budget', async () => {
+    let requests = 0;
+    const cfg = config((url) => {
+      requests++;
+      return router('search_page', { query: decodeURIComponent(url.pathname.slice(8)), isSuccess: true,
+        searchList: [{ video_data: row('10', '故事第七季') }] });
+    });
+    cfg.searchBudget = { maxRequests: 1, timeoutMs: 1000 };
+    const result = await createS1Provider(cfg).search('故事', 1).catch(error => error);
+    expect(result).toBeInstanceOf(Error);
+    expect(result.candidates).toMatchObject([{ id: 'drama_s_10', title: '故事第七季' }]);
+    expect(requests).toBe(1);
+  });
   it('m1 encodes query and uses detail/ids with stable identities and all lines', async () => {
     const cfg = config((url) => {
       expect(url.searchParams.get('ac')).toBe('detail');

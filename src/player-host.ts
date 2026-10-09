@@ -45,6 +45,7 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
   let nudge: ReturnType<typeof createSponsorNudge> = null;
   /** 打开代次：`close()` 递增它，用来作废在途的 refresh / 详情 / setScope / load 结果。 */
   let opening = 0;
+  let openingRequest: AbortController | null = null;
   const orientation = deps.orientation ?? createOrientationPort();
   /** 全屏唯一权威：本布尔与宿主类；内核不另持全屏通道。 */
   let isFullscreen = false;
@@ -96,7 +97,8 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
   async function open(contentId: string, resume?: WatchHistoryRow, retainStage = false): Promise<boolean> {
     const retained = retainStage ? layer : null;
     close(retained !== null);
-    const mine = opening;
+    const mine = opening, request = new AbortController();
+    openingRequest = request;
     // §3.1：创建与挂载都发生在第一个 await 之前——"点了没反应"就是旧实现的用户面缺陷本体。
     const host = retained ?? createHostLayer({ mount: deps.mount, onClose: () => close() });
     layer = host;
@@ -116,7 +118,7 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
       await deps.runtime?.refresh();
       // 每一个 await 之后都先核代次：偏好读取一慢就被取消的话，不该再把那次详情请求发出去。
       if (mine !== opening || layer !== host) return discard(host);
-      loaded = await deps.api.title(contentId);
+      loaded = await deps.api.title(contentId, request.signal);
     } catch (error) {
       return refuse(host, mine, retry, hostErrorFor(error));
     }
@@ -194,12 +196,22 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
       { beforeMenuOpen: () => void player?.dismissOverlay() }
     );
     detailBodyRef = detailBody;
-    const seasons = createSeasonSwitcher(loaded.item, deps.seriesItems?.() ?? [], (id) => { void open(id, undefined, true); });
-    if (seasons) {
-      detailBody.attachSeasonSwitcher(seasons);
-      const drawerSeasons = createSeasonSwitcher(loaded.item, deps.seriesItems?.() ?? [], (id) => { void open(id, undefined, true); });
-      if (drawerSeasons) host.sheet.querySelector('.prism-drawer')?.prepend(drawerSeasons);
-    }
+    const bindSeasons = (): void => {
+      const items = deps.seriesItems?.() ?? [];
+      const s = createSeasonSwitcher(loaded.item, items, (id) => { void open(id, undefined, true); });
+      if (s) {
+        detailBody.attachSeasonSwitcher(s);
+        const ds = createSeasonSwitcher(loaded.item, items, (id) => { void open(id, undefined, true); });
+        if (ds) {
+          host.sheet.querySelector('.prism-drawer [data-prism-ui="season-switcher"]')?.remove();
+          host.sheet.querySelector('.prism-drawer')?.prepend(ds);
+        }
+      }
+    };
+    bindSeasons();
+    deps.supplementSeries?.(loaded.item, () => {
+      if (mine === opening && layer === host && detail?.item.id === loaded.item.id) bindSeasons();
+    });
     host.shell.append(detailBody.body);
     const cast = document.createElement('button'); cast.type = 'button'; cast.className = 'prism-player__button';
     cast.dataset.prismUi = 'cast'; cast.setAttribute('aria-label', '投屏'); cast.innerHTML = icon('cast', { size: 20 });
@@ -211,6 +223,7 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
   }
   function close(retainStage = false): void {
     opening++;
+    openingRequest?.abort(); openingRequest = null;
     watchVideo?.destroy(); watchVideo = null;
     void deps.runtime?.watch?.setScope('unknown');
     nudge?.close(); nudge = null;

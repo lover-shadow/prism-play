@@ -1,5 +1,18 @@
 # Spec - 《光影Play》(Prism Play) v2.0.0
 
+2026-10-09 本批后续获用户授权生产发布：Worker `be761fca-310f-4d21-8bc6-3ffe31ed1185`、官网APK21607/2.6.7及两段合一启动确认公告已生效；下载回下SHA核验通过、原公告保留，收据见`outputs/deploy267-live-receipt.json`及系列修复二合一§12。此前本地记录中的“未部署”是当时状态，现由本记录承接；Android真机完整验收仍待测。
+
+## 2026-10-09 系列与播放共性修复变更记录
+
+采用 `docs/plans/2026-10-09-series-playback-notice-minimal-spec-and-plan.md` r2 的AC-R01～08：标题统一匹配、同编号/基础首季多版本保留、后台有界补卡不阻塞播放、部分失败保住成果且不缓存完整成功、原生视频海报隐藏，以及两段内容与反馈说明。随机剧目仅为回归样本，不做剧名/ID特判。发现GET仍8秒，15秒调整待样本；补缺预算失败保留卡片并报告failed。无新增接口/表；本地测试/浏览器与APK收据见二合一文档，生产通告/部署与Android真机验收未完成。
+
+## 2026-10-09 当前批次：端云最小闭环
+
+本批施工与验收采用 `docs/plans/2026-10-08-cloud-apk-foundation-spec-and-plan.md` r2 的 MIN-01～06：本地先显、发现局部索引、关键网络限时、同域正确APK、可选更新和应用内消息。保留授权/历史/签名和私密双重准入。
+`VersionResponse.android.artifact?={key,bytes,sha256}` 为不可变包描述；latest下载必需此字段并核对R2 size及sha256/versionCode/versionName元数据，302同源 `/dl/artifacts/{versionCode}/{file}`。GET完整200、HEAD无body、Accept-Ranges:none，不支持续传。
+新增公开 `/api/announcements` 与受现有Admin会话/同源保护的 GET/POST `/api/admin/announcements`，人工配置全量消息并读回验证；失败不得假成功。只在新版前台非播放时可选提醒，宿主Code读取失败不猜值。
+本批延期强制升级、完整Range、原生断电原子性、Admin发布UI和自动发布平台；相关历史承诺不作为本批门禁，也不宣称已实现。本批已按r2部署，公开下载与接口收据见outputs/deploy266-live-receipt.json；真机验收仍独立待测。
+
 > **生成日期**：2026-09-30（2026-09-30 夜间完成施工前契约收敛）  
 > **基于文档**：`PRD-prism-play.md` + `ARCHITECTURE.md` + `UIUX-design-system.md` + `openapi.yaml`  
 > **状态**：2026-10-01 编码前 G0 静态/合成契约复核完成；本版为施工与验收主依据，与 PRD/OpenAPI/SQL 冲突时同步修正；G1～G4 的真实 D1、AI、HLS 与 Android 行为尚未经实测，不得宣称完整交付门禁通过
@@ -264,7 +277,7 @@ v2.6增量以 `D:/DEV/prism-play/docs/04-spec/SPEC-v2.6.3-REPAIR.md` R26-01～12
 - **三轨直接冲突收敛**：底栏3键【精选/追剧/我的】，搜索Overlay，分享仅播放器内；公开目录60条/分片（搜索分页不变）；海报512 MiB、目录20 MiB。公开按作详情多线路直连为受控例外，私密双准入/逐资源校验不因此放宽。
 - **状态**：本地seed本轮统计20,163条、“末世”短剧5/AI3仅为seed样本；旧库约70部与另一来源多集、云搜索旧ID/两集、后台来源调查均待复核，不承诺来源数量。
 
-### 10.1.1 真实来源搜索与共享发现（2026-10-06 已批准执行，待实现/验收）
+### 10.1.1 真实来源搜索与共享发现（2026-10-06 批准，2026-10-08 与代码/生产实测对齐）
 
 ADR-006 已 Accepted。本节替代旧冻结、只查不存、仅零命中手动补充口径；不改变私密双准入、纯词法边界或运营后台既有目标。
 
@@ -273,14 +286,16 @@ ADR-006 已 Accepted。本节替代旧冻结、只查不存、仅零命中手动
 - **两种生命周期**：关键词查询缓存仅复用新鲜核验结果；共享永久剧库不随关键词 TTL 到期删除。过期须重验、更新新集/新季与线路/撤片事实，持久存在不等于永久可播。真实完成且无结果才短暂负缓存（≤5分钟），超时/限流/来源或核验失败不是无结果，不写成功空集缓存；保留本机结果并提示补充失败/可重试。
 - **静态基底 + 共享发现增量**：不每搜重写全量 manifest。静态基底仍按同 generation 完整校验发布，已核验发现以独立持久增量追加/更新；搜索、详情、海报、分享复核所读基底/增量的版本和当前公开可见性。此为受控新事实层，不允许回旧公开 D1 掩盖损坏。客户端按稳定作品 ID/版本去重合并，数据与同步进度原子提交，重启/整包升级/同步失败不误删发现；删除只依据明确撤片/删除事实，整包不含该作品不是删除证明。
 - **契约兼容与隔离**：`GET /api/search` 保留 `items/page`、pageSize≤20与可选hasMore（缺省未知）；增可选discoveryPage（1～200）及响应discoveryPending/discoveryFailed/retryAfterSeconds。App按等待秒数自动同词同页poll直到pending结束，切词取消旧poll及迟到响应；成功partial保留已有结果，不伪装empty或确认无结果。public/private/exclude查询、缓存、索引、持久层和日志严格隔离；响应元数据/错误/日志零外部品牌，日志零原始URL/响应/上游域名；仅已批准的播放清单 mediaUrl 运行时例外不扩大。
-- **发现同步与Schema**：`GET /api/search/discoveries?after=&limit=`使用独立seq cursor（初始0），limit默认60/max100，返回changes[{seq,workId,operation:upsert|withdraw,updatedAt,card?}],cursor,hasMore；updatedAt为Unix秒，card为可选公开ContentItem。不可复用catalog revision。0005发现五表、0006 jobqueries/jobs两表，总业务37表（不含FTS影子表）；D1存metadata/任务，独立DISCOVERY_BUCKET无r2.dev，R2存事实/cursor。永久剧库metadata与播放事实24小时刷新分离，查询TTL不删metadata；当前基线disabled/private不能被发现覆盖，不回旧公开D1掩盖事实损坏。verify_contracts由主会话更新，本轮不改源码/执行迁移。
+- **发现同步与Schema**：`GET /api/search/discoveries?after=&limit=`使用独立seq cursor（初始0），limit默认60/max100，返回changes[{seq,workId,operation:upsert|withdraw,updatedAt,card?}],cursor,hasMore；updatedAt为Unix秒，card为可选公开ContentItem。不可复用catalog revision。0005发现五表、0006 jobqueries/jobs两表、0007 发现卡片表，`verify:contracts` 实测合计 **38 张真实业务表 + 5 张 FTS5 影子表**；D1存metadata/任务，独立DISCOVERY_BUCKET无r2.dev，R2存事实/cursor。永久剧库metadata与播放事实24小时刷新分离，查询TTL不删metadata；当前基线disabled/private不能被发现覆盖，不回旧公开D1掩盖事实损坏。
+- **在线读路径资源规则（2026-10-08 新增，详见 `SPEC-CLOUD-REFACTOR.md` §6.1.2）**：免费档 HTTP CPU 预算 10ms（含突发额度），失败由平台强杀并返回不带 CORS 头的 1102，应用层无法补救，因此在线路径必须把单次 CPU 与子请求数控制在预算内。固化四条：事实包整包哈希与叶归属照校，逐部剧集/线路只在被请求时解析；搜索投影不得把全量条目序列化后再回读解析，改为就地逐条校验并并发化；发现账本变更读取用单条 `JOIN`，同页重复 workId 只核验一次，撤回行不做权限重核；`discoveries` 服务端单页硬预算 10 条，`limit` 契约默认/上限不变，超预算改为分批推进且游标严格不跳号。资源治理不放宽私密校验、完整性检查或白名单，也不因此升套餐。
+- **实测状态（2026-10-08）**：Worker 版本 `b5ba77bf-7980-4fcb-a43c-937f230e558d` 已部署，`titles` / `related` / `discoveries` 与部分搜索查询生产回 200，发现同步 CPU 由 2,020ms 降至 528ms；**但 1102 未根治**：同一查询「人到中年」首拉 200（19 条 / 22.1 秒）后紧接两次 503（2.6 秒 / 13.8 秒），「归墟」503，「持械入宋」200（10 条 / 6.6 秒），搜索墙钟 6~25 秒波动。不得写为秒级或资源安全；若要彻底稳定，须以复发率与耗时分布证据决定是否把在线检索重设计为预计算/离线索引。
 - **授权与验收**：必要云端施工/CI/独立验收 APK 已获准；正式官网 APK 与 OTA 仅验收后发布。本次仅七文件文档局部修改，不执行源码/云/权限/Git。G0检查契约门禁；G1验证真实来源与身份/线路/限流/脱敏/并发，G2验证共享持久增量/新季/故障/撤片和客户端原子合并，G3验证三列全部可达/计数/标签/重启与整包升级，G4取得验收证据后正式发布。并行未完工导致门禁失败应如实报告，不修无关代码、不把历史通过当本轮通过。
 
 ### 10.1.2 native manifest 与原生播放事实同步（2026-10-06，未完成 Stage A）
 
 - **限定字段**：`EpisodeLine` / `PlaybackLine` 保留必填 `providerId:string` / `mediaUrl:string`，新增 `native?: {kind:'s1-cenc',videoId:string}`，仅 provider_s1 可带。videoId 为1～32位 ASCII 数字字符串（`^[0-9]{1,32}$`），不转数字、保留前导零。native 严格只有 kind/videoId 两键，unknown-field reject，包括 key/cencKeyHex（即使 null）、任意额外键、错误 kind/类型/长度、显式 null/undefined；不能删除 native 后冒充普通明文线路。闭集只针对 native 对象，不把整份响应所有层级说成已严格拒绝未知字段。
 - **实际主链与密钥边界**：work manifest / 私有 R2 discovery fact 按作投影，不是 D1 episode 旧 playback。本作身份仍为 workId + episodeNumber；私有 R2 是访问权限属性，不放宽个人探索隔离。native mediaUrl 只是来源候选；原生桥的来源输入仅 vid（videoId，会话/进度控制参数另计），Android runtime resolver 获取实时地址/key，key 不返回 JS，不写 manifest、事实、响应、缓存或日志。Web/native cast 对 native 线路诚实拒绝，不以普通直连/投屏规则宣称 CENC 可播；无 native 的合法普通线路不受此特例扩大影响。
-- **事实与未完成项**：Android 本地 CENC DataSource + ExoPlayer 单集已获 Master 播放正常反馈；完整 HUD 集成代码已写/编译但未真机通过。云端授权绑定的播放解析 handle 尚未实现，Stage A 未完成；旧生产 fact 无 native，需刷新，本轮未部署。manifest 支持1～32位，而当前 Java bridge/resolver 仅1～20位，21～32位原生执行仍待接齐，不能宣称全范围可播。单集反馈不证明完整 HUD、后台、授权云链或发布完成。
+- **事实与未完成项**：Android 本地 CENC DataSource + ExoPlayer 已集成进正式播放器并经 Master 真机复验通过（起播、换集/换线、倍速、HUD 与选季抽屉），单集反馈不再是唯一证据源。云端授权绑定的播放解析 handle 仍未实现，Stage A 未完成：`/api/titles/{id}/episodes/{n}/native-playback` 返回 no-store 的非密钥身份而非签名授权凭据，`PrismPlayerPlugin` 仍接受裸 vid，禁止据此标完成。位数缺口已闭合——正式桥与 resolver 现按 `^[0-9]{1,32}$` 校验（`PrismPlayerPlugin.java:86`、`ProbeNativeResolver.java:49`），仅旧单集验证入口 `PrismPlaybackProbeActivity.java:93` 保留 1～20 位，它是独立验证用途，不构成正式路径限制。基线目录（revision 4 种子）里的旧 production fact 是否全部带 native 仍待逐 provider 取证，单集与部分查询通过不证明完整 HUD、后台、授权云链或全量覆盖完成。
 - **authority 与裁定范围**：AGENTS 仍为 authority，本节仅收窄 §4/§5/§7 历史“全部 ArtPlayer/旧 playback”和 AC-24 全线路投屏描述为普通无 native 线路；native 特例不重写历史 AC 编号、不扩张阶段授权。FLAG_SECURE 仍限 AC-02 个人探索频道/播放，退出解除，不扩大到其他内容。私密双准入、零落盘与 G0→G4 门禁保持。OpenAPI、ADR、index、专门 CENC 计划由主会话负责同步；本次五份文档同步不等于机读契约或任一整体门禁通过，未完成 todos 保留。
 
 ### 10.2 通用边界（未被本轮替代者继续有效）
@@ -371,9 +386,26 @@ npm test
 
 后台独立待验项：会话到期/撤销/轮换、Origin/CSRF/无CORS/fail closed，真实D1并发/回滚/requestId冲突，全码脱敏与双标签409，Cookie同意/撤回及统计失败不阻断前台，浏览器黄金/异常路径及全量 App 无回归。静态契约同步不是这些行为通过或生产发布授权。
 
+## 12.4 端云生产发布流水线标准契约（2026-10-09，已上线）
+
+关联正本：`docs/04-spec/RELEASE-SOP-AND-PIPELINE.md`。为彻底杜绝各 Agent 现场编写临时部署脚本、端口冲突超时及未验盲推，确立以下刚性发布纪律：
+1. **触发时机与授权前置**：仅当 Master 明确发出“发布生产”、“部署云端”、“更新 APK 下载”或“更新发布”指令时方可执行发布；未经显式授权禁止自行部署或更改线上指针。
+2. **唯一调用路径**：严禁现场手写任何 `deploy-*.mjs` 临时脚本，所有 Agent 必须且仅能通过工程内置标准命令推进：
+   - 步骤 1 预检备份：`npm run release:preflight -- --apk <path>`
+   - 步骤 2 资产上传与 SHA 回下校验：`npm run release:upload`
+   - 步骤 3 Worker 保护部署：`npm run release:deploy`
+   - 步骤 4 指针与通告生效：`npm run release:promote`
+   - 步骤 5 全链路端到端验收：`npm run release:verify`
+   - 一键串行流水线：`npm run release -- --apk <path>`
+3. **安全与回滚屏障**：Worker 部署必须带 `--keep-vars` 保留生产 Secrets 与普通变量；不可变 APK 必须通过同域安全通道上传并立即反向下载字节级 SHA-256 核验；若发布后出现异常，统一执行 `npm run release:rollback` 一键恢复上一版本并读回验证。
+
 ## 13. 变更记录
 | 日期 | 变更内容 | 原因 | 影响范围 |
 | :--- | :--- | :--- | :--- |
+| 2026-10-08（文档与代码同代校准） | §10.1.1 标题改为「与代码/生产实测对齐」、发现同步条目表数改为实测 38 业务表 + 5 FTS5 影子表、新增在线读路径四条资源规则与实测状态条目；§10.1.2 按真机复验与 `^[0-9]{1,32}$` 闭合改写；三轨 SPEC、两份阶段计划板、`ANALYSIS-S1` 快照与 v2.6.3/v2.6.4 进度地图统一为间歇复发口径 | 先前若干条目把「部分端点当日回 200」写成「全部恢复」，与同日复测矛盾；门禁自报表数与断言值不一致；文档必须与代码、真机与线上实测同代 | 仅文档与图数据；代码改动限于 `tests/verify_contracts.py` 汇总横幅改为从实测值推导（+4 行，无业务逻辑变更）。`verify:contracts`（24 App API / 38 业务表 / 13 功能 / 30 AC）、`verify:acceptance`（30/30，188 条署名用例）、`scan:p0`（503 文件）复跑通过；未提交 Git、未部署、未改套餐与准入 |
+| 2026-10-08（云端资源治理与 v2.6.5 修订发布） | §10.1.1 在线读路径新增资源规则（详见 SPEC-CLOUD-REFACTOR §6.1.2）：事实包按需解析、搜索投影零二次序列化、发现账本单条 JOIN + 同页去重 + 服务端单页预算 10 条；`discoveries` 契约 limit 默认/上限不变，超预算改为分批推进且游标不跳号 | `wrangler tail` 与拨测证实 1102 为 `exceededCpu`（2,020ms 撞顶，免费档 HTTP 10ms 含突发），非子请求超限；用户明确选择保留免费档 | Worker 版本 `b5ba77bf-7980-4fcb-a43c-937f230e558d` 已部署，titles/related/discoveries 与部分搜索查询生产回 200（发现同步 CPU 2,020ms→528ms）；但同日复测实证 **1102 仍间歇复发**（「人到中年」200 后紧接两次 503、「归墟」503；503 由平台强杀、无法补 CORS），搜索墙钟 6~25 秒波动，不宣布资源安全；同日 Master 真机复验通过后发布 `prism-play-v2.6.5-20261008.apk`（36,303,231 字节 / SHA-256 `67e07a5a…`，与验收包一致），`versionCode` 仍 21605 故老用户须手动覆盖安装 |
+| 2026-10-08（操作反馈修复） | 常规倍速原生起播前生效、网页metadata重应用；分享复制成功提示高于播放器；作者已有二维码Android10+写图库、旧版系统文件保存，成功/取消/失败分流，主动微信定向Intent失败可重试 | Master真机反馈默认2x未生效、分享提示遮挡、网页download在APK无效；不猜测联系账号，不承诺微信自动识别/转账 | SPEC-APP-REFACTOR、端侧实现与回归、原生本地插件；不变更云API/准入或HTTPS外链白名单，无新增存储权限；**已于 2026-10-08 真机验收通过并发布官网下载**（首次安装默认常规倍率仍 1×，已保存偏好保留） |
+| 2026-10-08（端侧连接加固） | 播放GET传输失败/自身超时最多追加2次重试，250/600ms退避，每次8秒覆盖响应体；退出/切剧取消旧详情与退避；业务响应/主动取消/写请求不重试，慢搜索不套8秒。明确断网才offline，其他传输失败显示连接暂不可用；冷启发现同步延后2秒并在播放器打开时让路，销毁清定时器 | 避免单次传输失败误报离线与无限等待，navigator.onLine不是服务可达证明；不承诺1秒起播 | SPEC-APP-REFACTOR与端侧加固计划、API客户端/宿主/错误态/启动调度及回归测试；API响应与准入不变；**已随 v2.6.5 修订包真机验收并发布**，图库写入与微信唤起为真机实测项 |
 | 2026-10-06（native事实同步） | 新增§10.1.2，EpisodeLine/PlaybackLine保留providerId/mediaUrl并增key-free native；provider_s1限定、1～32位数字字符串、native未知字段严格拒绝；实际work manifest/私有R2 discovery fact，原生vid/runtime key不返JS、Web/native cast拒绝 | 单集Master反馈与完整HUD编译/未真机通过分离；授权绑定handle未实现，Stage A未完成，旧生产fact待刷新、未部署；当前Java仅1～20位执行缺口保留 | 仅本次五份限定文档；AGENTS authority、AC-02 FLAG_SECURE及G0→G4不扩大；OpenAPI/ADR/index/专门CENC计划由主会话同步，原todos保留 |
 | 2026-10-06（真实搜索与共享发现） | ADR-006 Accepted；新增§10.1.1，本机先显/默认自动联网（有无命中均补充）、三列全可达/准确计数标签、真实来源核验后共享持久保存、查询新鲜缓存/并发合并/短负缓存、静态全量基底+独立发现增量、重启整包不误删、新集新季更新；GET /api/search 可选hasMore | 用户明确批准执行，替代冻结/只查不存/零命中手点；必要云/CI/独立验收APK获准，官网APK/OTA验收后；本次仅文档，不宣称部署验收 | ADR006、正本、云SPEC、PRD、UIUX、API-SPEC/OpenAPI局部同步：新增GET /api/search/discoveries独立seq，discoveryPage及pending/failed/retry轮询，0005/0006共37业务表，D1 metadata/R2事实cursor、无r2.dev独立bucket、基线disabled/private不可覆盖、metadata与24小时播放事实刷新分离；保留全部运营修改；verify_contracts由主会话更新，本次不宣称发布 |
 | 2026-10-05（后台增量目标） | 新增§12.3同源独立后台guard、哈希口令/12小时D1 opaque会话、Origin/CSRF/no-CORS/no-store、卡密requestId事务/幂等/409与opaque详情ID、AdminError、浏览器UV/下载触发和OTA只读边界 | 用户授权继续后台实施后同步目标契约；局部源码不等于完整实现，后台G0未签署、无部署 | SPEC、云/静态页SPEC、PRD、UIUX、API-SPEC；OpenAPI由主任务另行同步，不改App AC及既有计数 |

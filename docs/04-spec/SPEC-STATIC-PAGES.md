@@ -1,5 +1,7 @@
 # Track 1: 静态页面与裂变门户施工规格书 v2 (SPEC-STATIC-PAGES)
 
+2026-10-09 本批下载行为按二合一r2：latest校验公告artifact与R2元数据后跳同源hash路径；artifact GET完整200/HEAD无body/Accept-Ranges:none，Range延期。官网版本和大小取同一公告/对象，缺有效artifact下载503；不再采用外域r2.dev下载跳转。本批生产同域下载已核验302→200及完整SHA一致，收据outputs/deploy266-live-receipt.json；不是长期网络SLA证明。
+
 **版本**: v2（2026-10-03 审计后重写，取代 v1）
 **生效日期**: 2026-10-03
 **物理隔离边界**: `edge/src/html/**`, `edge/src/routes/share.ts`, `edge/src/routes/dl.ts`

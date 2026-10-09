@@ -1,5 +1,11 @@
 # 《光影Play》（Prism Play）总体架构设计规格书
 
+## 2026-10-09 本批端云最小闭环
+
+本地公开快照先显，发现ID局部索引，整包读取60秒限时，发现分页播放让路；保留receipt，不承诺原生文件断电原子性。
+KV config:version的artifact指向R2不可变APK；latest核验对象后同域302，artifact完整流式200/HEAD，Range延期。config:announcements及既有Admin认证提供人工消息配置/读回渠道；新版真实宿主Code驱动可选更新，非播放前台提示。
+不增加资源、D1表、Admin发布UI、强制门禁或发布平台。本批契约按二合一r2、OpenAPI及主SPEC；旧外域下载路线不再是本批目标。
+
 > **产品全称**：光影Play（英文标识：Prism Play）  
 > **统一服务主域**：`play.prismos.org`  
 > **版本**：v2.0.0  
@@ -27,7 +33,7 @@
 | :--- | :--- | :---: | :--- |
 | **移动端跨端容器** | **Capacitor** | `v7.x` | 标准 Android Gradle 工程与原生桥接；APK 6~8MB 仅为构建后实测目标，未验证不得承诺 |
 | **前端构建与语言** | **Vite + TypeScript** | `v6.x / TS 5.x` | 用于 Android WebView 与公开分享 H5 开发；桌面客户端非本期交付，热更新性能以开发环境实测 |
-| **流媒体播放内核** | **ArtPlayer.js + hls.js** | `v5.x / v1.5+` | 负责播放器和 HLS；系统音量、窗口亮度、双击手势与播放故障恢复由端侧/原生桥按实测实现，不声称播放器开箱即有这些能力 |
+| **流媒体播放内核（双轨）** | **ArtPlayer.js + hls.js**（网页内核）／**ExoPlayer·Media3 + 本机 CENC AES-CTR 解密**（原生内核） | `v5.x / v1.5+` · `Media3 1.5.1` | 普通线路由 WebView 内 ArtPlayer 直连；`provider_s1` 的 1080p HEVC + 音视频双 CENC 线路 MSE 无法解，改由 Android 原生内核承接，密钥在本机派生、不进清单/缓存/响应/日志。系统音量、窗口亮度、双击手势与故障恢复由端侧/原生桥按实测实现，不声称播放器开箱即有这些能力 |
 | **视觉与图标系统** | **Design Tokens + Lucide SVG** | `CSS Vars` | 严格执行 P0 红线：零 Emoji 功能图标，锁定统一 2px 描边 Lucide SVG（16/20/24px）；黑曜石 `#080A10` / 象牙白 `#F5F6FA` 双模与琥珀金 `#E5A93C` 主色 |
 | **边缘计算与网关** | **Cloudflare Workers + Cron** | `ES Modules` | 定时启动已配置来源增量处理及健康巡检；实际配额依账号计划而定，当前未核实套餐和 AI 可用量，不承诺零冷启动 |
 | **全文检索数据库** | **Cloudflare D1 FTS5** | `SQLite 原生` | 负责剧名、全拼、拼音首字母缩写、题材与错字纠偏词法检索；Workers AI 与 Vectorize 语义检索移入 v2.1+ |
@@ -63,6 +69,7 @@
 │  • 二级联动横滑流 : 有实数榜单/推荐/新片才显示；否则仅题材胶囊          │
 │  • 四模海报排版器 : 3列紧凑(默认) / 2列大图 / 4列书架 / 单列图文列表     │
 │  • ArtPlayer 内核 : 左滑音量HUD / 右滑亮度HUD / 双击10s快进退 / 定时关闭 │
+│  • 双内核分流 : 带加密标记的线路交原生内核，其余网页直连                │
 │  • 播放故障重解析 : 服务端择源并下发单个短时句柄，客户端按分集重试     │
 │  • 独立设置中枢   : 主题切换 / 后台播放 / 卡密兑换 / OTA / 探索开关      │
 └───────────────────────────────────▲─────────────────────────────────────┘
@@ -76,6 +83,8 @@
 │  • @capacitor/preferences: 非敏感本地偏好与观看断点；             │
 │    JWT 等凭证须使用系统级安全存储（Keystore 支持），不落明文偏好文件 │
 │  • @capacitor/app        : 前后台生命周期接管、返回键拦截与后台音频保持 │
+│  • PrismPlayer : ExoPlayer 硬解 + CENC 本机流式解密                     │
+│  • 原生本地插件 : 播放会话 / 投屏限制 / 二维码保存                      │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -150,21 +159,21 @@ D:\DEV\prism-play\
 │   ├── 03-contracts/                # OpenAPI 3.0.3 (openapi.yaml) + API-SPEC.md
 │   └── 04-spec/                     # SPEC-v2.0.md（施工与验收总契约）
 │
-├── src/                             # 【现代流媒体前端核心层 (Vite + TS + ArtPlayer)】
-│   ├── index.html                   # Edge-to-Edge 真全屏主入口
-│   ├── main.ts                      # 应用启动与生命周期挂载
+├── src/                             # 【现代流媒体前端核心层 (Vite + TS + 双播放内核)】
+│   ├── index.html                   # Edge-to-Edge 真全屏主入口（no-referrer 防上游盗链）
+│   ├── main.ts                      # 应用启动与生命周期挂载（含发现同步让路调度）
 │   ├── styles/                      # design-tokens.css / design-tokens.json / 布局样式
-│   ├── core/                        # API 客户端、故障重解析、离线验签、公开目录缓存
+│   ├── core/                        # API 客户端（有界重试/超时/取消）、离线验签、公开目录缓存与发现增量、原生作者支持桥
 │   ├── components/                  # 大视界频道栏、二级横滑胶囊、四模海报网格、续播卡
-│   ├── player/                      # ArtPlayer 封装（左音量/右亮度/双击快进退/定时关闭）
-│   └── views/                       # 独立设置中心（主题/后台播放/卡密核销/OTA检测）
+│   ├── player/                      # ArtPlayer 与 ExoPlayer 双引擎适配、线路编排、手势 HUD 与错误态分流
+│   └── views/                       # 独立设置中心（主题/后台播放/卡密核销/OTA 检测/作者支持）
 │
 ├── edge/                            # 【Cloudflare 边缘云脑层 (play.prismos.org)】
 │   ├── wrangler.toml                # Workers / D1 / KV / R2 编排配置
-│   ├── migrations/                  # 0001_initial_schema.sql（D1 数据库 Schema）
+│   ├── migrations/                  # 0001~0007 增量迁移（当前 38 张真实业务表 + 5 张 FTS5 影子表）
 │   └── src/
-│       ├── index.ts                 # 边缘网关主入口（路由分发 + Cron 源巡检）
-│       ├── routes/                  # channels / catalog / titles / playback / redeem / share
+│       ├── index.ts                 # 边缘网关主入口（路由分发 + Cron 源巡检 + 后台/隐私前置路由）
+│       ├── routes/                  # channels / catalog / titles / native-playback / search / discoveries / redeem / share / admin
 │       └── cron/                    # 源健康巡检与频道缓存刷新
 │
 ├── android/                         # 【Capacitor 7 标准 Android 原生工程】

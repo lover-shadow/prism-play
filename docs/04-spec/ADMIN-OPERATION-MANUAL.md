@@ -1,7 +1,16 @@
 # 《光影Play》（Prism Play）管理后台与卡密运维操作手册
 # (ADMIN-OPERATION-MANUAL.md)
 
-> **正本关联**：`docs/04-spec/ADMIN-ANALYTICS-AND-COUPON-SPEC-AND-PLAN.md`（技术规范与实施计划）  
+## 2026-10-09 消息与版本的标准化操作渠道（已部署）
+
+目前不新增Admin公告UI；使用已认证后台会话及同源请求调用 GET/POST `/api/admin/announcements`，携带现有CSRF头。POST为 `{requestId,confirmed:true,document:{schema:1,revision,items}}`，纯文本、有效时间、条目id/revision明确；撤下以递增revision和items=[]提交。每次操作GET读回确认，不把200解释为全员收到；409要求核对已有请求，503不称成功，结果未知先读回再重试。
+
+版本、安装包与通告发布已全面沉淀为工程级自动化流水线与 SOP 手册：
+- **正本手册**：`docs/04-spec/RELEASE-SOP-AND-PIPELINE.md`
+- **操作命令**：`npm run release:preflight`、`npm run release:upload`、`npm run release:deploy`、`npm run release:promote`、`npm run release:verify`、`npm run release:rollback` 或一键 `npm run release`。
+- 彻底告别临时手工脚本，不可变包校验、R2元数据注入、KV指针切换与生产端到端验收全部由标准工具保证。
+
+> **正本关联**：`docs/04-spec/ADMIN-ANALYTICS-AND-COUPON-SPEC-AND-PLAN.md`（技术规范与实施计划）、`docs/04-spec/RELEASE-SOP-AND-PIPELINE.md`（生产发布SOP）  
 > **服务域名**：`https://play.prismos.org/admin`  
 > **适用对象**：Master（产品负责人/日常运营）、接续施工 Agent、系统运维工程师  
 > **更新日期**：2026-10-06  

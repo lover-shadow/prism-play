@@ -7,6 +7,7 @@ import { handleAdminCouponRead } from './admin-coupons';
 import { handleAdminDashboard } from './admin-dashboard';
 import { handleAdminOperations } from './admin-operations';
 import { handleAdminCouponWrite } from './admin-coupon-write';
+import { handleAdminAnnouncementsRead, handleAdminAnnouncementsWrite } from './admin-announcements';
 import { renderAdminPage, adminScript, adminStyles } from '../html/admin-page';
 
 export function isAdminPath(path: string): boolean {
@@ -29,8 +30,12 @@ export async function handleAdminRequest(request: Request, env: Env & AdminEnv, 
     if (['/api/admin/login', '/api/admin/session', '/api/admin/logout'].includes(path)) return await handleAdminAuth(request, env, clock);
     const refusal = await guardAdmin(request, env, clock);
     if (refusal) return refusal;
-    if (request.method === 'POST' && path.startsWith('/api/admin/coupons/')) return await handleAdminCouponWrite(request, env, clock);
+    if (request.method === 'POST') {
+      if (path.startsWith('/api/admin/coupons/')) return await handleAdminCouponWrite(request, env, clock);
+      if (path === '/api/admin/announcements') return await handleAdminAnnouncementsWrite(request, env, clock);
+    }
     if (request.method !== 'GET') return adminJson({ code: 'METHOD_NOT_ALLOWED' }, 405);
+    if (path === '/api/admin/announcements') return await handleAdminAnnouncementsRead(request, env);
     if (path === '/api/admin/coupons' || /^\/api\/admin\/coupons\/[a-f0-9]{64}$/.test(path)) return await handleAdminCouponRead(request, env);
     if (path === '/api/admin/dashboard') return await handleAdminDashboard(request, env, clock);
     if (path === '/api/admin/operations') return await handleAdminOperations(request, env, clock);

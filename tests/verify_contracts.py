@@ -37,19 +37,23 @@ def check_openapi():
         "/api/device/ping",
         "/api/user/sync",
         "/api/version",
+        "/api/announcements",
         "/api/telemetry/lines",
         "/s/{drama_id}",
         "/dl",
         "/dl/latest/{platform}",
+        "/dl/artifacts/{versionCode}/{file}",
         "/",
         "/assets/{file}",
+        "/robots.txt",
+        "/sitemap.xml",
         "/proxy/{kind}/{handle}"
     ]
     admin_paths = {
         '/api/admin/' + suffix for suffix in [
             'login', 'session', 'logout', 'dashboard', 'coupons', 'coupons/generate',
             'coupons/{id}', 'coupons/{id}/reveal', 'coupons/{id}/confirm-stock',
-            'coupons/{id}/dispatch', 'coupons/{id}/revoke', 'operations',
+            'coupons/{id}/dispatch', 'coupons/{id}/revoke', 'operations', 'announcements',
         ]
     }
     for p in expected_paths:
@@ -90,6 +94,7 @@ def check_openapi():
     assert "windows" not in schemas["VersionResponse"]["properties"], "VersionResponse 不得包含未交付的 windows 产物属性"
     assert "oneOf" in schemas["CatalogChange"], "CatalogChange 必须使用 oneOf 区分 upsert 与 delete"
     print(f"  -> OpenAPI {len(expected_paths)} 个App路径与 {len(admin_paths)} 个后台目标路径校验通过，无悬空引用；不代表后台已部署。")
+    return len(expected_paths)
 
 def load_migration_sql():
     """按序读取全部迁移文件。
@@ -202,6 +207,7 @@ def check_sqlite_schema():
     res_double = conn.execute("SELECT content_id FROM public_search_fts WHERE public_search_fts MATCH ?", ("战神",)).fetchall()
     assert res_single and res_double, "FTS5 必须支持单字与双字预生成词元检索"
     print(f"  -> D1 真实业务表 {len(business_tables)} 张，FTS5 影子表 {len(fts_shadow)} 张；R-1 强制等式与卡密上限全部通过。")
+    return len(business_tables)
 
 def check_spec_openapi_alignment():
     print("[3/5] 检验 SPEC-v2.0 §5 声明与 OpenAPI 实际响应体形状对齐 (消除 R-4)...")
@@ -231,7 +237,8 @@ def check_cross_documents():
         
     # 验证 PRD 标题无重号 (消除 R-11)
     assert "### 13.1" in prd_text and "### 13.2" in prd_text, "PRD 第十三章子标题必须为 13.1 与 13.2，不可与第十二章重号"
-    print("  -> F-01~15 与 AC-01~30 编号无缝对齐，PRD 标题层级无重号。")
+    print(f"  -> {expected_f[0]}~{expected_f[-1]} 与 {expected_ac[0]}~{expected_ac[-1]} 编号无缝对齐，PRD 标题层级无重号。")
+    return len(expected_f), len(expected_ac)
 
 def check_design_tokens():
     print("[5/5] 检验 Design Tokens 与 CSS 变量一致性...")
@@ -253,14 +260,15 @@ def check_design_tokens():
 
 if __name__ == "__main__":
     try:
-        check_openapi()
-        check_sqlite_schema()
+        api_count = check_openapi()
+        table_count = check_sqlite_schema()
         check_spec_openapi_alignment()
-        check_cross_documents()
+        function_count, ac_count = check_cross_documents()
         check_design_tokens()
         print("\n==================================================")
         print("  【阶段 0：施工前契约复核门禁 (Gate G0)】通过检验！")
-        print("   (覆盖 24 App API / 37 业务表 / 13 功能 / 30 AC 验收)")
+        print(f"   (覆盖 {api_count} App API / {table_count} 业务表 / "
+              f"{function_count} 功能 / {ac_count} AC 验收)")
         print("==================================================")
     except Exception as e:
         print(f"\n[FAILED] 契约复核未通过: {e}", file=sys.stderr)

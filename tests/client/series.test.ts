@@ -24,20 +24,21 @@ describe('observed season grouping', () => {
     expect(groups.flatMap((group) => group.items.map((entry) => entry.id))).toEqual(['base', 's2', 'part']);
     expect(groups).toHaveLength(3);
   });
-  it('keeps every same-name unsuffixed work independent when identity is ambiguous', () => {
+  it('retains multiple same-name first-season candidates without deleting identities', () => {
     const groups = groupSeries([item('base-a', '故事'), item('base-b', '故事'), item('s2', '故事第二季')]);
-    expect(groups).toHaveLength(3);
-    expect(groups.flatMap((group) => group.items.map((entry) => entry.id))).toEqual(['base-a', 'base-b', 's2']);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].items.map((entry) => entry.id)).toEqual(['base-a', 'base-b', 's2']);
+    expect(groups[0].labels).toEqual({ 'base-a': '版本1', 'base-b': '版本2' });
   });
-  it('does not guess a family when two works claim the same season number', () => {
+  it('preserves family and numbers when two works claim the same season number (AC-R04)', () => {
     const groups = groupSeries([item('s1a', '故事第一季'), item('s1b', '故事第1季'), item('s2', '故事第二季')]);
-    expect(groups).toHaveLength(3);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].items.map((entry) => entry.id)).toEqual(['s1b', 's1a', 's2']);
   });
-  it('does not attach an unsuffixed work when an explicit first season already exists', () => {
+  it('retains unsuffixed and explicit first seasons in one selectable family', () => {
     const groups = groupSeries([item('base', '故事'), item('s1', '故事第一季'), item('s2', '故事第二季')]);
-    expect(groups).toHaveLength(2);
-    expect(groups[0].items.map((entry) => entry.id)).toEqual(['base']);
-    expect(groups[1].items.map((entry) => entry.id)).toEqual(['s1', 's2']);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].items.map((entry) => entry.id)).toEqual(['base', 's1', 's2']);
   });
   it('keeps unsuffixed single works and does not merge season and part families', () => {
     expect(groupSeries([item('a', '故事'), item('b', '别的故事第二季')])).toHaveLength(2);

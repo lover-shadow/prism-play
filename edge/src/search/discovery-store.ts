@@ -173,22 +173,38 @@ export async function readDiscoveryChanges(context: DiscoveryContext, cursor: nu
   { changes: DiscoveryChange[]; cursor: number; hasMore: boolean }> {
   discoveryTime(cursor); discoveryTime(now);
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('Invalid changes limit');
+  // limit is an upper bound; smaller pages keep cold-pack verification within the CPU budget.
+  limit = Math.min(limit, 10);
   await expireDiscoveryFacts(context.bindings.DB, now);
-  const result = await context.bindings.DB.prepare(`SELECT seq, work_id, operation, card_json, updated_at
-    FROM discovery_changes WHERE seq > ? ORDER BY seq LIMIT ?`).bind(cursor, limit + 1)
-    .all<{ seq: number; work_id: string; operation: 'upsert' | 'withdraw'; card_json: string | null; updated_at: number }>();
+  const result = await context.bindings.DB.prepare(`SELECT c.seq, c.work_id, c.operation, c.updated_at,
+    w.work_id AS current_id, w.provider_id, w.source_id, w.enabled, w.expires_at,
+    w.card_json AS fact_card, k.card_json AS discovery_card
+    FROM discovery_changes c LEFT JOIN discovery_works w ON w.work_id = c.work_id
+    LEFT JOIN discovery_cards k ON k.work_id = c.work_id
+    WHERE c.seq > ? ORDER BY c.seq LIMIT ?`).bind(cursor, limit + 1)
+    .all<{ seq: number; work_id: string; operation: 'upsert' | 'withdraw'; updated_at: number;
+      current_id: string | null; provider_id: string | null; source_id: string | null;
+      enabled: number | null; expires_at: number | null; fact_card: string | null; discovery_card: string | null }>();
   const page = result.results.slice(0, limit), changes: DiscoveryChange[] = [];
+  const authCache = new Map<string, ReturnType<typeof context.authority>>();
   for (const row of page) {
+    if (row.operation === 'withdraw') {
+      changes.push({ seq: row.seq, workId: row.work_id, operation: 'withdraw', updatedAt: row.updated_at });
+      continue;
+    }
     // A historical upsert can never resurrect a now withdrawn/expired/baseline-owned work.
-    const current = await indexRow(context.bindings.DB, row.work_id);
-    const baseline = await context.authority({ workId: row.work_id, providerId: current?.provider_id, sourceId: current?.source_id });
-    const card = await context.bindings.DB.prepare('SELECT card_json FROM discovery_cards WHERE work_id = ?')
-      .bind(row.work_id).first<{ card_json: string }>();
+    const identityKey = `${row.work_id}:${row.provider_id ?? ''}:${row.source_id ?? ''}`;
+    let baselinePromise = authCache.get(identityKey);
+    if (!baselinePromise) {
+      baselinePromise = context.authority({ workId: row.work_id, providerId: row.provider_id ?? undefined, sourceId: row.source_id ?? undefined });
+      authCache.set(identityKey, baselinePromise);
+    }
+    const baseline = await baselinePromise;
     const visible = (!baseline.authoritative || eligible(baseline)) &&
-      (current?.enabled === 1 && current.expires_at > now || !current && card !== null);
+      (row.enabled === 1 && row.expires_at! > now || row.current_id === null && row.discovery_card !== null);
     const operation = row.operation === 'upsert' && visible ? 'upsert' : 'withdraw';
     const change: DiscoveryChange = { seq: row.seq, workId: row.work_id, operation, updatedAt: row.updated_at };
-    if (operation === 'upsert') change.card = JSON.parse(current?.card_json ?? card!.card_json) as ContentItem;
+    if (operation === 'upsert') change.card = JSON.parse(row.fact_card ?? row.discovery_card!) as ContentItem;
     changes.push(change);
   }
   return { changes, cursor: page.at(-1)?.seq ?? cursor, hasMore: result.results.length > limit };

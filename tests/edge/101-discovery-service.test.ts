@@ -5,7 +5,7 @@ import { readDiscoveryConfig, createDiscoveryProviders } from '../../edge/src/se
 import { createDiscoveryContext } from '../../edge/src/search/discovery-runtime';
 import { acquireDiscoveryLease, discoveryQueryKey } from '../../edge/src/search/discovery-query';
 import type { DiscoveryContext } from '../../edge/src/search/discovery-store';
-import type { DiscoveryCandidate, DiscoveryProvider, DiscoveryPublicFact } from '../../edge/src/search/discovery-provider';
+import { IncompleteDiscoverySearch, type DiscoveryCandidate, type DiscoveryProvider, type DiscoveryPublicFact } from '../../edge/src/search/discovery-provider';
 import type { Env } from '../../edge/src/types/env';
 
 function fixture() {
@@ -33,6 +33,13 @@ function fixture() {
 }
 
 describe('discovery service bounded query interface', () => {
+  it('retains partial search candidates while reporting failed without success cache', async () => {
+    const f = fixture();
+    vi.mocked(f.provider.search).mockRejectedValue(new IncompleteDiscoverySearch([f.candidate]));
+    const result = await f.service.query('公共故事', 1, f.request);
+    expect(result.failed).toBe(true); expect(result.items[0]?.item.id).toBe(f.candidate.id);
+    expect(f.sqlite.count('discovery_queries')).toBe(0);
+  });
   it('publishes full facts with canonical identity and empty category, then shares D1 query cache', async () => {
     const f = fixture();
     const result = await f.service.query('公共故事', 1, f.request);

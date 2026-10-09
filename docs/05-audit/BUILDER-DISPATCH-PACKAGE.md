@@ -27,6 +27,11 @@
 7. **Cloudflare 云端基础设施专职分工**：
    - 鉴于总包会话无 Cloudflare MCP，**真实 Cloudflare 云端资源（D1 数据库创建、KV 命名空间创建、R2 存储桶创建、线上 SQL 迁移执行、生产发布与线上拨备）全部由监理 Agent 专职承接**；
    - 总包 Agent **无需安装或配置 Cloudflare MCP**，仅需专注本地工程代码（TypeScript、SQL 逻辑、本地模拟测试、前端与宿主）的高质量编写！真实 ID 将由监理方自动回填入 `edge/wrangler.toml` 供你直接使用。
+8. **端云生产发布铁律（严禁临时现场手写发布脚本）**：
+   - 任何涉及 Cloudflare Worker 部署、R2 不可变 APK 上传、KV 版本号或公告更新的发布操作，**必须严格获得 Master 明确授权**；
+   - **严禁编写任何临时 deploy 脚本或手工拼凑 CLI 命令**；
+   - 无论由哪个 Agent 执行发布，**必须 100% 消费标准发布流水线**：遵循 `docs/04-spec/RELEASE-SOP-AND-PIPELINE.md`，统一运行 `npm run release:preflight`、`upload`、`deploy`、`promote`、`verify`（或一键 `npm run release`）；
+   - 异常时立即执行 `npm run release:rollback` 快速回滚，确保 Secret 保护（`--keep-vars`）、不可变包 SHA-256 回核、全链路验收 100% 自动化闭环。
 
 ---
 
@@ -35,6 +40,7 @@
 | 资产类型 | 物理路径 | 权威属性与职责 |
 | :--- | :--- | :--- |
 | **施工总宪法** | `docs/04-spec/SPEC-v2.0.md` | **施工与验收的唯一依据**。包含全部范围、技术版本、API 列表、DDL、Tokens、EARS 验收标准与已知坑。 |
+| **生产发布 SOP** | `docs/04-spec/RELEASE-SOP-AND-PIPELINE.md` | **端云一体生产发布标准操作手册与流水线**。包含预检、不可变 R2 上传、Worker 安全部署、KV 指针原子切换、端到端线上验收与一键回滚 SOP。 |
 | **机器接口正本** | `docs/03-contracts/openapi.yaml` | OpenAPI 3.0.3 规范正本（18 个合法端点，已收敛多段路由 `/proxy/{kind}/{handle}` 与闭集错误码）。 |
 | **接口文字规范** | `docs/03-contracts/API-SPEC.md` | 接口逻辑细节与错误码映射表。 |
 | **数据模型正本** | `edge/migrations/0001_initial_schema.sql` | Cloudflare D1 (SQLite) 物理建表 SQL（包含 20 张业务表 + 5 张 FTS 影子表）。 |

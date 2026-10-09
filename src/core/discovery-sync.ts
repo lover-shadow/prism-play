@@ -1,5 +1,6 @@
 /** Independent public discovery log: disk -> merged index -> cache-scoped cursor. */
-import type { ContentItem } from '../../edge/src/types/api';
+import type { CatalogChange, ContentItem } from '../../edge/src/types/api';
+import type { SearchIndex } from './storage/search-index';
 import { PUBLIC_CHANNEL_IDS } from '../../edge/src/types/api';
 import type { PublicCache } from './storage/public-cache';
 import { isPrivateSubject } from './storage/storage-domains';
@@ -13,11 +14,13 @@ export interface DiscoveryChangesResponse {
 export interface DiscoverySyncResult { cursor: number; pages: number; hasMore: boolean; error: string | null }
 export interface DiscoverySyncDeps {
   cache: PublicCache;
-  client: { discoveryChanges(after: number, limit?: number): Promise<DiscoveryChangesResponse> };
+  client: { discoveryChanges(after: number, limit?: number, signal?: AbortSignal): Promise<DiscoveryChangesResponse> };
   /** Must finish indexing (or throw) before the cursor can advance. */
-  onEntries(items: readonly ContentItem[]): Promise<void>;
+  onEntries(items: readonly ContentItem[], changes?: readonly DiscoveryChangesResponse['changes'][number][]): Promise<void>;
   pageBudget?: number;
   limit?: number;
+  busy?: () => boolean;
+  signal?: AbortSignal;
 }
 
 function validate(response: DiscoveryChangesResponse, after: number): DiscoveryChangesResponse['changes'] {
@@ -52,12 +55,23 @@ export function createDiscoverySync(deps: DiscoverySyncDeps): { sync(): Promise<
     const start = cache.discoveryState();
     let cursor = start.cursor, pages = 0, hasMore = false;
     try {
+      const receipt = cache.pendingDiscoveryIndex();
+      if (receipt !== null) {
+        const changes = receipt.ids.map((workId) => ({ workId, seq: receipt.cursor, operation: 'withdraw' as const, updatedAt: 0 }));
+        await deps.onEntries(cache.list(), changes);
+        await cache.commitDiscoveryCursor(receipt.cursor, start.epoch);
+        cursor = receipt.cursor;
+      }
       for (; pages < budget;) {
-        const response = await deps.client.discoveryChanges(cursor, limit);
+        if (pages > 0) await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        if (deps.signal?.aborted || deps.busy?.()) break;
+        const response = await deps.client.discoveryChanges(cursor, limit, deps.signal);
+        if (deps.signal?.aborted) break;
         const changes = validate(response, cursor);
-        await cache.applyDiscoveryChanges(changes, start.epoch);
-        // Full merged input is authoritative for withdrawals, including base ids that must survive.
-        await deps.onEntries(cache.list());
+        if (changes.length > 0) {
+          await cache.applyDiscoveryChanges(changes, start.epoch, response.cursor);
+          await deps.onEntries(cache.list(), changes);
+        }
         await cache.commitDiscoveryCursor(response.cursor, start.epoch);
         cursor = response.cursor; pages += 1; hasMore = response.hasMore;
         if (!hasMore) break;
@@ -75,5 +89,30 @@ export function createDiscoverySync(deps: DiscoverySyncDeps): { sync(): Promise<
       runs.set(cache, task);
       return task;
     }
+  };
+}
+
+export type DiscoveryChangeItem = DiscoveryChangesResponse['changes'][number];
+
+/** 局部索引补丁器（AC-OPT-04）：仅针对本次变更卡片增量更新 FTS，绝不全量清库重构。 */
+export function createDiscoveryIndexPatcher(
+  cache: PublicCache,
+  searchIndex: { sync(feed: Parameters<SearchIndex['sync']>[0]): Promise<{ error: string | null }>; clear(): Promise<void> }
+): (items: readonly ContentItem[], changes?: readonly DiscoveryChangeItem[]) => Promise<void> {
+  return async (_items, changes) => {
+    const epoch = cache.discoveryState().epoch;
+    if (!changes || changes.length === 0) return;
+    const catalogChanges: CatalogChange[] = [];
+    for (const workId of new Set(changes.map((change) => change.workId))) {
+      const item = cache.getItem(workId);
+      if (item !== null && !isPrivateSubject(item) && item.enabled !== false) {
+        catalogChanges.push({ operation: 'upsert', contentId: workId, item, revision: cache.snapshotRevision() });
+      } else {
+        catalogChanges.push({ operation: 'delete', contentId: workId, revision: cache.snapshotRevision() });
+      }
+    }
+    const result = await searchIndex.sync({ items: [], changes: catalogChanges, revision: cache.snapshotRevision(), discovery: true });
+    if (epoch !== cache.discoveryState().epoch) { await searchIndex.clear(); throw new Error('Discovery cache was cleared'); }
+    if (result.error !== null) throw new Error(result.error);
   };
 }

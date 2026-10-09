@@ -1,4 +1,4 @@
-import type { DiscoveryCandidate } from '../discovery-provider';
+import { IncompleteDiscoverySearch, type DiscoveryCandidate } from '../discovery-provider';
 
 export function season(title: string): { base: string; number: number; unit: string; chinese: boolean } | undefined {
   const match = /^(.*?)第?\s*([0-9零〇一二两兩三四五六七八九十百]+)\s*(季|部|阶段)[\p{P}\s]*$/u.exec(title.normalize('NFKC'));
@@ -50,9 +50,13 @@ export async function fillSeasons(query: string, initial: DiscoveryCandidate[], 
         if (requests++ >= 32) break;
         const q = `${group.base}第${label}${group.unit}`;
         if ([...q].length > 80) continue;
-        for (const item of await get(q)) {
-          const s = season(item.title);
-          if (s?.base === group.base && s.unit === group.unit && s.number === n) { known.add(n); found.set(item.id, item); }
+        try {
+          for (const item of await get(q)) {
+            const s = season(item.title);
+            if (s?.base === group.base && s.unit === group.unit && s.number === n) { known.add(n); found.set(item.id, item); }
+          }
+        } catch {
+          throw new IncompleteDiscoverySearch([...found.values()]);
         }
         if (known.has(n)) break;
       }

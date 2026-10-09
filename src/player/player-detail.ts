@@ -252,13 +252,10 @@ export function buildDetailBody(
         const descBox = document.createElement('div');
         descBox.className = 'related-body';
         const title = document.createElement('span');
-        title.className = 'related-title';
-        title.textContent = item.title;
+        title.className = 'related-title'; title.textContent = item.title;
         const desc = document.createElement('span');
-        desc.className = 'related-desc';
-        desc.textContent = item.synopsis || item.category || '暂无简介';
-        descBox.append(title, desc);
-        card.append(cover, descBox);
+        desc.className = 'related-desc'; desc.textContent = item.synopsis || item.category || '暂无简介';
+        descBox.append(title, desc); card.append(cover, descBox);
         card.addEventListener('click', () => onOpenRelated?.(item.id));
         relatedGrid.append(card);
       }
@@ -272,6 +269,7 @@ export function buildDetailBody(
   // 放在 append 之前会让呼吸状态条永远挂不上树——面板照常工作、状态条却不出现，正是最难查的那类错位。
   castPanel.attach(actionIsland);
 
+  let attachedSeasonSwitcher: HTMLElement | null = null;
   const markEpisode = (id: number): void => {
     currentEpisodeId = id;
     // 手机上切集，大屏必须跟到同一集；未在投屏时 syncNow() 自己就是空操作。
@@ -286,7 +284,7 @@ export function buildDetailBody(
 
   return {
     body,
-    attachSeasonSwitcher: (el: HTMLElement) => { epSection.before(el); },
+    attachSeasonSwitcher: (el: HTMLElement) => { attachedSeasonSwitcher?.remove(); attachedSeasonSwitcher = el; epSection.before(el); },
     markEpisode,
     openCast: () => { menus?.beforeMenuOpen?.(); castPanel.open(); },
     closeCast: () => castPanel.close(),

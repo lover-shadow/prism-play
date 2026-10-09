@@ -228,26 +228,37 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
     async function refreshTopology(): Promise<void> {
       const nextToken = ++token;
       if (!active().hasContent() && !hydrateFromLocalCache()) grid.showSkeleton();
-      const continueTask = loadContinue(nextToken);
+      await loadContinue(nextToken);
+      if (nextToken !== token) return;
+
+      const initialScope = (deps.api.cachedSnapshot?.() !== undefined || channels.length > 0)
+        ? loadScope(nextToken, false)
+        : null;
+
       try {
         const response = await deps.api.channels();
         if (nextToken !== token) return;
         channels = [...response.channels];
         anchorSelection();
         paintTopology();
-        await loadScope(nextToken, false);
+        if (initialScope === null) {
+          await loadScope(nextToken, false);
+        } else {
+          await initialScope.catch(() => undefined);
+          void syncFeed?.().catch(() => undefined);
+        }
       } catch (error) {
         if (nextToken !== token) return;
-        // §3.2「更新失败保留上一可用快照」：拓扑这一条读面失败只关掉"内容更新"，不该把已经躺在
-        // 本机快照里的片单盖成整页错误。只剩空手（连频道都没有）才落五态。
+        if (initialScope !== null) await initialScope.catch(() => undefined);
+        // §3.2「更新失败保留上一可用快照」：拓扑失败只关掉内容更新，不盖掉已在快照里的内容。
         if (channels.length === 0) {
           presentState(stateKindForError(error), { detail: detailForError(error), actionLabel: '重试', onAction: retryTopology });
           return;
         }
-        await loadScope(nextToken, false);
+        if (initialScope === null) {
+          await loadScope(nextToken, false);
+        }
         if (active().hasContent()) reportFeedback({ phase: 'offline', syncError: error });
-      } finally {
-        await continueTask;
       }
     }
 

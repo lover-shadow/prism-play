@@ -195,6 +195,12 @@ function validateAndroidRelease(value: unknown, origin: string): AndroidRelease 
   if (typeof value.changelog === 'string' && value.changelog !== '') release.changelog = value.changelog;
   if (isInteger(value.minVersionCode)) release.minVersionCode = value.minVersionCode;
   if (typeof value.force === 'boolean') release.force = value.force;
+  if (value.artifact !== undefined) {
+    const a = value.artifact;
+    if (!isRecord(a) || typeof a.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(a.sha256) ||
+        !isInteger(a.bytes) || a.bytes <= 0 || a.key !== `releases/android/${release.versionCode}/${a.sha256}.apk`) return null;
+    release.artifact = { key: a.key as string, bytes: a.bytes, sha256: a.sha256 };
+  }
   return release;
 }
 

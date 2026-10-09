@@ -13,6 +13,7 @@
 import { escapeText } from './escape';
 import { ANDROID_PACKAGE_PATH, DOWNLOAD_ENTRY_PATH, heroShotMarkup } from './dl-page';
 import { inlineDocumentHead, inlineDayPaletteStyles, inlineThemeStyles, lucideIcon, type LucideIconName } from './theme';
+import { portalSeoTags } from './seo-meta';
 import { APP_NAME } from './share-page';
 
 export interface LandingRelease {
@@ -266,7 +267,7 @@ export function renderLandingPage(input: LandingPageInput): string {
   const head = inlineDocumentHead(
     `${APP_NAME} · 好剧随时开场`,
     `${inlineThemeStyles()}\n${inlineDayPaletteStyles()}\n${LANDING_STYLES}`,
-    { dualMode: true }
+    { dualMode: true, extraMeta: portalSeoTags() }
   );
   return [
     '<!doctype html>',

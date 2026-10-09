@@ -1,5 +1,5 @@
 import type { EpisodeLine } from '../../library/title-asset';
-import type { DiscoveryCandidate, DiscoveryConfig, DiscoveryProvider, DiscoveryResolveState } from '../discovery-provider';
+import { IncompleteDiscoverySearch, type DiscoveryCandidate, type DiscoveryConfig, type DiscoveryProvider, type DiscoveryResolveState } from '../discovery-provider';
 import { completeFact, factBase, publicText, record, router, type Row } from './parse';
 import { fillSeasons } from './seasons';
 import { resolveS1AppMedia, resolveS1PlaybackApi } from './s1-native';
@@ -67,7 +67,10 @@ export function createS1Provider(config: DiscoveryConfig, diagnosticSink?: (even
         const all = await fillSeasons(q, found, (next) => getSearch(next, scope));
         if (all.length > 256) throw invalid();
         return all;
-      } catch { throw invalid(); }
+      } catch (error) {
+        if (error instanceof IncompleteDiscoverySearch && error.candidates.length <= 256) throw error;
+        throw invalid();
+      }
     },
     async resolve(input, cursor, budget) {
       let stage: S1Diagnostic['stage'] = 'input', episodeNumber: number | undefined;

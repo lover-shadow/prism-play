@@ -3,7 +3,6 @@ import { PUBLIC_CHANNEL_IDS, type ContentItem, type MatchType, type SearchSugges
 import type { CatalogManifest } from '../library/manifest';
 import { factsHash, factsManifest, readWorkFact } from '../library/work-facts';
 import { isCount, isRecord } from '../library/contract';
-import { parseCatalogShard } from '../library/chunk';
 import { compileCoverage, coversCompiled, normalizeCoverage, type CompiledCoverage, type StageRequest } from './lexical';
 import { isCorrectionWithinBudget } from './correct';
 import { configUnavailableResponse } from '../config/kv-config';
@@ -46,9 +45,23 @@ export async function generationSearch(env: Env, origin: string): Promise<Genera
       totals[item.channelId as string] = (totals[item.channelId as string] ?? 0) + 1;
     }
     // Same per-item gate, one JSON round-trip rather than one tiny shard per work.
-    const parsed = parseCatalogShard(JSON.stringify({ items: raw.entries.map((entry) => entry.item), page: 1,
-      total: raw.entries.length, revision: manifest.revision }), manifest.revision, origin);
-    if (!parsed.ok) return null;
+    for (const entry of raw.entries) {
+      const item = entry.item as any;
+      if (item.isPrivate !== undefined && typeof item.isPrivate !== 'boolean') return null;
+      if (item.isAi !== undefined && typeof item.isAi !== 'boolean') return null;
+      if (item.isHot !== undefined && typeof item.isHot !== 'boolean') return null;
+      if (typeof item.firstPublishedAt === 'number' && (!Number.isSafeInteger(item.firstPublishedAt) || item.firstPublishedAt < 0)) return null;
+      if (typeof item.hitsTotal === 'number' && (!Number.isSafeInteger(item.hitsTotal) || item.hitsTotal < 0)) return null;
+      if (typeof item.coverUrl === 'string' && item.coverUrl.trim() !== '') {
+        const trimmed = item.coverUrl.trim();
+        if (!trimmed.startsWith('/') || trimmed.startsWith('//')) {
+          try {
+            const parsed = new URL(trimmed, origin);
+            if (parsed.origin !== origin || !parsed.pathname.startsWith('/proxy/')) return null;
+          } catch { return null; }
+        }
+      }
+    }
     for (const channel of PUBLIC_CHANNEL_IDS) if ((totals[channel] ?? 0) !== (manifest.channels[channel]?.total ?? 0)) return null;
     const value = { manifest, entries: raw.entries as unknown as SearchEntry[] };
     while (cache.size >= 2 || [...cache.values()].reduce((n, v) => n + v.bytes, 0) + bytes.length > MAX_BYTES) {
@@ -141,9 +154,10 @@ export function generationCandidates(entries: SearchEntry[], request: StageReque
 }
 
 async function verifiedItems(env: Env, generation: GenerationSearch, entries: SearchEntry[]): Promise<ContentItem[] | null> {
+  const reads = await Promise.all(entries.map((entry) => readWorkFact(env, generation.manifest, entry.item.id)));
   const items: ContentItem[] = [];
-  for (const entry of entries) {
-    const read = await readWorkFact(env, generation.manifest, entry.item.id);
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i]!, read = reads[i]!;
     if (read.status !== 'ok') return null;
     const fact = read.fact;
     if (fact.asset.title !== entry.item.title || fact.asset.channelId !== entry.item.channelId ||

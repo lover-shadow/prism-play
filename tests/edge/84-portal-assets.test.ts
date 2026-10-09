@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { VERSION_KV_KEY } from '../../edge/src/core/constants';
-import { ANDROID_APK_KEY, handlePortal } from '../../edge/src/routes/dl';
+import { handlePortal } from '../../edge/src/routes/dl';
 import {
   HLS_R2_KEY,
   IMMUTABLE_CACHE_CONTROL,
@@ -78,9 +78,14 @@ async function assetEnv(objects: Readonly<Record<string, string | number>>): Pro
 /** A published APK of 40 MB, or none at all; plus the operator's KV release bulletin. */
 async function portalEnv(options: { apk?: boolean; version?: string | null }): Promise<TestAssetEnv> {
   const env = (await createTestEnv()) as TestAssetEnv;
-  env.APK_BUCKET = bucketWith(options.apk === false ? {} : { [ANDROID_APK_KEY]: 40 * 1024 * 1024 });
+  if (options.version) {
+    const published = JSON.parse(options.version), r = published.android;
+    r.artifact = { key: `releases/android/${r.versionCode}/${'a'.repeat(64)}.apk`, sha256: 'a'.repeat(64), bytes: 40 * 1024 * 1024 };
+    env.APK_BUCKET = { head: async () => options.apk === false ? null : { size: r.artifact.bytes, customMetadata: { sha256: r.artifact.sha256, versionCode: String(r.versionCode), versionName: r.versionName } } } as unknown as R2Bucket;
+    await env.kv.put(VERSION_KV_KEY, JSON.stringify(published));
+  }
   env.APK_PUBLIC_BASE_URL = 'https://release.invalid/pub';
-  if (options.version !== null && options.version !== undefined) await env.kv.put(VERSION_KV_KEY, options.version);
+
   return env;
 }
 
@@ -147,6 +152,10 @@ describe('GET /assets/{file} (S-3)', () => {
     const response = await handleStaticAsset(new Request(`${ORIGIN}/${key}`), env, env.clock);
     expect(response.status).toBe(200);
     expect(response.headers.get('Cache-Control')).toBe('public, max-age=0, must-revalidate');
+
+    const ifNoneMatchReq = new Request(`${ORIGIN}/${key}`, { headers: { 'If-None-Match': 'W/"aabbccdd"' } });
+    const matchResponse = await handleStaticAsset(ifNoneMatchReq, env, env.clock);
+    expect(matchResponse.status).toBe(304);
   });
 
   it('404s an absent object, a missing bucket and any other name, and never guesses bytes', async () => {

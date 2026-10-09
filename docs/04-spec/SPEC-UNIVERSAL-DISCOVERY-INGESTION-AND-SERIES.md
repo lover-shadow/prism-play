@@ -519,7 +519,7 @@ CREATE TABLE IF NOT EXISTS discovery_job_queries (
 ### 8.2 全网增量发现同步：`GET /api/search/discoveries`
 *参数*：
 - `after` (integer, required): 客户端已同步的最大 `seq` 序号
-- `limit` (integer, default 60, max 100): 批次大小
+- `limit` (integer, default 60, max 100): 批次大小，**是上界而非承诺**。服务端另有单页硬预算 10 条（2026-10-08 免费档 CPU 预算治理，见 `SPEC-CLOUD-REFACTOR.md` §6.1.2），返回不足 10 且 `hasMore=false` 即已到当前游标末尾；`cursor` 按 `seq` 单调推进、绝不跳号。客户端 `pageBudget` 默认 4、上限 10 页，靠 `hasMore` 继续推进同一游标把预算内批次全部消费；`hasMore=true` 但游标不前进视为失败页。
 
 *响应体*：
 ```json

@@ -3,6 +3,7 @@ import { createCardDiscoveryService } from '../../edge/src/search/discovery-card
 import { asD1, createInMemoryD1 } from '../support/sqlite-d1';
 import { saveDiscoveryCard, readDiscoveryCard } from '../../edge/src/search/discovery-cards';
 import { readDiscoveryChanges, type DiscoveryContext } from '../../edge/src/search/discovery-store';
+import { IncompleteDiscoverySearch } from '../../edge/src/search/discovery-provider';
 
 function fixture(authoritative = false) {
   const sqlite = createInMemoryD1();
@@ -17,6 +18,15 @@ const candidate = { providerId: 'provider_s1' as const, sourceItemId: '10', id: 
   coverTargetUrl: 'https://cover.example/cover.jpg', synopsis: '故事简介' };
 
 describe('standalone discovery cards', () => {
+  it('keeps incomplete provider cards visible without a successful query cache', async () => {
+    const f = fixture(), search = vi.fn(async () => { throw new IncompleteDiscoverySearch([candidate]); });
+    const service = createCardDiscoveryService(f.context, [{ id: 'provider_s1', search, resolve: vi.fn() }]);
+    const request = new Request('https://app.example/api/search');
+    const result = await service.query('故事', 1, request);
+    expect(result.failed).toBe(true); expect(result.items[0]?.item.id).toBe(candidate.id);
+    expect(await f.context.bindings.DB.prepare('SELECT COUNT(*) AS n FROM discovery_queries').first('n')).toBe(0);
+    await service.query('故事', 1, request); expect(search).toHaveBeenCalledTimes(2);
+  });
   it('returns and caches search cards without calling episode resolve', async () => {
     const f = fixture();
     const provider = { id: 'provider_s1' as const, search: vi.fn(async () => [candidate]), resolve: vi.fn() };

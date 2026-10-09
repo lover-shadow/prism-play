@@ -68,7 +68,7 @@ export class SearchDiscoveries {
     return changed;
   }
   /** Ordered change batches commit removals and upserts together; base facts remain untouched. */
-  async apply(changes: readonly { workId: string; operation: 'upsert' | 'withdraw'; card?: ContentItem }[], base: ReadonlyMap<string, ContentItem>): Promise<void> {
+  async apply(changes: readonly { workId: string; operation: 'upsert' | 'withdraw'; card?: ContentItem }[], base: ReadonlyMap<string, ContentItem>, receipt?: CacheWrite): Promise<void> {
     for (const change of changes) if (change.operation === 'upsert') this.guard(change.card as ContentItem);
     const next = new Map(this.items), touched = new Set<string>();
     for (const change of changes) {
@@ -80,7 +80,8 @@ export class SearchDiscoveries {
       const item = next.get(id);
       return item === undefined ? [] : [{ key: keyOf(id), bytes: jsonBytes(item) }];
     });
-    if (touched.size) await this.disk.writeBatch(writes, [...touched].map(keyOf));
+    if (receipt) writes.push(receipt);
+    if (writes.length || touched.size) await this.disk.writeBatch(writes, [...touched].map(keyOf));
     this.items = next;
   }
   removalKeys(ids: readonly string[]): string[] { return ids.map(keyOf); }

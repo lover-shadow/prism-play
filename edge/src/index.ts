@@ -9,7 +9,7 @@ import { handleChannels } from './routes/channels';
 import { handleCatalog } from './routes/catalog';
 import { handleChanges } from './routes/changes';
 import { handleDevicePing } from './routes/device-ping';
-import { handleApkDownload, handleDownloadLanding, handlePortal } from './routes/dl';
+import { handleApkArtifact, handleApkDownload, handleDownloadLanding, handlePortal } from './routes/dl';
 import { handleStaticAsset } from './routes/assets';
 import { handleMonetizationConfig } from './routes/monetization';
 import { handlePlayback } from './routes/playback';
@@ -28,6 +28,8 @@ import { handleTitles } from './routes/titles';
 import { handleUserSync } from './routes/user-sync';
 import { handleTelemetryLines } from './routes/telemetry';
 import { handleVersion } from './routes/version';
+import { handleAnnouncements } from './routes/announcements';
+import { handleRobots, handleSitemap } from './routes/seo';
 import { handleAdminRequest, isAdminPath } from './routes/admin-request';
 import { collectAnalytics, analyticsFailure } from './analytics/collect';
 import { cleanupAnalytics } from './analytics/cleanup';
@@ -68,8 +70,12 @@ const ROUTES: readonly Route[] = [
   { pattern: ['api', 'user', 'sync'], allow: ['GET', 'POST'], handle: handleUserSync },
   { pattern: ['api', 'telemetry', 'lines'], allow: ['POST'], handle: handleTelemetryLines },
   { pattern: ['api', 'version'], allow: ['GET'], handle: handleVersion },
+  { pattern: ['api', 'announcements'], allow: ['GET'], handle: handleAnnouncements },
+  { pattern: ['robots.txt'], allow: ['GET'], handle: handleRobots },
+  { pattern: ['sitemap.xml'], allow: ['GET'], handle: handleSitemap },
   { pattern: ['s', '{dramaId}'], allow: ['GET'], handle: handleShare },
   { pattern: ['dl', 'latest', '{platform}'], allow: ['GET'], handle: handleApkDownload },
+  { pattern: ['dl', 'artifacts', '{versionCode}', '{file}'], allow: ['GET', 'HEAD'], handle: handleApkArtifact },
   { pattern: ['dl'], allow: ['GET'], handle: handleDownloadLanding },
   { pattern: ['assets', '{file}'], allow: ['GET'], handle: handleStaticAsset },
   { pattern: [], allow: ['GET'], handle: handlePortal },

@@ -105,6 +105,27 @@ describe('private discovery ledger (all migrations, real SQLite)', () => {
     expect(await readDiscoveryCards(f.context, [f.workId], 101)).toEqual([]);
     expect((await readDiscoveryChanges(f.context, 0, 101)).changes[0]).not.toHaveProperty('card');
   });
+  it('bounds requested 100-entry pages without skipping or losing change sequences', async () => {
+    const f = await fixture(); await f.publish();
+    for (let n = 0; n < 24; n++) await f.DB.prepare(`INSERT INTO discovery_changes(work_id, operation, updated_at) VALUES (?, 'withdraw', ?)`)
+      .bind(`withdrawn_${n}`, 101).run();
+    let cursor = 0;
+    const sequences: number[] = [];
+    for (let page = 0; page < 4; page++) {
+      const result = await readDiscoveryChanges(f.context, cursor, 101, 100);
+      expect(result.changes.length).toBeLessThanOrEqual(10);
+      sequences.push(...result.changes.map((change) => change.seq));
+      cursor = result.cursor;
+      if (!result.hasMore) break;
+    }
+    expect(sequences).toEqual(Array.from({ length: 25 }, (_, i) => i + 1));
+  });
+  it('loads ledger visibility in one joined query rather than per-entry SQL', async () => {
+    const f = await fixture(); await f.publish();
+    const prepare = vi.spyOn(f.DB, 'prepare');
+    await readDiscoveryChanges(f.context, 0, 101, 100);
+    expect(prepare).toHaveBeenCalledTimes(2);
+  });
   it('withdrawal and expiry append independent tombstones and never leak metadata', async () => {
     const f = await fixture(); await f.publish();
     expect(await withdrawDiscoveryFact(f.DB, f.workId, 110)).toBe(true);

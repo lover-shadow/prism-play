@@ -12,7 +12,8 @@ export function createSeasonSwitcher(current: ContentItem, items: readonly Conte
   const select = document.createElement('select'); select.className = 'pv-input';
   select.setAttribute('aria-label', `${group.title}选择季或部`);
   for (const item of group.items) {
-    const option = document.createElement('option'); option.textContent = item.title; option.value = item.id;
+    const text = group.labels?.[item.id] ? `${item.title} (${group.labels[item.id]})` : item.title;
+    const option = document.createElement('option'); option.textContent = text; option.value = item.id;
     select.append(option);
   }
   select.value = current.id;

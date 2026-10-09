@@ -53,7 +53,7 @@ describe('AC-23 分享出站（公网主域恒定）', () => {
     const h = share({ clipboard: 'denied' });
     await h.action(CONTENT, EPISODE);
     expect(h.opened).toEqual(['https://play.prismos.org/s/drama%201%2F?ep=7']);
-    expect(h.reports).toEqual([]);
+    expect(h.reports).toEqual(['无法复制，已请求打开分享页，请使用浏览器分享']);
   });
 
   it('AC-23 主域恒定，绝不退化到运行时 origin（Capacitor 下 window.location.origin 是 localhost）', async () => {

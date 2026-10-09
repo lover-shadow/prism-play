@@ -43,6 +43,7 @@ export function createShareAction(deps: ShareDeps): ShareAction {
     }
     try {
       await deps.bridge.openExternalUrl(url);
+      deps.report('无法复制，已请求打开分享页，请使用浏览器分享');
     } catch {
       deps.report('分享失败：本机无可用分享通道');
     }

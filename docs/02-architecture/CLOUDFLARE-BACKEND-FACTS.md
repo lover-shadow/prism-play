@@ -1,5 +1,7 @@
 # 《光影Play》（Prism Play）Cloudflare 边缘云脑白皮书与事实正本 (CLOUDFLARE-BACKEND-FACTS.md)
 
+2026-10-09 最小闭环已部署：Worker版本 `d8d63d31-9336-40a7-bc25-a5a36759d259`，APK公告2.6.6/21606、force=false。config:version.artifact对应R2不可变包，官网下载同域302→200，完整下载SHA `1dd650d62a34b1554d76a1bbd00b46ec93dac4cad730f160408da0f880e6d9b8`、36,379,585字节与验收包一致；config:announcements消息读取200。原绑定和密钥保留，不新增资源/D1表，不迁移重置数据库，未Git提交。回退基线为 `b5ba77bf-7980-4fcb-a43c-937f230e558d`，新旧不可变包保留；收据 `outputs/deploy266-live-receipt.json`。本次仅证明发布样本与下载正确，真机和长期网络表现仍待观察。
+
 > **版本**：v2.0 生产基线  
 > **生效日期**：2026-10-02  
 > **服务主域**：`https://play.prismos.org`  
@@ -68,7 +70,7 @@
 
 ## 三、 D1 数据库物理拓扑与核心表架构 (Database Schema)
 
-D1 物理建表定义位于 `edge/migrations/0001_initial_schema.sql`，全量部署 20 张业务表：
+D1 物理建表定义按序分布在 `edge/migrations/0001_initial_schema.sql` ~ `0007_discovery_cards.sql`：0001 首批部署 20 张业务表（下列职责映射即这一批），0002~0007 增量叠加后当前共 **38 张真实业务表 + 5 张 FTS5 影子表**，与 `npm run verify:contracts` 的实测口径一致（该门禁逐张断言表数，不是文案）。
 
 ### 1. 核心表职责映射表
 - **`channels` (频道拓扑表)**：云端下发 `drama`（短剧精选）、`movie`（院线电影）、`anime`（热血动漫）、`documentary`（人文纪录）与 `private`（个人探索）；
@@ -191,7 +193,7 @@ npx wrangler tail
 
 ### 2. D1 数据库在线管理与查询 (Remote D1)
 ```bash
-# 查询当前数据库表列表 (30 张业务表)
+# 查询当前数据库表列表（0007 之后为 38 张真实业务表 + 5 张 FTS5 影子表）
 npx wrangler d1 execute prism-play-db --remote --command "SELECT name FROM sqlite_master WHERE type='table';"
 
 # 查询全部频道及当前片单统计

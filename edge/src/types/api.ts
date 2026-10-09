@@ -247,6 +247,7 @@ export interface AndroidRelease {
   versionName: string;
   changelog?: string;
   downloadUrl: string;
+  artifact?: { key: string; bytes: number; sha256: string };
   minVersionCode?: number;
   force?: boolean;
 }

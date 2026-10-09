@@ -254,7 +254,7 @@ export function inlineDayPaletteStyles(): string {
 export function inlineDocumentHead(
   rawTitle: string,
   styleSheet: string,
-  options: { readonly dualMode?: boolean } = {}
+  options: { readonly dualMode?: boolean; readonly extraMeta?: readonly string[] } = {}
 ): string {
   const paletteMeta =
     options.dualMode === true
@@ -268,6 +268,7 @@ export function inlineDocumentHead(
     '<meta charset="utf-8" />',
     '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />',
     ...paletteMeta,
+    ...(options.extraMeta ?? []),
     `<title>${escapeText(rawTitle)}</title>`,
     `<style>${styleSheet}</style>`
   ].join('\n');

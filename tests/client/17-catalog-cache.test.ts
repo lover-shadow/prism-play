@@ -68,7 +68,7 @@ function harness(routes: Record<string, Handler> = {}, options: { disk?: MemoryC
   } });
   const service = createCatalogCacheService({ client, baseUrl: EDGE, cache: spyCache(real, calls), pageSize: 1, nowSeconds: () => 1_700_000_000,
     fetchImpl: async (url: string) => {
-      if (url.includes('catalog-bundle.json')) return { ok: false, status: 404 } as Response;
+      if (url.includes('catalog-bundle.json')) return new Response(null, { status: 404 });
       posterFetches.push(url); return options.poster === undefined ? image(PNG) : await options.poster(new URL(url, EDGE));
     } });
   service.onSynced((outcome) => outcomes.push(outcome));

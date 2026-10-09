@@ -4,6 +4,7 @@ import {
   TAGS_MAX_ITEMS, TAG_MAX_CODE_POINTS, TAG_MIN_CODE_POINTS
 } from '../../edge/src/library/metadata-policy.mjs';
 import { ApiError } from './api/client';
+import { readWithBudget } from './api/retry-fetch';
 
 type Bundle = { revision: number; channels: ChannelsResponse; items: ContentItem[] };
 type FetchBundle = (url: string, init?: RequestInit) => Promise<Response>;
@@ -65,12 +66,12 @@ export function parseCatalogBundle(value: unknown): Bundle {
 
 /** null 仅表示明确 404 未部署；所有其他 HTTP/传输/JSON 错误均阻止分页风暴。 */
 export async function fetchCatalogBundle(url: string, fetchImpl: FetchBundle): Promise<Bundle | null> {
-  let response: Response;
-  try { response = await fetchImpl(url, { cache: 'no-store' }); }
-  catch { throw new ApiError('NETWORK_ERROR', 0, '公开目录整包下载失败'); }
+  let response: Response, text: string;
+  try { ({ response, text } = await readWithBudget(fetchImpl, url, { cache: 'no-store' }, 60000)); }
+  catch { throw new ApiError('NETWORK_ERROR', 0, '公开目录整包下载失败或超时'); }
   if (response.status === 404) return null;
   if (!response.ok) throw new ApiError(response.status === 503 ? 'SERVICE_UNAVAILABLE' : 'UNEXPECTED_RESPONSE', response.status, `公开目录整包 HTTP ${response.status}`);
-  try { return parseCatalogBundle(await response.json()); }
+  try { return parseCatalogBundle(JSON.parse(text)); }
   catch (error) { if (error instanceof ApiError) throw error; return invalid(); }
 }
 

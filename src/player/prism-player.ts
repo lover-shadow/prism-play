@@ -28,7 +28,7 @@ import type { SleepMode } from './sleep-timer';
 import { createValueChannels } from './value-channel';
 import type { PlayerFailure, PlayerPhase, PrismPlayer, PrismPlayerOptions, PlayerState } from './player-contract';
 export type { PlayerApi, PlayerFailure, PlayerPhase, PrismPlayer, PrismPlayerOptions, PlayerState } from './player-contract';
-const errorKindOf = (error: unknown): PlayerErrorKind => error instanceof ApiError ? (error.treatedAsMissing ? 'missing' : error.code === 'NETWORK_ERROR' ? 'offline' : 'retryable') : 'retryable';
+const errorKindOf = (error: unknown): PlayerErrorKind => error instanceof ApiError ? (error.treatedAsMissing ? 'missing' : error.code === 'NETWORK_ERROR' ? (typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'connection') : 'retryable') : 'retryable';
 export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
   const clock = options.clock ?? systemClock;
   const { bridge, api, root } = options;
@@ -163,7 +163,7 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
     else if (event === 'timeupdate') { if (progress.due()) progress.emit(); }
     else if (event === 'error') { if (direct !== null) { noteLineFailure(); return; } root.classList.remove('is-playing'); phase = 'error'; errorKind = 'retryable'; overlay.show('retryable'); report({ kind: 'media', message: '播放失败' }); }
     // 必须显式一条分支：`loadedmetadata` 落到末尾的 `else` 会被当成 `ended`，于是每集刚出画面就自动跳下一集。
-    else if (event === 'loadedmetadata') { options.onAspect?.(probeStageOrientation(chrome.stage)); remeasure(); }
+    else if (event === 'loadedmetadata') { rate.reapply(); options.onAspect?.(probeStageOrientation(chrome.stage)); remeasure(); }
     // 缓冲/拖动同样必须显式一条分支：它们只剩收起判据的输入（`idle` 已接），绝不能落到 `else` 变成 `ended`。
     else if (event === 'waiting' || event === 'seeking') return;
     else if (event === 'ended') void onEnded();

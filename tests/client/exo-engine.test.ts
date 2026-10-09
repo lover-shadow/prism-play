@@ -114,6 +114,21 @@ describe('native engine adapter', () => {
     prepare(); await flush(); engine.destroy(); await flush();
   });
 
+  it('applies preferred rate before first play despite stale preparation events', async () => {
+    let prepare!: () => void;
+    native.setSource.mockImplementationOnce(() => new Promise<void>((resolve) => { prepare = resolve; }));
+    const engine = await createExoEngine({ container: mount(), theme: '', onError: vi.fn(), resolveNative: async (source) => source });
+    engine.setSource('', 'video/mp4', { kind: 's1-cenc', videoId: '12345' });
+    engine.setPlaybackRate?.(2); await flush();
+    const sessionId = native.create.mock.calls[0][0].sessionId;
+    native.callback?.({ sessionId, event: 'loadedmetadata', positionSeconds: 0, durationSeconds: 100,
+      playing: false, volume: 1, rate: 1, width: 1080, height: 1920 });
+    prepare(); await flush();
+    expect(engine.playbackRate?.()).toBe(2);
+    expect(native.setRate).toHaveBeenCalledWith({ sessionId, rate: 2 });
+    expect(native.setRate.mock.invocationCallOrder[0]).toBeLessThan(native.play.mock.invocationCallOrder[0]);
+    engine.destroy(); await flush();
+  });
   it('honors pause while preparing instead of briefly auto-playing', async () => {
     let prepare!: () => void;
     native.setSource.mockImplementationOnce(() => new Promise<void>((resolve) => { prepare = resolve; }));

@@ -27,13 +27,14 @@ export interface HostLayer {
 }
 
 /**
- * 详情阶段的层内口径：私密未准入、档位不足、未知故障与不存在**共用 `missing` 那一句**，
- * 只有传输级失败才如实说"需要网络"——那描述的是本机连接，不泄露任何剧目身份。
- * 这里与 `prism-player.ts:30` 的内核映射有意不同：内核面对的是"线路坏了没有"，本层面对的是
- * "能不能拿到详情"，反探测边界（AC-02 / SPEC §S-2「私有与未知一律 404」）必须先收紧。
+ * 在线标记不能证明服务可达；只有明确断网才显示离线，拒绝类错误仍隐藏剧目身份。
  */
 export function hostErrorFor(error: unknown): OverlayState {
-  return error instanceof ApiError && error.code === 'NETWORK_ERROR' ? 'offline' : 'missing';
+  if (error instanceof ApiError && error.code === 'NETWORK_ERROR') {
+    return typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'connection';
+  }
+  if (error instanceof ApiError && error.code === 'SERVICE_UNAVAILABLE') return 'connection';
+  return 'missing';
 }
 
 export function createHostLayer(deps: { mount: HTMLElement; onClose(): void }): HostLayer {

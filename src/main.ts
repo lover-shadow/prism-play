@@ -9,7 +9,8 @@ import type { RedeemOutcome } from './views/settings-view';
 import { CATALOG_CACHE_LIMIT_BYTES, createLocalSearchApi, createSearchIndex, createStorageDomains, isPrivateSubject, MemoryCacheDisk, POSTER_CACHE_LIMIT_BYTES } from './core/storage';
 import { PrismApiClient } from './core/api/client';
 import { createCatalogCacheService } from './core/catalog-cache';
-import { createDiscoverySync } from './core/discovery-sync';
+import { createDiscoveryIndexPatcher, createDiscoverySync } from './core/discovery-sync';
+import { deferDiscoverySync } from './core/discovery-start';
 import { createPosterUrls } from './core/poster-urls';
 import { createUserSync } from './core/user-sync';
 import { createGrantProbe, grantAdaptersFor } from './core/identity/offline-grant';
@@ -27,6 +28,8 @@ import { createHomeView, type HomeApi, type HomeView } from './views/home-view';
 import { createHistoryView } from './views/history-view';
 import { createSearchOverlay } from './views/search-overlay';
 import { createSettingsView, SETTINGS_PREF_KEYS } from './views/settings-view';
+import { scheduleBulletinsCheck } from './views/client-bulletins';
+import { createSeriesDiscovery } from './core/series-discovery';
 
 /** 搜索热词的唯一来源：本机公开快照的剧名，绝不内置词表（SPEC §10 私密与公开同条约束）。 */
 const HOT_WORD_LIMIT = 8;
@@ -83,14 +86,10 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
   const catalog = createCatalogCacheService({ client, baseUrl: defaultApiBaseUrl, cache: storage.cache, nowSeconds: now,
     onSnapshotEntries: (feed) => void searchIndex.sync(feed.changes === undefined ? { ...feed, items: storage.cache.list() } : feed)
   });
-  const discoverySync = createDiscoverySync({ cache: storage.cache, client, onEntries: async () => {
-    const epoch = storage.cache.discoveryState().epoch;
-    // Same revision + same count may still contain changed titles/episodes: bypass rebuild's count shortcut.
-    await searchIndex.clear();
-    const result = await searchIndex.sync({ items: storage.cache.list(), revision: storage.cache.snapshotRevision() });
-    if (epoch !== storage.cache.discoveryState().epoch) { await searchIndex.clear(); throw new Error('Discovery cache was cleared'); }
-    if (result.error !== null) throw new Error(result.error);
-  } });
+  const backgroundAbort = new AbortController();
+  const discoverySync = createDiscoverySync({ cache: storage.cache, client,
+    busy: () => player.isOpen(), signal: backgroundAbort.signal, onEntries: createDiscoveryIndexPatcher(storage.cache, searchIndex)
+  });
 
   const homeApi: HomeApi = {
     channels: () => catalog.api.channels(),
@@ -128,8 +127,20 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
 
   const share = createShareAction({ bridge, report });
   const runtime = await createRuntimeServices({ prefs, grant, monetization: () => client.monetization(), report });
+  const ingestDiscoveries = async (items: Parameters<typeof storage.cache.mergeDiscoveries>[0]) => {
+    const discoveries = await storage.cache.mergeDiscoveries(items);
+    await searchIndex.sync({ items: [], discoveries, revision: storage.cache.snapshotRevision() });
+    return discoveries;
+  };
+  const seriesDiscovery = createSeriesDiscovery({
+    search: (input) => client.search(input),
+    onDiscovered: async (items) => { await ingestDiscoveries(items); }
+  });
   const player = createPlayerHost({
     mount: app, bridge, api: client, following, runtime, seriesItems: () => storage.cache.list().filter((entry) => !isPrivateSubject(entry)),
+    supplementSeries: (target, onUpdated) => {
+      void seriesDiscovery.discover(target).then((items) => { if (items.length > 0) onUpdated(); });
+    },
     onRedeem: () => void shell.activate('settings'),
     onProgress: sync.onProgress,
     // §1.9.3 节点 ①：退出播放/关闭播放器/系统 Back 销毁的那一刻就地断点上报（`keepalive` + 待发队列）。
@@ -143,8 +154,7 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
   let homeView: HomeView | null = null;
   const publicLocalItems = () => posters.items(storage.cache.list().filter((entry) => !isPrivateSubject(entry)));
   const searchApi = createLocalSearchApi({ index: searchIndex, localItems: publicLocalItems, remote: client, onOnlineItems: async (items) => {
-    const discoveries = await storage.cache.mergeDiscoveries(items);
-    await searchIndex.sync({ items: [], discoveries, revision: storage.cache.snapshotRevision() });
+    await ingestDiscoveries(items);
     void discoverySync.sync(); // Search's successful online supplement can resume the independent log.
   } });
   const overlay = createSearchOverlay({
@@ -164,17 +174,12 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
   function viewFor(tab: ShellTab, root: HTMLElement): ManagedView {
     if (tab === 'home') {
       const view = createHomeView({
-        api: homeApi,
-        nowSeconds: now,
+        api: homeApi, nowSeconds: now,
         syncCatalog: async () => { const result = await catalog.syncIncremental(); if (result.reason) throw new Error(result.reason); },
-        root,
-        headerAccessory: shell.headerAccessory(),
-        posterMode: () => posterMode,
+        root, headerAccessory: shell.headerAccessory(), posterMode: () => posterMode,
         onPosterModeChange: (mode) => { posterMode = mode; void writePosterMode(prefs, mode); },
-        onOpenTitle: (contentId) => void player.open(contentId),
-        onResume: (row) => void player.open(row.content_id, row),
-        historyPreview: listHistory,
-        onSearch: () => overlay.open(),
+        onOpenTitle: (contentId) => void player.open(contentId), onResume: (row) => void player.open(row.content_id, row),
+        historyPreview: listHistory, onSearch: () => overlay.open(),
         onChannelChange: (channel) => { privateChannel = channel?.id === 'private'; syncSecure(); }
       });
       homeView = view;
@@ -182,32 +187,18 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
     }
     if (tab === 'history') {
       const view = createHistoryView({
-        api: client,
-        root, following,
-        history: {
-          available: historyAvailable,
-          list: () => storage.history.listRecent(),
-          clear: async () => void await storage.history.clearHistory()
-        },
-        credentials: identity.credentials,
-        onOpenTitle: (contentId) => void player.open(contentId),
-        onResume: (row) => void player.open(row.content_id, row),
-        // §1.9.4 接口 B 的端侧触发点：进入【追剧】即静默拉取并按 `updatedAt` 取较新者合并。
-        pullRemote: () => sync.pull(),
-        now
+        api: client, root, following,
+        history: { available: historyAvailable, list: () => storage.history.listRecent(), clear: async () => void await storage.history.clearHistory() },
+        credentials: identity.credentials, onOpenTitle: (contentId) => void player.open(contentId),
+        onResume: (row) => void player.open(row.content_id, row), pullRemote: () => sync.pull(), now
       });
       return { mount: () => view.mount(), reload: () => view.reload(), destroy: () => view.destroy() };
     }
     const view = createSettingsView({
-      api: client,
-      apiBaseUrl: defaultApiBaseUrl,
-      runtimeVersions: {
-        app: async () => (await import('@capacitor/app')).App.getInfo(),
-        cloud: () => client.version()
-      },
+      api: client, apiBaseUrl: defaultApiBaseUrl,
+      runtimeVersions: { app: async () => (await import('@capacitor/app')).App.getInfo(), cloud: () => client.version() },
       catalogStatus: () => catalog.snapshotState(), checkCatalogUpdate: () => catalog.syncIncremental(),
-      prefs,
-      bridge,
+      prefs, bridge,
       supportAssets: { contact: { url: './images/author-contact.jpg' }, reward: { url: './images/author-reward.jpg' } },
       cache: {
         measure: async () => {
@@ -219,21 +210,14 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
           return { clearedBytes: freed.freedBytes, domains: ['public-cache'] };
         }
       },
-      tokens: storage.privateVault.session,
-      root,
-      tierSource: identity.tierSource,
-      deviceIdSource: identity.deviceIdSource,
+      tokens: storage.privateVault.session, root,
+      tierSource: identity.tierSource, deviceIdSource: identity.deviceIdSource,
       bridgeSourceOf: bridgeSource, now,
       onThemeChange: (mode) => applyTheme(mode),
-      // 核销成功后凭证归位：视图自身不留 JWT 副本，写 Keystore 属凭证域。
       onOpenRedeem: (outcome: RedeemOutcome) => void handOffCredential(outcome),
       onPrivateSessionChange: (active) => {
-        if (!active) {
-          storage.privateVault.clear();
-          privateChannel = false;
-        }
-        syncSecure();
-        void homeView?.refresh();
+        if (!active) { storage.privateVault.clear(); privateChannel = false; }
+        syncSecure(); void homeView?.refresh();
       }
     });
     return { mount: () => view.mount(), reload: () => view.reload(), destroy: () => view.destroy() };
@@ -258,12 +242,13 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
   });
 
   const started = await catalog.bootstrap();
-  void discoverySync.sync(); // hydrate and local catalog bootstrap always precede background discovery I/O.
+  const cancelDiscoveryStart = deferDiscoverySync(() => discoverySync.sync(), () => player.isOpen());
   if (started.outcome !== null && started.outcome.offline === false) await grant.recordOnlineCheck(now());
   catalog.onSynced((outcome) => { if (homeView !== null && outcome.appliedEntries > 0) void homeView.syncRecommendation(); }); // HP-06b：后台推进只走背景同步入口，新的发现轮次只由用户显式刷新开启
   const releaseNotifications = bindNotificationActions((action) => player.onNotification(action));
   const releaseAppState = await sync.observeBackground(() => { player.suspend(); void sync.reportExit(sync.lastBreakpoint()); });
   await shell.activate('home');
+  const releaseBulletins = scheduleBulletinsCheck({ api: client, prefs, root: app, bridge, isPlayerOpen: () => player.isOpen(), nowSeconds: now });
   if (started.hadSnapshot === false && storage.cache.snapshotRevision() === 0) {
     report('离线或目录拉取失败：本机尚无公开快照，点播需联网。');
   }
@@ -272,8 +257,7 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
     shell, sync,
     openTitle: (contentId, resume) => player.open(contentId, resume),
     destroy() {
-      releaseNotifications();
-      releaseAppState();
+      backgroundAbort.abort(); releaseBulletins(); cancelDiscoveryStart(); releaseNotifications(); releaseAppState();
       // Overlay 排在播放器之前拆：它的 Layer handler 必须先于播放器离场摘掉，返回栈才不会串层。
       overlay.destroy();
       // 节点 ① 的上报必须排在同步中枢解散之前，否则"完全退出"这一次永远发不出去。

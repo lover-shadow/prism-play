@@ -1,5 +1,7 @@
 # Track 2: Cloudflare 云端与 CI 管线重构施工规格书 v2 (SPEC-CLOUD-REFACTOR)
 
+2026-10-09 本批按二合一r2最小闭环：manifest轻量读取，config:version新增artifact并核对R2元数据，latest同域跳转，消息人工配置/读回，失败不假成功。自动发布/回退平台、Admin UI延期；不增加资源或迁移D1；本批已部署，生产版本与下载收据见CLOUDFLARE-BACKEND-FACTS及二合一r2。
+
 **版本**: v2（2026-10-03 审计后重写，取代 v1）
 **生效日期**: 2026-10-03
 **物理隔离边界**: `edge/scripts/**`, `.github/workflows/**`, `edge/src/routes/catalog.ts`, `edge/src/routes/titles.ts`, `edge/src/routes/telemetry.ts`(新建), `edge/migrations/**`, `edge/src/config/kv-config.ts`
@@ -374,6 +376,15 @@ C-4(遥测) 独立，任意时点可施工
 
 必要云施工/CI/独立验收APK已获用户授权，正式官网APK/OTA须验收后。本次仅文档；G0静态检查不等于G1真实检索核验/并发脱敏、G2持久增量更新与故障恢复、G3真机重启升级/可达性或G4正式发布通过。
 
+## 6.1.2 免费档 CPU 预算下的在线读路径资源规则（2026-10-08 实施）
+
+依据 `wrangler tail` 与生产拨测：1102 的实测原因是 `exceededCpu`（搜索与发现同步各耗满约 2,020ms；免费档 HTTP 预算 10ms 含突发额度，亦观测到 10ms 即终止），**不是**子请求超限（1019）。平台强杀的 1102 页面由 Cloudflare 生成，应用层无法为其补 CORS 头，因此在线路径必须把 CPU 控制在预算内，而不是靠端侧兜错。
+
+- **事实包（`edge/src/library/work-facts.ts`）**：整包字节数与 SHA-256 必须与 KV 清单声明一致；逐部作品的剧集/线路只在被请求时解析（`parseFact` 惰性化），小样本包（≤4 条）仍逐条校验哈希叶归属，大包由包级哈希与打包器前缀校验担保。缺失、损坏、未启用仍不回退旧公开 D1。
+- **搜索投影（`edge/src/search/generation.ts`）**：投影条目就地逐条校验，禁止把全量条目 `JSON.stringify` 后再 `parse` 回读；候选核验（`verifiedItems`）并发执行，任一条目不可核验即整体失败关闭，不得降级为部分可信。
+- **发现账本（`edge/src/search/discovery-store.ts`、`routes/search-discovery.ts`）**：变更页用单条 `LEFT JOIN`（changes × works × cards）一次取回可见性所需字段，撤回行不再触发权限重核；同一页内重复 workId 只核验一次；服务端把单页预算硬夹到 10 条（`limit` 入参契约仍为默认 60/上限 100，超预算分批推进，游标严格连续不跳号）。
+- **诚实边界**：以上只降低单次请求 CPU 与子请求数，不消除突发额度耗尽后的 1102。2026-10-08 复测实证其**间歇性**：同一查询「人到中年」首拉 200（19 条 / 22.1 秒），紧接两次 503（2.6 秒 / 13.8 秒，响应无 CORS 头）；「持械入宋」200（10 条 / 6.6 秒）、「末世」「斗罗」200（14~20 秒）。搜索墙钟 6~25 秒波动，不得宣称秒级或资源安全；免费档约束下若需彻底稳定，须以测量证据决定是否重设计在线路径（预计算/离线索引），不默认升套餐。
+
 ## 6.2 运营后台与统计云端增量目标（2026-10-05，planned）
 
 本节 additive，不改 C-1～C-6、App端点/表计数或三轨公开facts规则。依据 SPEC-v2.0 §12.3、API-SPEC §八.三及后台计划；用户授权继续实施，已有局部本地数据/认证模块，完整接线与真实D1验收待证，无部署、后台G0未签署。OTP/Cloudflare Access 未实现。
@@ -388,6 +399,7 @@ C-4(遥测) 独立，任意时点可施工
 
 | 日期 | 变更 | 状态/边界 |
 | :--- | :--- | :--- |
+| 2026-10-08 | 新增§6.1.2：以测量确认 1102 为 CPU 超限（非子请求数），固化事实包按需解析、搜索投影零二次序列化、发现账本单条 JOIN + 同页去重 + 单页预算 10 条 | 已实施并部署 Worker 版本 `b5ba77bf-7980-4fcb-a43c-937f230e558d`；发现同步 CPU 2,020ms→528ms，titles/related/discoveries 与部分搜索查询生产回 200；**1102 仍间歇复发**（同一查询先 200 后 503，503 响应不带 CORS 头），搜索墙钟 6~25 秒，不宣布资源安全；未升套餐、未改准入与私密边界 |
 | 2026-10-06 | 新增§3.2.1，native字段与work manifest/私有R2 discovery fact主链边界 | provider_s1、1～32位数字字符串、native严格unknown-field reject且无key；原生vid/runtime key不返JS、Web/native cast拒绝。单集Master反馈不代表完整HUD真机通过；授权绑定handle未实现，Stage A未完成，旧生产fact待刷新、未部署，Java仅1～20位执行缺口待接齐。AGENTS/FLAG_SECURE不扩大，原todos保留，OpenAPI等主会话同步。 |
 | 2026-10-06 | ADR-006 Accepted，§6.1.1真实来源核验后共享持久发现、查询新鲜缓存/并发合并/短负缓存、静态基底+独立增量，search可选hasMore | 本次局部同步discoveries独立seq、search发现分页/自动轮询、0005/0006共37业务表、独立无r2.dev bucket与metadata/24小时播放事实分离，基线disabled/private不可覆盖；运营修改保留；仅文档，无部署验收，verify_contracts由主会话更新，官网APK/OTA验收后 |
 | 2026-10-03 | v2 审计后重写 | 原任务基线保留 |
@@ -396,4 +408,14 @@ C-4(遥测) 独立，任意时点可施工
 
 **只读代码核查**：已有 `edge/scripts/work-fact-packs.mjs`、`edge/src/library/work-facts.ts`、`edge/scripts/library-catalog.mjs` 与打包器/路由接线可作为施工依据，不重复实现。打包器已有显式 revision 参数检查与 blobs 后 KV 发布；“比线上 revision 递增”仍为发布验收门禁，不因参数检查存在而视为已闭环。
 
-**全局进度地图**：G0 本次两份相关 SPEC 对齐；G1 生产 packs/manifest/封面与 flags 一致性待验；G2 新 packs 日更真实周期待闭环（旧 publisher 拒绝覆盖仅防退化）；G3 新 APK 真机播放/搜索/海报/手动目录检查待验；G4 集中交付与生产完成结论待上述证据。未取得证据不得跨门禁宣称完成。
+**全局进度地图（2026-10-08 与代码/生产实测对齐）**：
+
+| 门禁 | 当前结论 | 下一证据 |
+| :--- | :--- | :--- |
+| G0 | 三轨 SPEC 与 `verify:contracts` 通过（24 App API / 38 业务表 / 13 功能 / 30 AC）；§6.1.2 资源规则入册 | 待校准参数与新增端点须先改契约再施工 |
+| G1 | 公开基底已发布 generation revision 4 / 21,963 部并逐对象回读一致；发现卡片迁移 0007 已上线；Worker `b5ba77bf-7980-4fcb-a43c-937f230e558d` 部署后，titles / related / discoveries 与部分搜索查询（「持械入宋」200 / 10 条 / 6.6 秒，「末世」「斗罗」200 / 14~20 秒）生产回 200，发现同步 CPU 由 2,020ms 降至 528ms。**同一查询可先 200 后 503**：「人到中年」首拉 200（19 条 / 22.1 秒）后紧接两次 503（2.6 秒 / 13.8 秒，503 页面 `access-control-allow-origin` 为空），「归墟」503 | 免费档突发额度下 1102 已实测间歇复发，须长期复发率监控；搜索墙钟 6~25 秒波动的进一步压缩证据（预计算/离线索引方向，不默认升套餐） |
+| G2 | 采集与打包机制存在（`daily-facts` / `package-and-publish-library`）；按需发现与 24 小时刷新已接线并有单测 | **日更真实周期未闭环**：定时 ingest 注册表仍为空（`edge/src/index.ts:130`），scheduled 发现刷新的线上稳定性未证 |
+| G3 | v2.6.5 修订包 Master 真机验收通过（原生 CENC 起播、默认 1× 与已保存倍率生效、分享复制提示、作者二维码保存与手动打开微信） | DLNA 投屏、FLAG_SECURE 边界、缺供元数据与其余真机项继续复测 |
+| G4 | 官网下载已发布：`prism-play-v2.6.5-20261008.apk`（36,303,231 字节，SHA-256 `67e07a5a…`）与验收包逐字节一致，`config:version` 公告同步；`versionCode` 仍 21605，老用户须手动覆盖安装 | 下一次正式发布须递增 versionCode 或明确不提示的取舍；内容日更闭环前不得宣称生产完成 |
+
+未取得证据不得跨门禁宣称完成；本文档中的历史「已配置/已通过」条目不推导为当前可用性。

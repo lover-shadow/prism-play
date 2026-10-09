@@ -69,6 +69,24 @@ describe('public work facts: one verified source for titles/share/poster', () =>
       expect(validatePublicManifest({ ...compact, workFacts: { ...compact.workFacts, packs: { [leaf]: tuple } } })).toBeNull();
     }
   });
+  it('validates playback data only for the requested work in an authenticated pack', async () => {
+    const f = await fixture();
+    const [leaf, descriptor] = Object.entries(f.manifest.workFacts.packs)[0];
+    let other = '';
+    for (let n = 0; !other; n++) {
+      const candidate = `other_${n}`;
+      if ((await factsHash(new TextEncoder().encode(candidate))).startsWith(leaf)) other = candidate;
+    }
+    const original = await f.env.APK_BUCKET!.get(descriptor.key);
+    const pack = JSON.parse(new TextDecoder().decode(await original!.arrayBuffer()));
+    pack.works[other] = { workId: other, episodes: 'invalid' };
+    const bytes = new TextEncoder().encode(JSON.stringify(pack)), hash = await factsHash(bytes);
+    Object.assign(descriptor, { key: `library/facts/${hash}.json`, bytes: bytes.length, sha256: hash });
+    await f.env.KV.put('catalog:manifest', JSON.stringify(f.manifest));
+    f.env.APK_BUCKET = { get: async () => ({ size: bytes.length, arrayBuffer: async () => bytes.buffer }) } as unknown as R2Bucket;
+    expect((await f.responses()).map((r) => r.status)).toEqual([200, 200, 200]);
+    expect((await f.responses(other)).map((r) => r.status)).toEqual([503, 503, 503]);
+  });
   it('unknown ids are uniformly 404', async () => {
     const f = await fixture();
     expect((await f.responses('unknown')).map((r) => r.status)).toEqual([404, 404, 404]);

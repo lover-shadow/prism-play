@@ -43,6 +43,7 @@ export interface PlayerHostDeps {
   playbackPreferences?: import('./playback-rate').PlaybackPreferences;
   following?: import('../core/storage/following-store').FollowingStore;
   seriesItems?(): readonly ContentItem[];
+  supplementSeries?(item: ContentItem, onUpdated: () => void): void;
   runtime?: RuntimeServices;
   onRedeem?(): void;
 }

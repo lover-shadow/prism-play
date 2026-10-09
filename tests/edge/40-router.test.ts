@@ -33,6 +33,8 @@ const MOUNTED: readonly { path: string; allow: string; wrongMethod: string }[] =
   { path: '/dl', allow: 'GET', wrongMethod: 'POST' },
   { path: '/dl/latest/android', allow: 'GET', wrongMethod: 'POST' },
   { path: '/assets/hls.min.js', allow: 'GET', wrongMethod: 'POST' },
+  { path: '/robots.txt', allow: 'GET', wrongMethod: 'POST' },
+  { path: '/sitemap.xml', allow: 'GET', wrongMethod: 'POST' },
   { path: '/', allow: 'GET', wrongMethod: 'POST' },
   { path: '/proxy/img/d_8f31c2', allow: 'GET', wrongMethod: 'POST' }
 ];

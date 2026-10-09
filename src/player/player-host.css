@@ -49,8 +49,8 @@
 
 /* 留白填充（AC-19 的"无纯黑死边"）：9:16 短剧放进 20:9 屏必然上下共留约 480px，
    本项目坚持 `contain` 零裁切（裁 20% 宽度会切掉烧录字幕），所以这块留白必须由模糊底片填上。
-   `player.css` 在起播后会淡出底片（非全屏态画面本就盖满，留着没必要），这里只在全屏态把它按住。 */
-.prism-player-host--fullscreen .prism-player.is-playing .prism-player__backdrop { opacity: 1; visibility: visible; }
+   `player.css` 在起播后会淡出底片，这里只在非原生全屏态把它按住；原生播放激活时始终由底层负责渲染画面，海报底片彻底隐藏（AC-R07）。 */
+html:not(.prism-native-active) .prism-player-host--fullscreen .prism-player.is-playing .prism-player__backdrop { opacity: 1; visibility: visible; }
 
 /* ==========================================================================
    HP-08 非全屏：画面内悬浮控制条物理缺席（§3 HP-08 / §5.1 HP-08a）

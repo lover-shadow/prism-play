@@ -43,6 +43,7 @@ export interface CompositeFeed extends HomeFeed {
   record(): HomeRoundRecord | null;
   /** 背景同步的唯一入口：同修订不重排，换代也只喂下一次显式刷新。 */
   sync(): Promise<void>;
+  hydrateLocal(): boolean;
 }
 
 export function createHomeFeed(deps: CompositeDeps): CompositeFeed {
@@ -123,7 +124,26 @@ export function createHomeFeed(deps: CompositeDeps): CompositeFeed {
     pool = candidates;
   }
 
+  /** 启动本地先显（AC-OPT-01）：有快照直接建首轮上屏，网络请求转入后台。 */
+  function hydrateLocal(): boolean {
+    const targets = publicFeedChannels(deps.channels());
+    if (targets.length === 0) return false;
+    const snapshot = deps.api.cachedSnapshot?.();
+    if (!snapshot) return false;
+    const cached: ContentItem[] = [];
+    for (const channel of targets) cached.push(...(snapshot.items(channel.id) ?? []));
+    if (cached.length === 0) return false;
+    const state = snapshot.state?.() ?? null;
+    coverage = state !== null && !state.partial ? 'full' : 'partial';
+    revision = state?.revision ?? 0;
+    newRound(cached);
+    if (!deliver(0)) return false;
+    if (shown.length < deps.pageSize) deps.recheck();
+    return true;
+  }
+
   return {
+    hydrateLocal,
     async load(token: number, append: boolean): Promise<void> {
       if (append) {
         if (round === null || delivered >= round.record.pages) return;
@@ -171,12 +191,16 @@ export function createHomeFeed(deps: CompositeDeps): CompositeFeed {
     hasContent: () => shown.length > 0,
     record: () => round?.record ?? null,
     async sync(): Promise<void> {
-      const token = deps.token();
-      if (round !== null && shown.length > 0) { await holdRound(token); return; }
-      const candidates = await readCandidates(token);
-      if (candidates === null || !deps.isCurrent(token) || candidates.length === 0) return;
-      newRound(candidates);
-      deliver(0);
+      try {
+        const token = deps.token();
+        if (round !== null && shown.length > 0) { await holdRound(token); return; }
+        const candidates = await readCandidates(token);
+        if (candidates === null || !deps.isCurrent(token) || candidates.length === 0) return;
+        newRound(candidates);
+        deliver(0);
+      } catch {
+        // 背景同步网络异常静默保持现状，不抛出未处理异常
+      }
     },
     /**
      * HP-06：显式刷新＝**新的推荐轮次**。同修订也重开一轮（`roundIndex` 自增、云 revision 不变），

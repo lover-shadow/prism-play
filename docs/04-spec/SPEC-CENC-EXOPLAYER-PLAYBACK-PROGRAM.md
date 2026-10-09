@@ -27,6 +27,19 @@
 | D 普适发现 | 季聚合卡、切季、连载追更、cron未完成；失败的只读调查不算产出 |
 | E 完整交付 | 未出新完整集成APK；未部署、未提交、未正式发布 |
 
+### 0.2.1 2026-10-08 状态校正（与代码/真机/生产实测对齐，覆盖上表 10-06 交接基线）
+
+| 工作包 | 现在的真实状态 | 证据 |
+| :--- | :--- | :--- |
+| A 清单契约 | native 描述子与 `GET /api/titles/{id}/episodes/{n}/native-playback` 已上线；**A3 云端授权绑定句柄仍未实现**（返回 no-store 非密钥身份，不是签名凭据；`PrismPlayerPlugin` 仍接受裸 vid） | `edge/src/routes/native-playback.ts:34`、`src/player/exo-engine.ts` |
+| B 单集验证 | 维持通过；已由 C 集成承接 | `build/apk265/native-playback-probe-receipt.json` |
+| C 正式内核 | 集成 APK 已出并且 Master 真机复验通过：原生 CENC 起播、换集/换线、默认 1× 与已保存倍率、全屏 HUD、选季选集抽屉；常规倍速改为原生起播前生效 | `build/apk265/client-feedback-acceptance-receipt.json` |
+| C 仍未收口 | 后台音频/MediaSession 与通知真机复跑、投屏 DLNA、FLAG_SECURE 边界、30-AC 矩阵全量真机 | 保持未完成，不因单轮验收勾选 WS4/WS6/WS8 |
+| D 普适发现 | 卡片化搜索已上线（迁移 0007）；1102 由"必然失败"降为**间歇失败**，未根治；D1～D5 未完成项不变 | `SPEC-CLOUD-REFACTOR.md` §6.1.2 |
+| E 交付 | v2.6.5（versionCode 21605）修订包已发布官网下载：`prism-play-v2.6.5-20261008.apk`，36,303,231 字节，SHA-256 与验收包逐字节一致；**因未递增 versionCode，老用户无 OTA 提示，须手动覆盖安装** | `build/web-release-265/README.md` |
+
+回归基线由 138 文件 / 1,644 项提升至 **156 套 / 1,755 项**；`verify:contracts`、`verify:acceptance`（AC 30/30，188 条署名用例）、`scan:p0`、`verify:android` 与本地 Gradle 编译 + 签名核验均通过。
+
 后续由主Agent直接完成，**禁止继续调用子代理**（Master已明确要求）。不需要让Master选择技术分叉；其职责是安装验收APK并反馈。代码与本地构建已授权，Git/生产部署/官网发布不据此自动获准。
 
 ### 0.3 铁律与授权边界（新 agent 必须遵守）
@@ -142,7 +155,7 @@ native仅允许provider_s1，videoId为1～32位数字字符串，内部未知�
 - [ ] A3 播放授权绑定：仍未完成；Master最新裁定：个人探索新入口的专项准入测试与完善后移，不作为本轮公开播放交付阻塞，既有双准入保护不删除、不放宽。后面的私密专项测试属于延期项，不能重新列为主线前置。已新增 `GET /api/titles/{titleId}/episodes/{episodeNumber}/native-playback?line={index}`（`edge/src/routes/native-playback.ts`），复用handleTitles准入并重读权威清单，只接受line参数，不接受客户端vid；返回no-store非密钥native身份和checkedAt，不是签名授权凭据。9项selector测试+router/foundation共25项、edge类型、契约/P0通过。公开APP起播现经PrismApiClient.nativePlayback(no-store)复核work/episode/line和vid匹配再调用原生桥，复核拒绝不触发setSource/play、取消后不继续；5项exo适配测试通过。此为JS正式消费链，不是Android内强制授权验证，裸vid插件接口仍在，保持未完成。待：真实私密双准入集成测试、短时授权消费设计/实现、Android强制按work/episode/line调用且禁止直接裸vid正式起播、端侧缓存/会话失效回归。当前PrismPlayerPlugin仍接受vid，禁止标完成。
 - [x] A4 server/client parser拒绝native中的key和未知字段；runtime key仅在Android内存，不返回JS清单
 - [x] A5 `prism-player.ts`先读取Surface，再按native选引擎；不把局部ID交给旧D1播放端点
-- [ ] A6 最终契约与回归收口：native字段现有回归138文件/1644项通过；A3未实现，后台/多季未完成，因此整阶段不可标完成。待剩余功能落地后重新同步契约、运行全量回归。
+- [ ] A6 最终契约与回归收口：native字段现有回归138文件/1644项通过（2026-10-08 全量为 156 套 / 1,755 项，含本轮端侧韧性与原生倍速/二维码支持回归）；A3未实现，后台/多季未完成，因此整阶段不可标完成。待剩余功能落地后重新同步契约、运行全量回归。
 
 **规模**：250–400 LOC / 12k–20k tokens。
 
@@ -238,7 +251,7 @@ native仅允许provider_s1，videoId为1～32位数字字符串，内部未知�
 - [~] **WS5 全屏/转屏（部分）**：`exo-engine` 监听 resize/scroll 并 `setBounds`，`metadata` 后重算；全屏 surface 实际效果未真机验证。
 - [ ] **WS6 选集抽屉/切季（未验收）**：引擎已按线路 `setSource(vid)` 会话隔离可换源，但 30 段抽屉与多季无感切播的真机效果未测。
 - [x] **WS7 投屏（代码）**：`cast-ports.ts` 对带 native 的线路不直投、明文集不受影响；分享页 `share-player-script.ts` 跳过 native 线路，避免把密文交电视/浏览器。加密内容"如实不可投"，不谎报。
-- [ ] **WS8 回归收口（部分）**：本地 `npm test` 138/1644、P0、契约、Android 资产全绿并出集成 APK；**30-AC 矩阵与透明叠层/后台真机复跑尚未做**。
+- [ ] **WS8 回归收口（部分）**：本地 `npm test` 138/1644、P0、契约、Android 资产全绿并出集成 APK；**30-AC 矩阵与透明叠层/后台真机复跑尚未做**。2026-10-08 状态：全量升至 156 套 / 1,755 项并出 v2.6.5 修订包，Master 真机复验通过核心播放与操作反馈项，但 30-AC 矩阵与后台/投屏真机复跑仍未做，本项保持未完成。
 
 内部中间构建：`build/apk265/prism-play-v2.6.5-integrated-native-playback.apk`，现已撤回用户验收交付，收据`readyForUserAcceptance=false`。不删除产物、不要求Master安装。不再称作完整验收包。待端侧功能、播放授权、内容更新及可测数据链全部具备且本地回归通过，才能交付下一份完整验收APK；单集探针已通过的结论保留。
 
@@ -252,7 +265,7 @@ native仅允许provider_s1，videoId为1～32位数字字符串，内部未知�
 - [x] 共享发现库 D1（迁移 0005/0006）+ 私有 R2 + 查询缓存/跨 isolate 租约/限流
 - [x] 默认自动补充（无需手点按钮）
 - [x] 纵向三列网格 + 真翻页（废除隐藏横向滚动条）
-- [x] 云端 CJK 长前缀匹配修复 + 生产 503/1102 修复
+- [x] 云端 CJK 长前缀匹配修复；生产 503/1102 由"必然失败"降为**间歇失败**（发现同步 CPU 2,020ms→528ms，部分查询回 200），免费档突发额度下仍可复发，未根治
 
 待完成：
 - [ ] D1 搜索结果**季/系列聚合卡（部分实现）**：复用providers/seasons的季号解析，新src/core/series.ts按频道/基础名/季部区分并排序，不造缺季；src/views/series-card.ts保留所有已观测work选择。search-view已接入，已跨matchType合并并用最强匹配分组，保留各季选择；已补季/部/阶段歧义和同名无后缀work拒绝猜绑，6解析/3卡片测试通过；仍需同族分页与权威族关联全量回归。3解析测试+2卡片测试及搜索回归通过，浏览器393px实测选择第七季对应work可触发；不是全数据族关联完成。
@@ -267,11 +280,11 @@ native仅允许provider_s1，videoId为1～32位数字字符串，内部未知�
 
 ## 7. 阶段 E：部署 + 验收 + 发布（全程需 Master 授权）
 
-- [ ] E1 部署 Worker + 更新 `SEARCH_DISCOVERY_CONFIG` 密钥（含新 App 主机白名单，源文件 `outputs/search-discovery-config.json`）
-- [ ] E2 仅对实际新增模型执行经验证的迁移；阶段A不新增旧D1 episode元数据列，D是否需要迁移由实现决定
-- [ ] E3 本地JDK/SDK出完整集成验收APK → `build/apk265/` + SHA-256/签名/测试范围收据；不复用单集验证包充当完整包
-- [ ] E4 Master 真机验收（30-AC 矩阵 + 加密剧真实全集播放）
-- [ ] E5 **验收合格后**才做云端正式发布 / 官网下载替换（严禁提前，AGENTS.md + SPEC §9 G4）
+- [ ] E1 部署 Worker + 更新 `SEARCH_DISCOVERY_CONFIG` 密钥（含新 App 主机白名单，源文件 `outputs/search-discovery-config.json`）。2026-10-08 校正：Worker 已部署（`b5ba77bf-…`），发现链路在生产在线（`discoveries` 端点实测 200），说明开关、配置与独立 bucket 齐备；但本轮未取证"新 App 主机白名单"是否已按该源文件更新，故整项不勾选。
+- [x] E2 仅对实际新增模型执行经验证的迁移：2026-10-07 对远程 D1 **只**执行 0007 新增 `discovery_cards` 表，未重跑旧迁移、未新增旧 D1 episode 元数据列、未迁移内容库。
+- [x] E3 本地 JDK/SDK 出完整集成验收 APK → `build/apk265/prism-play-v2.6.5-acceptance-20261007.apk`（SHA-256 `7729c377…`），签名与基线一致并附测试范围收据；未用单集验证包充当完整包。
+- [ ] E4 Master 真机验收：核心播放与操作反馈项（原生 CENC 起播、换集/换线、默认 1× 与已保存倍率、分享复制提示、作者二维码保存与手动打开微信、全屏 HUD 与选季抽屉、版本展示）已通过；**30-AC 全矩阵与加密剧整季播完、后台/投屏真机复跑未做**，整项保持未完成。
+- [x] E5 验收合格后再做官网下载替换：2026-10-08 发布 `prism-play-v2.6.5-20261008.apk`（36,303,231 字节，SHA-256 `67e07a5a…` 与验收包逐字节一致）并同步 `config:version` 公告；未提前推广，`versionCode` 仍 21605 的取舍已如实登记。
 
 **规模**：~0 代码（配置/CI 为主）/ 5k–10k tokens。
 
@@ -284,11 +297,11 @@ native仅允许provider_s1，videoId为1～32位数字字符串，内部未知�
 | 阶段 | 关键出口 | LOC | Token | 需授权 | 状态 |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | P0（已完成）| ADR v1.2 + P0-1 协议 + 密钥返回 | ~180 | ~15k | 否 | DONE（本地）|
-| A 云端播放绑定 | 搜索返回卡片，点开按需生成纯 videoId 原生描述符 | 约480 | ~25k | 部署已执行 | DONE（Worker 1f35163f 已部署）|
+| A 云端播放绑定 | 搜索返回卡片，点开按需生成纯 videoId 原生描述符 | 约480 | ~25k | 部署已执行 | DONE（Worker `1f35163f` 首部署，后经 CPU 治理版本 `b5ba77bf` 取代；A3 授权绑定句柄仍未实现）|
 | B ExoPlayer spike | **真机一集出画面+声音+完整时长（闸门）** | 约1580 | ~60k | 本地构建+Master真机 | DONE（Master 2026-10-06 验证通过）|
-| C 完整集成 WS1–8 | CENC Range解密 + ExoPlayer硬解 + 透明WebView + 后台音频 + 纯videoId契约 | 约1420 | ~55k | 本地实现 | DONE（149套测试1723项全通，本地编译APK归档）|
-| D 普适补完 | 独立卡片表 0007 + 选季紧贴选集 + 竖向HUD + no-referrer防盗链 | 约650 | ~30k | D1迁移已执行 | DONE（D1迁移生效，UI已校准）|
-| E 完整回归与交付 | 全量1723项测试、Gate G0、P0扫描、最新APK交付（不发WEB） | 约350 | ~15k | Master真机验收 | IN PROGRESS（最新验收包已就绪，等待Master真机验证）|
+| C 完整集成 WS1–8 | CENC Range解密 + ExoPlayer硬解 + 透明WebView + 后台音频 + 纯videoId契约 | 约1420 | ~55k | 本地实现+真机 | 核心通过（156套/1,755项，v2.6.5 真机复验出画面/声音/换集/倍速）；WS4 后台音频与投屏真机复跑、30-AC 全矩阵仍未做 |
+| D 普适补完 | 独立卡片表 0007 + 选季紧贴选集 + 竖向HUD + no-referrer防盗链 | 约650 | ~30k | D1迁移已执行 | 上线并通过真机；多季/追更（D1～D5）未完成；1102 仅降为间歇失败，未根治 |
+| E 完整回归与交付 | 全量1,755项测试、Gate G0、P0扫描、验收APK → 真机通过后官网发布 | 约350 | ~15k | Master真机验收 | DONE（v2.6.5 修订包 2026-10-08 发布官网，SHA-256 与验收包逐字节一致；30-AC 全矩阵与 A3 授权绑定仍是未闭合项）|
 
 唯一有效执行顺序：控制条/生命周期收口 → A3权威播放绑定 → 后台音频/全屏集成 → D多季与追更 → 本地完整回归及可测后端/fact链路准备 → 完整验收APK → Master真机验收 → 获准正式发布。B单集基础播放已通过，不重复要求测试。内部编译可验证代码，但不得提前把中间APK交给Master承担未完工作。测试后端准备与正式发布分开：有真实可播数据才能验收，生产写入仍需授权。
 
@@ -307,6 +320,7 @@ native仅允许provider_s1，videoId为1～32位数字字符串，内部未知�
 9. 本地验证：`npm test`、`npm run build`、`npm run typecheck`、`python tests/scan_p0.py`、`python tests/verify_contracts.py`、`python tests/verify_android_assets.py`；`npx cap sync android`后用本地JDK/SDK运行`./gradlew :app:testDebugUnitTest :app:assembleDebug`。完整集成不带`-PplaybackProbe=true`，该参数仅用于旧独立验证入口。
 10. 工具链路径：`build/android-tools/jdk-21.0.12.1+1`、`build/android-tools/sdk`、`build/android-tools/gradle-cache`；通过JAVA_HOME/ANDROID_HOME/GRADLE_USER_HOME传入。不需要为了本地出包写Git/CI。安装包必须归档hash/签名及真实验收范围。
 11. 最近基线证据：138文件1644项全量回归通过，P0扫描467文件、契约及Android编译/JVM单测通过；仅证明该基线已测代码，未实现功能不在完成范围。浏览器仅假内核验证，不证明Android叠层；后续改动最终必须重跑全部。
+12. **2026-10-08 现行基线**（取代第 11 项的数字）：156 套 / 1,755 项全量回归、客户端与云端 `tsc --noEmit`、`scan:p0`（503 文件）、Gate G0 契约与 AC 30/30（188 条署名用例）、`verify:android`、本地 Gradle `assembleDebug` + apksigner 核验均通过。换集/换线已改为独立 engine/video 实例并先提交旧进度；常规倍速在原生起播前生效；作者二维码走原生保存与显式微信定向 Intent。未闭合项仍是 A3 授权绑定、WS4 后台音频真机复跑、DLNA 投屏、30-AC 全矩阵，以及云端 1102 间歇复发与内容日更闭环。禁止调用子代理。
 12. 曾编译名为integrated-native-playback的中间APK，现已撤回用户验收并在收据标false；保留文件作内部证据。当前没有可交付的完整验收APK。生产未部署、旧fact缺native。必须先完成A/C/D并准备真实可测后端，再交包；生产写入需授权，正式发布只在最终验收后执行。
 
 ---

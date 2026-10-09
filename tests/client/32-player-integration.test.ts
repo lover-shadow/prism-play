@@ -3,11 +3,12 @@
  * 播放器宿主生命周期（AC-02-6 / AC-15）：起播、断点上报、异常态文案与私密缺失卡。
  * The real ArtPlayer/hls.js path is device-only; everything else in the lifecycle is proven here.
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../src/core/api/client';
 import type { TitleDetail } from '../../edge/src/types/api';
 import { detailOf, settle, setup, STREAM } from './player-harness';
 
+afterEach(() => vi.restoreAllMocks());
 describe('起播、异常态与断点上报', () => {
   it('loads the resolved url, resumes at the breakpoint and hands the row to the sink', async () => {
     const h = setup();
@@ -38,6 +39,7 @@ describe('起播、异常态与断点上报', () => {
   });
 
   it('断网 says 需要网络 instead of pretending offline playback works (AC-15)', async () => {
+    vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
     const h = setup({ allowBackgroundAudio: true });
     h.api.playback.mockRejectedValueOnce(new ApiError('NETWORK_ERROR', 0, '网络不可用'));
     await h.player.load(11); await settle();
@@ -47,6 +49,16 @@ describe('起播、异常态与断点上报', () => {
     expect(h.calls.startBackground).toHaveLength(0);
   });
 
+  it('applies the configured 2x rate on open, metadata reset and the next episode', async () => {
+    const h = setup({ playbackPreferences: { normalRate: () => 2 } });
+    await h.player.load(11); await settle();
+    expect(h.state.rate).toBe(2);
+    h.state.rate = 1; h.fire('loadedmetadata');
+    expect(h.state.rate).toBe(2);
+    await h.player.load(12); await settle();
+    expect(h.state.rate).toBe(2);
+    h.player.destroy();
+  });
   it('private and unknown both render the same missing card, leaking nothing (AC-02-6)', async () => {
     const render = async (detail?: TitleDetail) => {
       const h = setup(detail === undefined ? {} : { detail, titleId: detail.item.id });

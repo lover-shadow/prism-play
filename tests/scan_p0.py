@@ -16,7 +16,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 SCAN_DIRS = ["src", "edge/src", "android", "tests", "."]
 SCAN_SUFFIXES = {".ts", ".tsx", ".js", ".mjs", ".cjs", ".css", ".html", ".vue", ".svelte", ".java", ".kt", ".xml"}
-SKIP_NAMES = {"node_modules", "dist", "build", ".git", ".workbuddy", ".wrangler", "docs", "coverage"}
+SKIP_NAMES = {"node_modules", "dist", "build", "outputs", ".git", ".gitnexus", ".workbuddy", ".wrangler", "docs", "coverage"}
 # `npx cap sync android` 会把 dist/ 逐字节拷进 app/src/main/assets/public；那是一份构建产物，
 # 与 SKIP_NAMES 里的 dist/build 同类，不应被当作业务源码判定（否则第三方 bundle 的色值会冒充我们的红线）。
 SKIP_PATH_PREFIXES = ("android/app/src/main/assets/",)

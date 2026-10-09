@@ -51,4 +51,13 @@ describe('series aggregate result card', () => {
     const card = document.createElement('button');
     expect(createSeriesCard({ title: '单剧', items: [item('single', '单剧')] }, () => card, vi.fn())).toBe(card);
   });
+  it('applies disambiguation labels for identical titles in group (AC-R04)', () => {
+    const s3a = item('s3a', '持械入宋第三季');
+    const s3b = item('s3b', '持械入宋第三季');
+    const root = createSeriesCard({ title: '持械入宋', items: [s3a, s3b], labels: { s3a: '版本1', s3b: '版本2' } }, (v) => {
+      const card = document.createElement('button'); card.textContent = v.title; return card;
+    }, vi.fn());
+    const options = Array.from(root.querySelectorAll('option')).map((o) => o.textContent);
+    expect(options).toEqual(['持械入宋第三季 (版本1)', '持械入宋第三季 (版本2)']);
+  });
 });

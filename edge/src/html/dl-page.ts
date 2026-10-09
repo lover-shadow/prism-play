@@ -15,6 +15,7 @@
 
 import { escapeText, sanitizeDisplayToken } from './escape';
 import { inlineDocumentHead, inlineThemeStyles, lucideIcon, type LucideIconName } from './theme';
+import { downloadSeoTags } from './seo-meta';
 import { APP_NAME } from './share-page';
 
 export const ANDROID_PACKAGE_PATH = '/dl/latest/android';
@@ -57,7 +58,7 @@ function shell(rawTitle: string, body: string): string {
     '<!doctype html>',
     '<html lang="zh-CN">',
     '<head>',
-    inlineDocumentHead(rawTitle, `${inlineThemeStyles()}\n${DL_STYLES}`),
+    inlineDocumentHead(rawTitle, `${inlineThemeStyles()}\n${DL_STYLES}`, { extraMeta: downloadSeoTags() }),
     '</head>',
     '<body>',
     '<main class="shell stack">',

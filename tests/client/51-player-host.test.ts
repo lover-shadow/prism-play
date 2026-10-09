@@ -23,7 +23,7 @@ describe('player-host 装配', () => {
     expect(layer?.getAttribute('role')).toBe('dialog');
     expect(layer?.getAttribute('aria-modal')).toBe('true');
     expect(layer?.querySelector('.prism-player-host__exit')).not.toBeNull();
-    expect(h.api.title).toHaveBeenCalledWith('c1');
+    expect(h.api.title).toHaveBeenCalledWith('c1', expect.any(AbortSignal));
     expect(h.player.isOpen()).toBe(true);
   });
 

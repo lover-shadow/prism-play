@@ -7,12 +7,10 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  ANDROID_APK_KEY,
   detectAudience,
   handleApkDownload,
   handleDownloadLanding,
   platformFromPath,
-  resolveApkLocation,
   type DlEnv
 } from '../../edge/src/routes/dl';
 import {
@@ -26,6 +24,8 @@ import { renderAndroidDownloadPage, renderUnsupportedNoticePage, renderWeChatGui
 import { ICON_SIZES } from '../../edge/src/html/theme';
 import { createTestEnv, type PrismTestEnv } from '../support/test-env';
 
+const HASH = 'a'.repeat(64);
+const ANDROID_APK_KEY = `releases/android/21606/${HASH}.apk`;
 const ORIGIN = 'http://localhost:8787';
 const HOSTILE_REF = '"><img src=x onerror=alert(1)>';
 const PICTOGRAPHS: readonly (readonly [number, number])[] = [
@@ -61,7 +61,7 @@ const IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleW
 function bucketWith(keys: readonly string[]): R2Bucket {
   return {
     async head(key: string): Promise<unknown> {
-      return keys.includes(key) ? { key, size: 4_200_000 } : null;
+      return keys.includes(key) ? { key, size: 4_200_000, customMetadata: { sha256: HASH, versionCode: '21606', versionName: '2.6.6' } } : null;
     }
   } as unknown as R2Bucket;
 }
@@ -71,6 +71,7 @@ async function apkEnv(bucket: R2Bucket | undefined, publicBase: string | undefin
   const view = env as DlEnv;
   view.APK_BUCKET = bucket;
   view.APK_PUBLIC_BASE_URL = publicBase;
+  await env.KV.put('config:version', JSON.stringify({ android: { versionCode: 21606, versionName: '2.6.6', downloadUrl: `${ORIGIN}/dl/latest/android`, artifact: { key: ANDROID_APK_KEY, sha256: HASH, bytes: 4_200_000 } } }));
   return env;
 }
 
@@ -166,37 +167,25 @@ describe('/dl/latest/{platform} (五.3)', () => {
     }
   });
 
-  it('302s to the verified R2 location when the artifact exists', async () => {
+  it('302s to the verified same-origin artifact when it exists', async () => {
     const env = await apkEnv(bucketWith([ANDROID_APK_KEY]), 'https://release.invalid/pub');
     const response = await handleApkDownload(new Request(`${ORIGIN}/dl/latest/android`), env as DlEnv, env.clock);
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toBe('https://release.invalid/pub/releases/android/latest.apk');
+    expect(response.headers.get('Location')).toBe(`${ORIGIN}/dl/artifacts/21606/${HASH}.apk`);
     expect(response.headers.get('Cache-Control')).toBe('no-store');
     expect(await response.text()).toBe('');
   });
 
-  it('404s when the artifact, the bucket or the public base is missing', async () => {
-    const cases: (readonly [R2Bucket | undefined, string | undefined])[] = [
-      [bucketWith([]), 'https://release.invalid/pub'],
-      [undefined, 'https://release.invalid/pub'],
-      [bucketWith([ANDROID_APK_KEY]), undefined],
-      [bucketWith([ANDROID_APK_KEY]), '   ']
-    ];
-    for (const [bucket, publicBase] of cases) {
-      const env = await apkEnv(bucket, publicBase);
+  it("503s when the published artifact or bucket is missing", async () => {
+    for (const bucket of [bucketWith([]), undefined]) {
+      const env = await apkEnv(bucket, undefined);
       const response = await handleApkDownload(new Request(`${ORIGIN}/dl/latest/android`), env as DlEnv, env.clock);
-      expect(response.status).toBe(404);
+      expect(response.status).toBe(503);
     }
   });
-
-  it('never invents a redirect target: a malformed base is treated as unconfigured', () => {
-    expect(resolveApkLocation('not a url')).toBeNull();
-    expect(resolveApkLocation('ftp://release.invalid/pub')).toBeNull();
-    expect(resolveApkLocation('https://user:pw@release.invalid/pub')).toBeNull();
-    expect(resolveApkLocation('https://release.invalid/pub?token=secret')).toBeNull();
-    expect(resolveApkLocation('release.invalid/pub')).toBeNull();
-    expect(resolveApkLocation('https://release.invalid/pub/')).toBe('https://release.invalid/pub/releases/android/latest.apk');
-    expect(resolveApkLocation(undefined)).toBeNull();
+  it("does not depend on a public external base", async () => {
+    const env = await apkEnv(bucketWith([ANDROID_APK_KEY]), undefined);
+    expect((await handleApkDownload(new Request(`${ORIGIN}/dl/latest/android`), env as DlEnv, env.clock)).status).toBe(302);
   });
 });
 

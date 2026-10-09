@@ -61,7 +61,7 @@ const FTS_STAGES: readonly Stage[] = [
 export interface LocalSearchDoc { content_id: string; doc_id: number; title: string; pinyin: string; initials: string; category: string; synopsis: string }
 export interface SearchHit { contentId: string; matchType: MatchType; title: string; category: string; initials: string }
 /** §A-6.2 的数据流载荷：全量快照落地只给 `items`（重建），增量批次给 `changes`（按 content_id 幂等）。 */
-export interface SnapshotFeed { items: readonly ContentItem[]; changes?: readonly CatalogChange[]; discoveries?: readonly ContentItem[]; revision: number }
+export interface SnapshotFeed { items: readonly ContentItem[]; changes?: readonly CatalogChange[]; discoveries?: readonly ContentItem[]; revision: number; discovery?: boolean }
 export interface IndexReport { indexed: number; removed: number; rejected: number; revision: number; replaced: boolean; skipped: boolean; error: string | null }
 /** `available` 为假时调用方必须如实回落云端，而不是把"索引没就绪"冒充成"目录里没有"。 */
 export interface SearchIndexStatus { available: boolean; docs: number; revision: number; indexedAt: number; error: string | null }
@@ -225,7 +225,7 @@ export function createSearchIndex(deps: SearchIndexDeps): SearchIndex {
       try {
         await ensureReady();
         if (feed.discoveries !== undefined) return await applyChanges(feed.discoveries.map((item) => ({ operation: 'upsert', contentId: item.id, item, revision: state.revision })), state.revision, true);
-        return feed.changes === undefined ? await rebuild(feed) : await applyChanges(feed.changes, feed.revision);
+        return feed.changes === undefined ? await rebuild(feed) : await applyChanges(feed.changes, feed.revision, feed.discovery === true);
       } catch (error) {
         ready = false; failure = describeError(error);
         return { ...EMPTY_REPORT, revision: feed.revision, error: failure };

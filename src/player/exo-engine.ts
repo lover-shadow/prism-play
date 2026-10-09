@@ -33,6 +33,7 @@ export const createExoEngine: EngineFactory = async ({ container, onError, resol
   let disposed = false, position = 0, duration = 0, playing = false, volume = 1, rate = 1;
   let failure: LineFailureCode | null = null;
   let preparing = false, wantsPlayback = true, pendingSeek: number | null = null;
+  let requestedRate = 1;
   let queue = Promise.resolve();
   let controls: ReturnType<typeof createNativeControls> | null = null;
   const ancestors: HTMLElement[] = [];
@@ -62,7 +63,7 @@ export const createExoEngine: EngineFactory = async ({ container, onError, resol
     subscription = await plugin.addListener('event', (event) => {
       if (disposed || event.sessionId !== sessionId) return;
       position = pendingSeek ?? event.positionSeconds; duration = event.durationSeconds; playing = event.playing;
-      volume = event.volume; rate = event.rate; failure = event.failureCode ?? failure;
+      volume = event.volume; rate = preparing ? requestedRate : event.rate; failure = event.failureCode ?? failure;
       container.dataset.nativeVideoWidth = String(event.width);
       container.dataset.nativeVideoHeight = String(event.height);
       if (event.event === 'loadedmetadata') resize();
@@ -102,7 +103,7 @@ export const createExoEngine: EngineFactory = async ({ container, onError, resol
     volume: () => volume,
     setVolume: (value) => { volume = value; command(() => plugin.setVolume({ sessionId, volume: value })); },
     playbackRate: () => rate,
-    setPlaybackRate: (value) => { rate = value; command(() => plugin.setRate({ sessionId, rate: value })); },
+    setPlaybackRate: (value) => { requestedRate = rate = value; if (!preparing) command(() => plugin.setRate({ sessionId, rate: value })); },
     setSource: (_url, _mime, native) => {
       failure = null; position = 0; duration = 0; pendingSeek = null;
       if (!native) { failed(); return; }
@@ -118,8 +119,14 @@ export const createExoEngine: EngineFactory = async ({ container, onError, resol
           await plugin.seek({ sessionId, seconds });
           if (pendingSeek === seconds) pendingSeek = null;
         }
-        preparing = false;
-        if (!disposed && wantsPlayback) await plugin.play({ sessionId });
+        let appliedRate: number;
+        do {
+          appliedRate = requestedRate;
+          await plugin.setRate({ sessionId, rate: appliedRate });
+          if (disposed) return;
+        } while (appliedRate !== requestedRate);
+        rate = requestedRate; preparing = false;
+        if (wantsPlayback) await plugin.play({ sessionId });
       });
     },
     toggleControls: () => controls?.toggle(),

@@ -53,6 +53,7 @@ export const SEARCH_MAX_PAGE_SIZE = 20;
 /** KV is the only home for the cloud-delivered commercial and OTA config (SPEC §6 has no table). */
 export const MONETIZATION_KV_KEY = 'config:monetization';
 export const VERSION_KV_KEY = 'config:version';
+export const ANNOUNCEMENTS_KV_KEY = 'config:announcements';
 
 /**
  * Public poster browser cache. NOT pinned by any contract document (SPEC only says 公开海报可用

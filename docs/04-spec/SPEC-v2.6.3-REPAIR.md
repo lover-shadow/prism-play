@@ -67,6 +67,8 @@ API-SPEC/OpenAPI 公开目录 pageSize 按三轨60条分片同步（旧20/50是�
 
 执行批完成时逐项登记命令、退出码、样本/设备、实际结果与阻塞原因，不覆盖历史验收记录；不得以旧30项署名覆盖代替本轮行为验收。
 
+> **本表是 v2.6.3 修订批次登记，不是当前状态**。现行进度以 `SPEC-CLOUD-REFACTOR.md` §6.1.2/全局进度地图、`SPEC-APP-REFACTOR.md` 全局进度地图与 `TIMELINE.md` 为准：云端已部署发现卡片迁移 0007 与 CPU 治理版本 `b5ba77bf`（免费档 1102 降为间歇失败，未根治），端侧已随 v2.6.5 修订包真机验收并发布官网下载；作者图片仍由 `src/main.ts` 的 `supportAssets` 注入，但保存动作已改为 Android 原生（10+ 写图库 `Pictures/PrismPlay`，旧版本文件保存）与显式"打开微信"定向 Intent，网页端保留直接下载兜底。
+
 ### 2026-10-04 当前执行事实（本次仅文档同步）
 
 - 用户已授权计划与完整修复；本次完整读取 `D:/DEV/prism-play/src/core/storage/following-store.ts`、`src/core/watch-time.ts`、`src/views/settings-support.ts`、`src/core/runtime-services.ts`、`edge/src/search/generation.ts`、`edge/src/library/manifest.ts`、`edge/scripts/public-search-projection.mjs`、`edge/scripts/package-and-publish-library.mjs`、`edge/scripts/daily-facts.mjs`、`edge/scripts/public-provider.mjs`（均相对同一绝对工程根）；确认独立收藏、标量计时、静态作者资源、内部投影/同代复核及日更生成模块局部落地，不代表接线/所有边界验收。

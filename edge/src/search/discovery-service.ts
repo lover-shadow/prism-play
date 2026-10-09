@@ -1,6 +1,6 @@
 import type { SearchResult } from '../types/api';
 import { discoveryCanonicalId } from './discovery-facts';
-import type { DiscoveryProvider } from './discovery-provider';
+import { IncompleteDiscoverySearch, type DiscoveryCandidate, type DiscoveryProvider } from './discovery-provider';
 import { acquireDiscoveryLease, completeDiscoveryQuery, consumeDiscoveryRate, discoveryQueryKey,
   readDiscoveryQuery, releaseDiscoveryLease } from './discovery-query';
 import { publishDiscoveryFact, readDiscoveryCards, readDiscoveryFact, type DiscoveryContext } from './discovery-store';
@@ -82,7 +82,12 @@ export function createDiscoveryService(context: DiscoveryContext, providers: rea
         more = false;
         for (const provider of providers) {
           try {
-            const found = await provider.search(q, page);
+            let found: DiscoveryCandidate[];
+            try { found = await provider.search(q, page); }
+            catch (error) {
+              if (!(error instanceof IncompleteDiscoverySearch)) throw error;
+              found = error.candidates; searchFailed = true;
+            }
             if (found.length > 256) throw new Error('Too many discovery candidates');
             // m1 has no source pagination signal yet: conservatively offer another page.
             more ||= found.length > 0 && provider.id === 'provider_m1';
