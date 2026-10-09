@@ -37,7 +37,7 @@ function result(status: number, code: string, form: boolean, cookie?: string): R
   headers.set('Content-Type', form ? 'text/html; charset=utf-8' : 'application/json; charset=utf-8');
   const messages: Record<string, string> = {
     AGREED: '已同意浏览器去重统计。', REVOKED: '已拒绝或撤回同意，对应记录已删除。',
-    FORBIDDEN: '请求不符合隐私或同源要求，未授予同意。',
+    FORBIDDEN: '您的浏览器开启了「请勿跟踪」（DNT/GPC），本站尊重该设置，未授予同意；如需统计请关闭后再试。',
     UNAVAILABLE: '统计设置暂不可用，未确认记录删除成功，请稍后重试。',
     INVALID_REQUEST: '请求格式不正确，设置未更改。', TOO_LARGE: '请求超过大小限制，设置未更改。',
     METHOD_NOT_ALLOWED: '请通过隐私设置页主动提交您的选择。'
@@ -83,14 +83,18 @@ async function readAction(request: Request, form: boolean): Promise<'agree' | 'r
   } catch { return 400; } finally { reader.releaseLock(); }
 }
 
-/** Route independently before public CORS; only explicit exact-origin POST can change consent. */
+/** Route independently before public CORS; only explicit exact-origin POST can change consent.
+ * `Sec-Fetch-Site` accepts `same-origin` and `same-site`: the Origin equality check above already
+ * pins the exact host, and strict `same-origin` alone 403s real user submissions that arrive via a
+ * scheme upgrade (http → https) or an edge redirect, where Chrome reports `same-site`. */
 export async function handleAnalyticsConsent(request: Request, env: AnalyticsEnv, _clock: Clock): Promise<Response> {
   const type = request.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase();
   const form = type === 'application/x-www-form-urlencoded';
   if (request.method !== 'POST') return result(405, 'METHOD_NOT_ALLOWED', form);
   const url = new URL(request.url);
+  const fetchSite = request.headers.get('Sec-Fetch-Site');
   if (url.protocol !== 'https:' || request.headers.get('Origin') !== url.origin ||
-    (request.headers.has('Sec-Fetch-Site') && request.headers.get('Sec-Fetch-Site') !== 'same-origin')) {
+    (fetchSite !== null && fetchSite !== 'same-origin' && fetchSite !== 'same-site')) {
     return result(403, 'FORBIDDEN', form);
   }
   if (!form && type !== 'application/json') return result(400, 'INVALID_REQUEST', false);

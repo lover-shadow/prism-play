@@ -26,57 +26,65 @@ export interface LandingPageInput {
   readonly apkSizeBytes: number | null;
 }
 
-const LANDING_STYLES = [
-  'body { padding: 0; }',
-  '.page { display: flex; flex-direction: column; gap: var(--space-10); padding: 0 var(--space-4) var(--space-8); }',
-  '.wrap { width: 100%; max-width: var(--container-desktop); margin: 0 auto; }',
-  // --- 顶栏：品牌 + 锚点导航 + 常驻下载键
-  '.top { border-bottom: 1px solid var(--border); }',
-  '.top-inner { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: var(--touch-target); padding: var(--safe-top) 0 var(--space-3); }',
-  '.brand { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--accent); font-size: var(--text-base); font-weight: 700; letter-spacing: var(--tracking-caps); text-decoration: none; }',
-  '.brand-tag { display: none; font-size: var(--text-xs); padding: 2px var(--space-2); border-radius: var(--radius-xs); background: var(--surface-raised); border: 1px solid var(--border); color: var(--muted); }',
-  '.top-actions { display: flex; align-items: center; gap: var(--space-2); }',
-  '.nav { display: none; gap: var(--space-6); margin-right: auto; }',
-  '.nav a { color: var(--fg-2); font-size: var(--text-sm); text-decoration: none; }',
-  '.nav a:hover { color: var(--accent); }',
-  '.cta-compact { min-height: 38px; padding: var(--space-2) var(--space-4); font-size: var(--text-sm); }',
-  // --- hero
-  '.hero { padding: var(--space-8) 0 0; text-align: center; }',
-  '.hero-inner { display: flex; flex-direction: column; gap: var(--space-6); }',
-  '.hero-copy > * + * { margin-top: var(--space-4); }',
-  '.hero-badge { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-3); border-radius: var(--radius-pill); background: var(--accent-subtle); border: 1px solid var(--border); font-size: var(--text-xs); color: var(--accent); letter-spacing: var(--tracking-caps); }',
-  '.hero-title { font-family: var(--font-display); font-size: var(--text-xl); line-height: var(--leading-tight); letter-spacing: var(--tracking-tight); color: var(--fg); }',
-  '.hero-lede { max-width: 46ch; margin-inline: auto; color: var(--fg-2); font-size: var(--text-md); line-height: var(--leading-normal); }',
-  '.hero-highlights { display: flex; justify-content: center; flex-wrap: wrap; gap: var(--space-2); }',
-  '.highlight-pill { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-xs); color: var(--accent); padding: 3px 10px; border-radius: var(--radius-pill); background: var(--surface); border: 1px solid var(--border); font-weight: 600; }',
-  '.cta-row { display: flex; justify-content: center; flex-wrap: wrap; gap: var(--space-3); }',
-  '.trust { display: flex; align-items: flex-start; gap: var(--space-2); max-width: 52ch; margin-inline: auto; color: var(--muted); font-size: var(--text-xs); text-align: left; }',
-  '.trust .icon { color: var(--accent); margin-top: 2px; }',
-  '.hero-meta { color: var(--muted); font-size: var(--text-xs); letter-spacing: var(--tracking-caps); }',
-  '.hero-visual { margin-top: var(--space-2); }',
-  '.hero-shot { display: block; width: 100%; height: auto; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--player-bg); }',
-  // --- 区块标题
-  '.section-head { text-align: center; margin-bottom: var(--space-6); }',
-  '.section-title { font-size: var(--text-lg); color: var(--fg); }',
-  '.section-lede { color: var(--muted); font-size: var(--text-sm); margin-top: var(--space-2); }',
-  // --- 栅格：手机单列，宽屏按区块分列，永不横向溢出 (AC-S4-3)
-  '.grid { display: grid; grid-template-columns: 1fr; gap: var(--space-4); }',
-  '@media (min-width: 600px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .hero-title { font-size: var(--text-display); } .brand-tag { display: inline-block; } }',
-  '@media (min-width: 960px) { .nav { display: flex; } .hero { padding: var(--space-10) 0 0; text-align: left; } .hero-inner { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: var(--space-10); align-items: center; } .hero-lede, .trust { margin-inline: 0; } .hero-highlights, .cta-row { justify-content: flex-start; } .hero-visual { margin-top: 0; } .grid.is-devices, .grid.is-features { grid-template-columns: repeat(3, minmax(0, 1fr)); } }',
-  '.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-2); }',
-  '.card-head { display: flex; align-items: center; gap: var(--space-2); color: var(--fg); font-size: var(--text-base); font-weight: 700; }',
-  '.card-head .icon { color: var(--accent); }',
-  '.pills { display: flex; flex-wrap: wrap; gap: var(--space-2); }',
-  '.pill { display: inline-flex; align-items: center; min-height: var(--space-6); padding: 0 var(--space-3); border: 1px solid var(--accent); border-radius: var(--radius-pill); color: var(--accent); font-size: var(--text-xs); letter-spacing: var(--tracking-caps); }',
-  '.pill-plain { border-color: var(--border); color: var(--fg-2); }',
-  '.card.is-off { background: var(--surface-raised); border-style: dashed; }',
-  '.card.is-off .card-head, .card.is-off .card-head .icon { color: var(--muted); }',
-  '.feature { font-size: var(--text-sm); color: var(--fg-2); line-height: var(--leading-normal); }',
-  '.feature-sub { font-size: var(--text-xs); color: var(--accent); font-weight: 600; }',
-  '.note { font-size: var(--text-xs); color: var(--muted); line-height: var(--leading-normal); }',
-  '.foot { border-top: 1px solid var(--border); padding: var(--space-6) 0 calc(var(--space-4) + var(--safe-bottom)); }',
-  '.foot-inner { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: baseline; justify-content: space-between; font-size: var(--text-xs); color: var(--muted); }'
-].join('\n');
+const LANDING_STYLES = `
+body { padding: 0; }
+.page { display: flex; flex-direction: column; gap: var(--space-10); padding: 0 var(--space-4) var(--space-8); }
+.wrap { width: 100%; max-width: var(--container-desktop); margin: 0 auto; }
+.top { border-bottom: 1px solid var(--border); }
+.top-inner { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: var(--touch-target); padding: var(--safe-top) 0 var(--space-3); }
+.brand { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--accent); font-size: var(--text-base); font-weight: 700; letter-spacing: var(--tracking-caps); text-decoration: none; }
+.brand-tag { display: none; font-size: var(--text-xs); padding: 2px var(--space-2); border-radius: var(--radius-xs); background: var(--surface-raised); border: 1px solid var(--border); color: var(--muted); }
+.top-actions { display: flex; align-items: center; gap: var(--space-2); }
+.nav { display: none; gap: var(--space-6); margin-right: auto; }
+.nav a { color: var(--fg-2); font-size: var(--text-sm); text-decoration: none; }
+.nav a:hover { color: var(--accent); }
+.cta-compact { min-height: 38px; padding: var(--space-2) var(--space-4); font-size: var(--text-sm); }
+.hero { padding: var(--space-8) 0 0; text-align: center; }
+.hero-inner { display: flex; flex-direction: column; gap: var(--space-6); }
+.hero-copy > * + * { margin-top: var(--space-4); }
+.hero-badge { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-3); border-radius: var(--radius-pill); background: var(--accent-subtle); border: 1px solid var(--border); font-size: var(--text-xs); color: var(--accent); letter-spacing: var(--tracking-caps); }
+.hero-title { font-family: var(--font-display); font-size: var(--text-xl); line-height: var(--leading-tight); letter-spacing: var(--tracking-tight); color: var(--fg); }
+.hero-lede { max-width: 46ch; margin-inline: auto; color: var(--fg-2); font-size: var(--text-md); line-height: var(--leading-normal); }
+.hero-highlights { display: flex; justify-content: center; flex-wrap: wrap; gap: var(--space-2); }
+.highlight-pill { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-xs); color: var(--accent); padding: 3px 10px; border-radius: var(--radius-pill); background: var(--surface); border: 1px solid var(--border); font-weight: 600; }
+.cta-row { display: flex; justify-content: center; flex-wrap: wrap; gap: var(--space-3); }
+.trust { display: flex; align-items: flex-start; gap: var(--space-2); max-width: 52ch; margin-inline: auto; color: var(--muted); font-size: var(--text-xs); text-align: left; }
+.trust .icon { color: var(--accent); margin-top: 2px; }
+.hero-meta { color: var(--muted); font-size: var(--text-xs); letter-spacing: var(--tracking-caps); }
+.hero-visual { margin-top: var(--space-2); }
+.hero-shot { display: block; width: 100%; height: auto; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--player-bg); }
+.section-head { text-align: center; margin-bottom: var(--space-6); }
+.section-title { font-size: var(--text-lg); color: var(--fg); }
+.section-lede { color: var(--muted); font-size: var(--text-sm); margin-top: var(--space-2); }
+.grid { display: grid; grid-template-columns: 1fr; gap: var(--space-4); }
+@media (min-width: 600px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .hero-title { font-size: var(--text-display); } .brand-tag { display: inline-block; } }
+@media (min-width: 960px) { .nav { display: flex; } .hero { padding: var(--space-10) 0 0; text-align: left; } .hero-inner { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: var(--space-10); align-items: center; } .hero-lede, .trust { margin-inline: 0; } .hero-highlights, .cta-row { justify-content: flex-start; } .hero-visual { margin-top: 0; } .grid.is-devices, .grid.is-features { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-2); }
+.card-head { display: flex; align-items: center; gap: var(--space-2); color: var(--fg); font-size: var(--text-base); font-weight: 700; }
+.card-head .icon { color: var(--accent); }
+.pills { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.pill { display: inline-flex; align-items: center; min-height: var(--space-6); padding: 0 var(--space-3); border: 1px solid var(--accent); border-radius: var(--radius-pill); color: var(--accent); font-size: var(--text-xs); letter-spacing: var(--tracking-caps); }
+.pill-plain { border-color: var(--border); color: var(--fg-2); }
+.card.is-off { background: var(--surface-raised); border-style: dashed; }
+.card.is-off .card-head, .card.is-off .card-head .icon { color: var(--muted); }
+.feature { font-size: var(--text-sm); color: var(--fg-2); line-height: var(--leading-normal); }
+.feature-sub { font-size: var(--text-xs); color: var(--accent); font-weight: 600; }
+.note { font-size: var(--text-xs); color: var(--muted); line-height: var(--leading-normal); }
+.foot { border-top: 1px solid var(--border); padding: var(--space-6) 0 calc(var(--space-4) + var(--safe-bottom)); }
+.foot-inner { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: baseline; justify-content: space-between; font-size: var(--text-xs); color: var(--muted); }
+.hero-trust-badges { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); justify-content: center; }
+.trust-badge-pill { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-xs); color: var(--fg-2); padding: 4px 10px; border-radius: var(--radius-pill); background: var(--surface-raised); border: 1px solid var(--border); text-decoration: none; }
+.trust-badge-pill .icon { color: var(--accent); }
+@media (min-width: 960px) { .hero-trust-badges { justify-content: flex-start; } }
+.cookie-banner { position: sticky; bottom: 0; z-index: 50; width: 100%; background: rgba(18, 21, 31, 0.96); backdrop-filter: blur(12px); border-top: 1px solid var(--border); padding: var(--space-3) var(--space-4); box-shadow: 0 -4px 24px rgba(0,0,0,0.4); }
+.cookie-inner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); max-width: var(--container-desktop); margin: 0 auto; }
+.cookie-desc { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs); color: var(--fg-2); }
+.cookie-desc .icon { color: var(--accent); flex-shrink: 0; }
+.cookie-actions { display: flex; align-items: center; gap: var(--space-3); flex-shrink: 0; }
+.cta-cookie { min-height: 32px; padding: 2px var(--space-3); font-size: var(--text-xs); }
+.ghost-cookie { font-size: var(--text-xs); color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
+.ghost-cookie:hover { color: var(--accent); }
+`;
 
 function formatSize(bytes: number | null): string | null {
   if (bytes === null || !Number.isFinite(bytes) || bytes <= 0) return null;
@@ -130,6 +138,11 @@ function heroBlock(release: LandingRelease | null, apkSize: string | null): stri
     '      </div>',
     `      <p class="cta-row"><a class="cta" href="${ANDROID_PACKAGE_PATH}">${lucideIcon('download', 20)}立即下载 APK</a>`,
     `        <a class="ghost" href="${DOWNLOAD_ENTRY_PATH}">${lucideIcon('info', 16)}下载说明</a></p>`,
+    '      <div class="hero-trust-badges">',
+    `        <span class="trust-badge-pill">${lucideIcon('layers', 16)}<span>GitHub AIOS-Lab 开源核心</span></span>`,
+    `        <span class="trust-badge-pill">${lucideIcon('shield', 16)}<span>VirusTotal 0 风险检出</span></span>`,
+    `        <span class="trust-badge-pill">${lucideIcon('info', 16)}<span>纯净沙盒 · 零敏感权限</span></span>`,
+    '      </div>',
     `      <p class="trust">${lucideIcon('shield', 16)}<span>不索取手机号、通讯录、位置或相册权限；授权码与观看进度只存在你这台设备的本地库里，本站不做任何账号绑定。</span></p>`,
     `      <p class="hero-meta">ANDROID · ${version}${sizePill}</p>`,
     '    </div>',
@@ -187,42 +200,12 @@ function matrixBlock(release: LandingRelease | null, apkSizeBytes: number | null
 }
 
 const FEATURE_CARDS: readonly { readonly icon: LucideIconName; readonly title: string; readonly sub: string; readonly detail: string }[] = [
-  {
-    icon: 'film',
-    title: '精选短剧一键播放',
-    sub: '免注册 · 纯净零广告',
-    detail: '拒绝手机号与隐私搜集，全链路零开屏、零插播、零贴片弹窗，进入即播。'
-  },
-  {
-    icon: 'play-circle',
-    title: '当前集点开即播',
-    sub: '点开即播 · 播完截流',
-    detail: '微信与浏览器单集秒播。朋友分享第 24 集直接载入第 24 集，绝不倒退第 1 集。'
-  },
-  {
-    icon: 'wifi-off',
-    title: '可缓存 可离线观看',
-    sub: '零流量畅看 · 随时随地',
-    detail: '剧集支持离线缓存到设备本地，断网或飞行模式下也能流畅播放，通勤出行告别流量焦虑。'
-  },
-  {
-    icon: 'layers',
-    title: '多源聚合去重',
-    sub: '云端归一 · 线路可切',
-    detail: '同一剧目在云端按标准化片名合并，一条条目只出现一次，播放线路可随时切换。'
-  },
-  {
-    icon: 'monitor-smartphone',
-    title: '多端断点接力',
-    sub: '匿名同步观看进度 · 预制卡密',
-    detail: '凭授权码在换设备时无缝续播，观看进度与收藏走匿名云端同步通道，不索取手机号，不绑定个人身份。'
-  },
-  {
-    icon: 'tv',
-    title: '客厅大屏一键投屏',
-    sub: 'DLNA · 直连线路',
-    detail: '把当前播放线路直接交给局域网里的电视或盒子，不必把视频再下载一遍，手机可以继续做别的。'
-  }
+  { icon: 'film', title: '精选短剧一键播放', sub: '免注册 · 纯净零广告', detail: '拒绝手机号与隐私搜集，全链路零开屏、零插播、零贴片弹窗，进入即播。' },
+  { icon: 'play-circle', title: '当前集点开即播', sub: '点开即播 · 播完截流', detail: '微信与浏览器单集秒播。朋友分享第 24 集直接载入第 24 集，绝不倒退第 1 集。' },
+  { icon: 'wifi-off', title: '可缓存 可离线观看', sub: '零流量畅看 · 随时随地', detail: '剧集支持离线缓存到设备本地，断网或飞行模式下也能流畅播放，通勤出行告别流量焦虑。' },
+  { icon: 'layers', title: '多源聚合去重', sub: '云端归一 · 线路可切', detail: '同一剧目在云端按标准化片名合并，一条条目只出现一次，播放线路可随时切换。' },
+  { icon: 'monitor-smartphone', title: '多端断点接力', sub: '匿名同步观看进度 · 预制卡密', detail: '凭授权码在换设备时无缝续播，观看进度与收藏走匿名云端同步通道，不索取手机号，不绑定个人身份。' },
+  { icon: 'tv', title: '客厅大屏一键投屏', sub: 'DLNA · 直连线路', detail: '把当前播放线路直接交给局域网里的电视或盒子，不必把视频再下载一遍，手机可以继续做别的。' }
 ];
 
 function featuresBlock(): string {
@@ -255,10 +238,36 @@ function footBlock(release: LandingRelease | null): string {
   return [
     '<footer class="foot">',
     '  <div class="wrap foot-inner">',
-    `    <p class="meta">${escapeText(APP_NAME)} · ${version} · © 2026 AIOS Foundation</p>`,
-    `    <p class="meta"><a class="ghost" href="${DOWNLOAD_ENTRY_PATH}">下载与安装说明</a></p>`,
+    '    <div style="display:flex;flex-direction:column;gap:var(--space-1)">',
+    `      <p class="meta">${escapeText(APP_NAME)} · ${version} · © 2026 AIOS Foundation</p>`,
+    '      <p class="meta">开源流媒体核心：AIOS-Lab/prism-play-core (Apache-2.0)</p>',
+    '    </div>',
+    '    <div style="display:flex;flex-wrap:wrap;gap:var(--space-4);align-items:center">',
+    `      <a class="ghost" href="${DOWNLOAD_ENTRY_PATH}">下载说明</a>`,
+    '      <a class="ghost" href="/privacy">隐私与统计设置</a>',
+    '    </div>',
     '  </div>',
     '</footer>'
+  ].join('\n');
+}
+
+function cookieBanner(): string {
+  return [
+    '<aside class="cookie-banner" role="region" aria-label="隐私与统计提示">',
+    '  <div class="cookie-inner">',
+    '    <div class="cookie-desc">',
+    `      ${lucideIcon('info', 16)}`,
+    '      <span>本站使用随机匿名浏览器标识统计访问去重与下载触发，不收集任何个人隐私。</span>',
+    '    </div>',
+    '    <div class="cookie-actions">',
+    '      <form method="post" action="/api/analytics/consent" style="margin:0">',
+    '        <input type="hidden" name="action" value="agree">',
+    '        <button type="submit" class="cta cta-cookie">同意统计</button>',
+    '      </form>',
+    '      <a class="ghost-cookie" href="/privacy">查看说明与设置</a>',
+    '    </div>',
+    '  </div>',
+    '</aside>'
   ].join('\n');
 }
 
@@ -283,7 +292,7 @@ export function renderLandingPage(input: LandingPageInput): string {
     featuresBlock(),
     footBlock(release),
     '</div>',
-    '<p><a href="/privacy">隐私与统计设置</a></p>',
+    cookieBanner(),
     '</body>',
     '</html>'
   ].join('\n');

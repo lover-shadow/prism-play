@@ -154,11 +154,17 @@ function consent(action: string, headers: Record<string, string> = {}, body?: st
   });
 
   it.each<Record<string, string>>([{ Origin: 'https://evil.invalid' }, { Origin: 'null' }, { Origin: '' },
-    { 'Sec-GPC': '1' }, { DNT: '1' }])('does not grant consent for %j', async (headers) => {
+    { 'Sec-GPC': '1' }, { DNT: '1' }, { 'Sec-Fetch-Site': 'cross-site' }, { 'Sec-Fetch-Site': 'none' }])('does not grant consent for %j', async (headers) => {
     const response = await handleAnalyticsConsent(consent('agree', headers), await enabled(), clock);
     expect(response.status).toBe(403);
     expect(response.headers.get('Set-Cookie') ?? '').not.toContain('Max-Age=15552000');
     expect(response.headers.has('Access-Control-Allow-Origin')).toBe(false);
+  });
+
+  it.each(['same-origin', 'same-site'])('grants consent when Sec-Fetch-Site is %j with exact-origin', async (fetchSite) => {
+    const response = await handleAnalyticsConsent(consent('agree', { 'Sec-Fetch-Site': fetchSite }), await enabled(), clock);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Set-Cookie') ?? '').toContain('Max-Age=15552000');
   });
 
   it.each(['{}', 'null', '[]', '{', '{"action":"other"}', '{"action":"agree","extra":1}'])('rejects malformed input %s', async (body) => {

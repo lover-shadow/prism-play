@@ -132,6 +132,7 @@ export function renderAndroidDownloadPage(input: DlPageInput = {}): string {
     '  <p class="lede">点击下方按钮获取当前已发布并通过校验的安装包；下载入口由本站固定路径提供，不存在其他镜像地址。</p>',
     `  ${heroShotMarkup('shot')}`,
     `  <p class="cta-row"><a id="prism-apk" class="cta" href="${ANDROID_PACKAGE_PATH}">${lucideIcon('download', 20)}下载 Android 安装包</a></p>`,
+    '  <p class="meta">基于 AIOS-Lab 开源流媒体架构构建 · VirusTotal 0 风险检出</p>',
     '  <p class="meta">若系统提示禁止安装未知来源应用，请在设置中允许当前浏览器安装后重试。</p>',
     `  <p class="notice">${lucideIcon('info', 16)}本期仅提供 Android 版本；Windows、macOS 与桌面客户端尚未发布，本站不提供对应安装包。</p>`,
     attributionLine(ref),

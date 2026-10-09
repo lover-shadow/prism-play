@@ -126,6 +126,7 @@ function footerBlock(ref: string | null): string {
     `  <p class="meta">${attribution}</p>`,
     '  <p class="fineprint">链接上的分享标识只用于展示来源：跨安装无法凭 URL 自动归因，',
     '  因此本页不会据此结算任何邀请奖励，也不会改变你的授权状态。</p>',
+    '  <p class="fineprint" style="margin-top:8px"><a class="ghost" href="/privacy">隐私与统计设置</a></p>',
     '</footer>'
   ].join('\n');
 }
@@ -255,7 +256,6 @@ export function renderSharePage(input: SharePageInput): string {
     '  <noscript class="noscript">本页面需要启用 JavaScript 才能向剧集清单取得这一集的播放源；没有脚本时播放与下载提示仍然保留入口，但不会自动载入影音。</noscript>',
     '</div>',
     renderPlayerScript(playerConfig(input)),
-    '<p><a href="/privacy">隐私与统计设置</a></p>',
     '</body>',
     '</html>'
   ].join('\n');
