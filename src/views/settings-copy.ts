@@ -1,6 +1,7 @@
 import type { ErrorCode } from '../../edge/src/types/api';
 import { PERMANENT_EXPIRES_AT } from '../../edge/src/types/api';
 import { ApiError } from '../core/api/client';
+import { formatBeijingDate } from '../core/time-format';
 import { errorCopy } from './history-view';
 const NETWORK_COPY = '网络不可用：版本检测与卡密核销都需联网，离线期只可验证已存授权。';
 export const ERROR_COPY: Readonly<Record<ErrorCode | 'NETWORK_ERROR' | 'UNEXPECTED_RESPONSE', string>> = {
@@ -20,5 +21,5 @@ export function copyFor(error: unknown): string {
 export function formatExpiry(expiresAt: number, nowSeconds: number): string {
   if (expiresAt === PERMANENT_EXPIRES_AT) return '永久有效';
   if (expiresAt <= nowSeconds) return '已到期，需重新核销';
-  return `${new Date(expiresAt * 1000).toLocaleDateString('zh-CN')} 到期（剩余 ${Math.ceil((expiresAt - nowSeconds) / 86400)} 天）`;
+  return `${formatBeijingDate(expiresAt)} 到期（剩余 ${Math.ceil((expiresAt - nowSeconds) / 86400)} 天）`;
 }

@@ -21,6 +21,7 @@ import { CREDENTIAL_KEYS, DEVICE_ID_PATTERN } from '../storage/credentials';
 import type { CredentialWriter } from '../../views/history-view';
 import type { DeviceIdReader, TierReader } from '../../views/settings-view';
 import type { PreferenceStore } from '../state/theme';
+import { formatBeijingDate } from '../time-format';
 
 export interface OfflineGrant {
   tier: DeviceTier;
@@ -265,6 +266,6 @@ const REJECT_COPY: Readonly<Record<GrantRejectReason, string>> = {
 
 export function grantCopyFor(status: GrantStatus): string {
   if (!status.ok) return `${REJECT_COPY[status.reason]}${OFFLINE_HONEST_BOUNDARY}`;
-  const lifetime = status.grant.expiresAt === PERMANENT_EXPIRES_AT ? '永久' : new Date(status.grant.expiresAt * 1000).toLocaleDateString('zh-CN');
+  const lifetime = status.grant.expiresAt === PERMANENT_EXPIRES_AT ? '永久' : formatBeijingDate(status.grant.expiresAt);
   return `本机授权离线验签通过，档位 ${status.grant.tier}，有效期至 ${lifetime}，密钥标识 ${status.grant.kid}。${OFFLINE_HONEST_BOUNDARY}`;
 }

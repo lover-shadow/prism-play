@@ -1,4 +1,5 @@
 import type { SnapshotState, SyncOutcome } from '../../core/catalog-cache';
+import { formatBeijingDateTime } from '../../core/time-format';
 import { band, button, make, type ViewState } from '../history-view';
 
 export interface CatalogStatusDeps {
@@ -31,7 +32,7 @@ export function createCatalogStatusBand(deps: CatalogStatusDeps) {
     local.dataset.el = 'catalog-local';
     const note = make('p', `pv-state pv-state-${state === 'offline' ? 'error' : state}`, result);
     note.dataset.el = 'catalog-result';
-    const time = make('p', 'pv-note', checkedAt === null ? '检查时间：尚未检查' : `检查时间：${new Date(checkedAt * 1000).toLocaleString('zh-CN')}`);
+    const time = make('p', 'pv-note', checkedAt === null ? '检查时间：尚未检查' : `检查时间：${formatBeijingDateTime(checkedAt)}`);
     time.dataset.el = 'catalog-checked-at';
     if (checkedAt !== null) time.dataset.timestamp = String(checkedAt);
     section.wrap.dataset.state = state;

@@ -10,6 +10,7 @@
 
 import { Capacitor } from '@capacitor/core';
 import { bridgeSource, getBridge } from './native/bridge';
+import { formatBeijingClockMs, formatBeijingDateTimeFull } from './time-format';
 
 export type LogLevel = 'INFO' | 'WARN' | 'ERROR' | 'NET';
 
@@ -27,9 +28,8 @@ let sequence = 0;
 const ringBuffer: LogEntry[] = [];
 
 function nowTimeString(): string {
-  const d = new Date();
-  const pad = (n: number): string => String(n).padStart(2, '0');
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, '0')}`;
+  // R15：日志行内时间戳同样走北京时间口径，与报告生成时间、导出结果三处一致。
+  return formatBeijingClockMs(Date.now());
 }
 
 export function recordLog(level: LogLevel, tag: string, message: string, detail?: unknown): void {
@@ -91,7 +91,7 @@ export const logger = {
       '========================================',
       '《光影Play》移动端运行诊断报告',
       '========================================',
-      `报告生成时间: ${new Date().toLocaleString('zh-CN')}`,
+      `报告生成时间: ${formatBeijingDateTimeFull(Math.floor(Date.now() / 1000))}`,
       `平台环境: ${Capacitor.getPlatform()} (isNative: ${Capacitor.isNativePlatform()})`,
       `宿主桥接源: ${bridgeSource()}`,
       `安全密钥库: ${keystore ? '硬件 Keystore 保护' : '未挂载/Web降级'}`,

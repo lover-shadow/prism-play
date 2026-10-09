@@ -15,6 +15,7 @@ import type { ContentItem, DeviceTier, RelatedResponse } from '../../edge/src/ty
 import { isPrivateSubject, type StorageDomain, type WatchHistoryRow } from '../core/storage/storage-domains';
 import type { FollowingRow, FollowingStore } from '../core/storage/following-store';
 import { isFinished as finishedByHistoryDomain } from '../core/storage/history-store';
+import { formatBeijingDate } from '../core/time-format';
 import type { MergeReport } from '../core/user-sync';
 import './views.css';
 import './history.css';
@@ -129,7 +130,7 @@ function formatClock(totalSeconds: number): string {
 }
 function formatWatchedAt(unixSeconds: number, nowSeconds: number): string {
   const days = Math.floor((nowSeconds - unixSeconds) / 86400);
-  if (days >= 30) return new Date(unixSeconds * 1000).toLocaleDateString('zh-CN');
+  if (days >= 30) return formatBeijingDate(unixSeconds);
   return days < 1 ? '今天' : days === 1 ? '昨天' : `${days} 天前`;
 }
 /** 完播判定：已到末集，且断点距片尾的秒窗复用历史域权威实现（同一常量、同一口径，不在此处复制）。 */
