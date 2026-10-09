@@ -13,7 +13,14 @@
 .prism-player-host__bar { flex: none; display: flex; align-items: center; gap: var(--space-3); min-height: var(--header-height); padding: calc(env(safe-area-inset-top, 0px) + var(--space-1)) var(--space-4) var(--space-1); background: var(--surface-overlay); border-bottom: 1px solid var(--border-subtle); position: sticky; top: 0; z-index: 30; }
 .prism-player-host__exit { min-width: 44px; min-height: 44px; background: none; border: 0; color: var(--fg); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-pill); }
 .prism-player-host__title { font-size: var(--text-sm); font-weight: 600; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.prism-player-host__stage { flex: none; width: 100%; background: var(--player-bg); }
+.prism-player-host__stage { position: relative; flex: none; width: 100%; aspect-ratio: 16 / 9; background: var(--player-bg); }
+/* W1 舞台骨架（渐进详情第一步）：只覆盖媒体区，不遮顶栏与下方详情区；升级为播放器或落错误态即隐藏。
+   cover 可选（卡片上刚见过的公开海报）作模糊氛围底；图标用与旧 loading 同源的 refresh 微光。 */
+.prism-player-host__skeleton { position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; background: var(--player-bg); }
+.prism-player-host__skeleton[hidden] { display: none; }
+.prism-player-host__skeleton-cover { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: blur(28px) brightness(0.6); transform: scale(1.18); }
+.prism-player-host__skeleton-glow { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: var(--radius-pill); border: 1px solid var(--border-subtle); color: var(--accent); animation: prismSkeletonPulse 2.2s infinite ease-in-out; }
+@keyframes prismSkeletonPulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.95; } }
 /* 选集面板的宿主槽位：紧跟舞台之后，非全屏时走正文流（视频下方），浮动态则由 `player.css` 把它摘成 fixed。 */
 .prism-player-host__sheet { flex: none; }
 .prism-season-switcher { padding: var(--space-2); color: var(--fg); }

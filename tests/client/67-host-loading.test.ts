@@ -197,3 +197,48 @@ describe('HP-03 点击立即进入', () => {
     expect(getBackHandlerCountOf('layer')).toBe(base);
   });
 });
+
+describe('W1 渐进详情：骨架先出（PS-AC01 前端半步）', () => {
+  it('传入 candidate：首个 await 前标题与舞台骨架已同步挂出；升级后骨架隐藏、标题以核验值为准', async () => {
+    const gate = deferred();
+    const h = host({ titleGate: gate.promise, detail: detailOf({ title: '核验后的剧名' }) });
+    const opened = h.player.open('c1', undefined, { candidate: { title: '卡片标题', coverUrl: 'https://play.prismos.org/proxy/img/w1' } });
+    const layer = shellOf(h.mount);
+    expect(layer?.dataset.phase).toBe('loading');
+    expect(layer?.querySelector('.prism-player-host__title')?.textContent).toBe('卡片标题');
+    const skeleton = layer?.querySelector<HTMLElement>('.prism-player-host__skeleton');
+    expect(skeleton?.hidden).toBe(false);
+    // 骨架只覆盖媒体区：挂在 stage 内（不是整层遮罩），顶栏与下方详情区不被遮挡
+    expect(skeleton?.parentElement?.classList.contains('prism-player-host__stage')).toBe(true);
+    expect(skeleton?.querySelector('.prism-player-host__skeleton-cover')).not.toBeNull();
+    gate.release();
+    expect(await opened).toBe(true);
+    await settle();
+    expect(layer?.querySelector<HTMLElement>('.prism-player-host__skeleton')?.hidden).toBe(true);
+    expect(layer?.querySelector('.prism-player-host__title')?.textContent).toBe('核验后的剧名');
+    h.player.close();
+  });
+
+  it('未传 candidate：骨架照挂但保持零元信息（防泄露底线不动）', async () => {
+    const gate = deferred();
+    const h = host({ titleGate: gate.promise });
+    const opened = h.player.open('c1'); // 故意不 await：断言的就是"第一个 await 之前"
+    const layer = shellOf(h.mount);
+    expect(layer?.querySelector('.prism-player-host__title')?.textContent).toBe('');
+    expect(layer?.querySelector<HTMLElement>('.prism-player-host__skeleton')?.hidden).toBe(false);
+    gate.release();
+    await opened;
+    h.player.close();
+  });
+
+  it('暖切命中统一事实缓存：关闭后重开同一剧目不再发第二次详情请求', async () => {
+    const h = host({ detail: detailOf() });
+    expect(await h.player.open('c1')).toBe(true);
+    await settle();
+    h.player.close();
+    expect(await h.player.open('c1')).toBe(true);
+    await settle();
+    expect(h.api.title).toHaveBeenCalledTimes(1); // 第二次读统一事实缓存，零网络（PS-AC01 暖切）
+    h.player.close();
+  });
+});

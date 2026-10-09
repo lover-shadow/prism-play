@@ -9,12 +9,26 @@ import type { OrientationPort } from '../core/native/orientation';
 import type { ExitReport } from '../core/user-sync';
 import type { NotificationAction } from '../core/native/capacitor-bridge';
 import type { RuntimeServices } from '../core/runtime-services';
+import type { TitleFactsStore } from '../core/api/title-facts';
 import type { PlayerApi, PrismPlayer } from './prism-player';
 import type { EngineFactory } from './engine-seam';
 import type { ProgressContext } from './progress-reporter';
 
 export interface PlayerHostApi extends PlayerApi {
   related?(titleId: string): Promise<RelatedResponse>;
+}
+
+/** W1 渐进详情：卡片预填仅允许携带卡片已展示的合法公开字段，不伪造分集/线路。 */
+export interface OpenCandidate {
+  title?: string;
+  coverUrl?: string;
+}
+
+export interface OpenOptions {
+  /** 卡片预填（可选）；缺席时首个 await 前仍是零元信息壳。 */
+  candidate?: OpenCandidate;
+  /** 换季切换：复用当前壳层与舞台（内部使用，不作为公开入口语义）。 */
+  retainStage?: boolean;
 }
 
 export interface PlayerHostDeps {
@@ -36,6 +50,8 @@ export interface PlayerHostDeps {
   onClose?(): void;
   /** HP-03：这是"来自卡片的候选标题"，属受保护元信息，只在详情身份核验通过后才允许进 DOM。 */
   titleOf?(): string;
+  /** W1 统一事实缓存（测试注入或跨层共享；缺省由宿主按 api 能力自建）。 */
+  facts?: TitleFactsStore;
   /** 播放内核工厂是公开接缝（默认为 ArtPlayer+hls.js）：真机之外的装配与集成测试由此注入替身。 */
   engine?: EngineFactory;
   /** AC-20 方向端口：Web 自动降级，注入端口验证锁/解时序，真机验证旋转。 */
@@ -49,7 +65,7 @@ export interface PlayerHostDeps {
 }
 
 export interface PlayerHost {
-  open(contentId: string, resume?: WatchHistoryRow): Promise<boolean>;
+  open(contentId: string, resume?: WatchHistoryRow, options?: OpenOptions): Promise<boolean>;
   close(): void;
   /** HP-03：loading 期即为真——"有没有一层挡住首页"与"内核是否已装配"是两件事，不该混为一谈。 */
   isOpen(): boolean;

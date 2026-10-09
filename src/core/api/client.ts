@@ -160,8 +160,17 @@ export class PrismApiClient {
     return this.get(`/api/search/suggestions${queryString({ q })}`);
   }
 
+  /**
+   * W1 统一事实缓存的取数口：返回**原始响应**，形状校验与适配交给消费者
+   * （`core/api/title-facts` 的 `adaptTitleDetail` / `parseTitleManifest`）。
+   * 与 `title()` 同一路径、同一错误语义。
+   */
+  titleRaw(titleId: string, signal?: AbortSignal): Promise<unknown> {
+    return this.request<unknown>(`/api/titles/${encodeURIComponent(titleId)}`, { headers: this.headers(), signal });
+  }
+
   async title(titleId: string, signal?: AbortSignal): Promise<TitleDetail> {
-    const raw = await this.request<unknown>(`/api/titles/${encodeURIComponent(titleId)}`, { headers: this.headers(), signal });
+    const raw = await this.titleRaw(titleId, signal);
     try {
       return adaptTitleDetail(raw, titleId);
     } catch {

@@ -21,6 +21,7 @@ import { applyTheme, readPosterMode, readThemePreference, writePosterMode } from
 import { createAppShell } from './app-shell';
 import { createNotice } from './components/notice';
 import { createPlayerHost } from './player-host';
+import type { OpenCandidate } from './player-host';
 import { createFollowingStore } from './core/storage/following-store';
 import { createRuntimeServices } from './core/runtime-services';
 import { createShareAction } from './core/share';
@@ -153,6 +154,19 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
 
   let homeView: HomeView | null = null;
   const publicLocalItems = () => posters.items(storage.cache.list().filter((entry) => !isPrivateSubject(entry)));
+  /**
+   * W1 渐进详情：打开即显示的卡片预填（仅公开卡片已展示的合法字段）。
+   * 私密内容不预填——即使持权用户从【个人探索】点开也不例外（提前显示没有任何收益，只增加泄露面）；
+   * 查不到（如尚未落缓存的在线结果）就不预填，由骨架屏承担零元信息的首屏反馈。
+   */
+  const candidateFor = (contentId: string): OpenCandidate | undefined => {
+    const item = storage.cache.getItem(contentId);
+    if (item === null || isPrivateSubject(item)) return undefined;
+    return { title: item.title, coverUrl: posters.resolve(item.coverUrl) ?? undefined };
+  };
+  const candidateFromResume = (row: WatchHistoryRow): OpenCandidate => ({
+    title: row.title, coverUrl: posters.resolve(row.cover_url) ?? undefined
+  });
   const searchApi = createLocalSearchApi({ index: searchIndex, localItems: publicLocalItems, remote: client, onOnlineItems: async (items) => {
     await ingestDiscoveries(items);
     void discoverySync.sync(); // Search's successful online supplement can resume the independent log.
@@ -161,7 +175,7 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
     appRoot: app, api: searchApi,
     localItems: publicLocalItems,
     hotWords: () => publicLocalItems().slice(0, HOT_WORD_LIMIT).map((entry) => entry.title),
-    onOpenTitle: (contentId) => void player.open(contentId),
+    onOpenTitle: (contentId) => void player.open(contentId, undefined, { candidate: candidateFor(contentId) }),
     onBrowse: () => void shell.activate('home')
   });
 
@@ -178,7 +192,8 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
         syncCatalog: async () => { const result = await catalog.syncIncremental(); if (result.reason) throw new Error(result.reason); },
         root, headerAccessory: shell.headerAccessory(), posterMode: () => posterMode,
         onPosterModeChange: (mode) => { posterMode = mode; void writePosterMode(prefs, mode); },
-        onOpenTitle: (contentId) => void player.open(contentId), onResume: (row) => void player.open(row.content_id, row),
+        onOpenTitle: (contentId) => void player.open(contentId, undefined, { candidate: candidateFor(contentId) }),
+        onResume: (row) => void player.open(row.content_id, row, { candidate: candidateFromResume(row) }),
         historyPreview: listHistory, onSearch: () => overlay.open(),
         onChannelChange: (channel) => { privateChannel = channel?.id === 'private'; syncSecure(); }
       });
@@ -189,8 +204,8 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
       const view = createHistoryView({
         api: client, root, following,
         history: { available: historyAvailable, list: () => storage.history.listRecent(), clear: async () => void await storage.history.clearHistory() },
-        credentials: identity.credentials, onOpenTitle: (contentId) => void player.open(contentId),
-        onResume: (row) => void player.open(row.content_id, row), pullRemote: () => sync.pull(), now
+        credentials: identity.credentials, onOpenTitle: (contentId) => void player.open(contentId, undefined, { candidate: candidateFor(contentId) }),
+        onResume: (row) => void player.open(row.content_id, row, { candidate: candidateFromResume(row) }), pullRemote: () => sync.pull(), now
       });
       return { mount: () => view.mount(), reload: () => view.reload(), destroy: () => view.destroy() };
     }
@@ -255,7 +270,7 @@ export async function boot(options: BootOptions = {}): Promise<PrismApp | null> 
 
   return {
     shell, sync,
-    openTitle: (contentId, resume) => player.open(contentId, resume),
+    openTitle: (contentId, resume) => player.open(contentId, resume, { candidate: candidateFor(contentId) }),
     destroy() {
       backgroundAbort.abort(); releaseBulletins(); cancelDiscoveryStart(); releaseNotifications(); releaseAppState();
       // Overlay 排在播放器之前拆：它的 Layer handler 必须先于播放器离场摘掉，返回栈才不会串层。

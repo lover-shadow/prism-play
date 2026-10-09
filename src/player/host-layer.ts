@@ -19,6 +19,11 @@ export interface HostLayer {
   stage: HTMLElement;
   sheet: HTMLElement;
   showState(kind: OverlayState): void;
+  /**
+   * W1 渐进详情：首个 await 前挂出壳与舞台骨架（取代旧的整层 loading 遮罩）。
+   * `candidate` 仅允许携带卡片已展示的公开字段（title/coverUrl）；未提供时保持零元信息。
+   */
+  showSkeleton(candidate?: { title?: string; coverUrl?: string }): void;
   /** 重试出口由宿主接线（本模块不知道要重开哪一部剧），且一个实例只允许挂一条监听。 */
   onRetry(action: (() => void) | null): void;
   /** 详情身份核验通过后才能调用：这一刻才允许把标题写进层里。 */
@@ -64,6 +69,13 @@ export function createHostLayer(deps: { mount: HTMLElement; onClose(): void }): 
   bar.append(exit, title);
   const stage = document.createElement('div');
   stage.className = 'prism-player-host__stage';
+  // W1 舞台骨架：只在舞台（媒体区）内呈现，不遮挡顶栏与下方详情区；错误态与升级后即隐藏。
+  const skeleton = document.createElement('div');
+  skeleton.className = 'prism-player-host__skeleton';
+  skeleton.dataset.el = 'host-skeleton';
+  skeleton.setAttribute('aria-hidden', 'true');
+  skeleton.hidden = true;
+  stage.append(skeleton);
   // 选集面板的正文槽位排在舞台之后：非全屏即视频下方，不覆盖画面（R26-05）。
   const sheet = document.createElement('div');
   sheet.className = 'prism-player-host__sheet';
@@ -90,6 +102,7 @@ export function createHostLayer(deps: { mount: HTMLElement; onClose(): void }): 
     stage,
     sheet,
     showState(kind: OverlayState) {
+      skeleton.hidden = true; // 错误态不需要骨架（预填标题同时清空，防未核验身份泄露）
       title.textContent = '';
       shell.dataset.phase = kind === 'loading' ? 'loading' : 'error';
       shell.setAttribute('aria-busy', kind === 'loading' ? 'true' : 'false');
@@ -102,6 +115,29 @@ export function createHostLayer(deps: { mount: HTMLElement; onClose(): void }): 
       state.retryButton.hidden = kind === 'loading';
       back.hidden = false;
     },
+    showSkeleton(candidate) {
+      // 换季复用壳层时 `close(retainStage)` 会清空 stage——骨架是 stage 的子节点，同样被清掉，
+      // 因此这里必须保证它仍在舞台内（幂等的恢复挂载），否则换季加载期就没有首屏骨架。
+      if (skeleton.parentElement !== stage) stage.append(skeleton);
+      title.textContent = candidate?.title ?? '';
+      shell.dataset.phase = 'loading';
+      shell.setAttribute('aria-busy', 'true');
+      shell.setAttribute('aria-label', '正在载入');
+      skeleton.replaceChildren();
+      const coverUrl = candidate?.coverUrl;
+      if (typeof coverUrl === 'string' && coverUrl !== '') {
+        const cover = document.createElement('img');
+        cover.className = 'prism-player-host__skeleton-cover';
+        cover.src = coverUrl;
+        cover.alt = '';
+        skeleton.append(cover);
+      }
+      const glow = document.createElement('span');
+      glow.className = 'prism-player-host__skeleton-glow';
+      glow.innerHTML = icon('refresh', { size: 24 });
+      skeleton.append(glow);
+      skeleton.hidden = false;
+    },
     onRetry(action) {
       retryAction = action;
     },
@@ -110,6 +146,7 @@ export function createHostLayer(deps: { mount: HTMLElement; onClose(): void }): 
       shell.setAttribute('aria-busy', 'false');
       shell.setAttribute('aria-label', '播放');
       title.textContent = text;
+      skeleton.hidden = true;
       state.destroy(); // 只摘状态节点，shell / stage / sheet 原样复用
     },
     destroy() {

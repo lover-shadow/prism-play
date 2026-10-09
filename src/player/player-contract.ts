@@ -7,6 +7,7 @@
 import type { EpisodeItem, PlaybackInfo, TitleDetail, TitleManifest } from '../../edge/src/types/api';
 import type { PrismNativeBridge } from '../core/native/bridge';
 import type { WatchHistoryRow } from '../core/storage/storage-domains';
+import type { TitleFactsStore } from '../core/api/title-facts';
 import type { AspectOrientation } from './aspect';
 import type { EngineFactory } from './engine-seam';
 import type { GestureBounds } from './gestures';
@@ -20,6 +21,8 @@ export type PlayerPhase = 'idle' | 'loading' | 'ready' | 'ended' | 'error' | 'de
 /** Missing title manifests fall back to the existing playback endpoint. */
 export interface PlayerApi {
   playback(episodeId: number): Promise<PlaybackInfo>; title(titleId: string, signal?: AbortSignal): Promise<TitleDetail>; titleManifest?(workId: string): Promise<TitleManifest>;
+  /** W1 统一事实缓存的取数口（原始响应；形状与适配由消费者负责）。 */
+  titleRaw?(titleId: string, signal?: AbortSignal): Promise<unknown>;
   nativePlayback?(workId: string, episodeNumber: number, lineIndex: number): Promise<{
     workId: string; episodeNumber: number; lineIndex: number; native: { kind: 's1-cenc'; videoId: string }; checkedAt: number;
   }>;
@@ -32,6 +35,8 @@ export interface PrismPlayerOptions {
   onError?: (failure: PlayerFailure) => void;
   /** Pre-loaded detail avoids a second round trip; otherwise the player fetches `titleId` itself. */
   detail?: TitleDetail; allowShare?: boolean; onShare?: (episode: EpisodeItem) => void;
+  /** W1 统一事实缓存（宿主创建并传入）：清单层从同一份原始响应解析，免第二次网络。 */
+  facts?: TitleFactsStore;
   /** AC-10 permission flag: background-audio persistence is never enabled without it. */
   allowBackgroundAudio?: boolean;
   /** 选集面板宿主（R26-05）：inline 态挂进视频下方的正文槽位，浮动态由 CSS 摘成 fixed；模式现读不自持。 */

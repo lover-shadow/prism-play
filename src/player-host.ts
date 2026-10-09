@@ -15,11 +15,12 @@ import { createSponsorNudge } from './views/sponsor-nudge';
 import { isPrivateSubject } from './core/storage/storage-domains';
 import { createHostLayer, hostErrorFor, type HostLayer } from './player/host-layer';
 import type { OverlayState } from './player/hud';
-import type { PlayerHost, PlayerHostDeps } from './player/host-contract';
+import type { OpenOptions, PlayerHost, PlayerHostDeps } from './player/host-contract';
+import { createTitleFactsStore, type TitleFactsStore } from './core/api/title-facts';
 import './player/player-host.css';
 import { createSeasonSwitcher } from './player/season-switcher';
 
-export type { PlayerHost, PlayerHostApi, PlayerHostDeps } from './player/host-contract';
+export type { OpenCandidate, OpenOptions, PlayerHost, PlayerHostApi, PlayerHostDeps } from './player/host-contract';
 
 /** 历史优先，缺集回第一集；端云合并后 ID/集数冲突时优先按集数匹配，避免旧 ID 续错集。 */
 function episodeFor(detail: TitleDetail, resume?: WatchHistoryRow): { episode: EpisodeItem; seconds: number } {
@@ -33,6 +34,16 @@ function episodeFor(detail: TitleDetail, resume?: WatchHistoryRow): { episode: E
 }
 
 export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
+  /**
+   * W1 统一事实缓存：详情与线路清单读取同一份原始响应，暖切不再重复全量请求。
+   * 注入优先（测试与跨层共享）；缺省按 api 能力自建——`titleRaw` 是最优取数口，
+   * `titleManifest` 直通为旧式装配置保留，`fetchDetail` 兜底保证任何退化装配仍可用。
+   */
+  const facts: TitleFactsStore = deps.facts ?? createTitleFactsStore({
+    fetchRaw: typeof deps.api.titleRaw === 'function' ? (id, signal) => deps.api.titleRaw!(id, signal) : undefined,
+    fetchDetail: (id, signal) => deps.api.title(id, signal),
+    fetchManifest: typeof deps.api.titleManifest === 'function' ? (id) => deps.api.titleManifest!(id) : undefined
+  });
   /** 当前这一层（loading / error / ready 三态同一条记录）：`layer !== null` 就是"界面被挡住"的真相。 */
   let layer: HostLayer | null = null;
   let player: PrismPlayer | null = null;
@@ -94,15 +105,15 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
     if (layer !== host) host.destroy();
     return false;
   }
-  async function open(contentId: string, resume?: WatchHistoryRow, retainStage = false): Promise<boolean> {
-    const retained = retainStage ? layer : null;
+  async function open(contentId: string, resume?: WatchHistoryRow, options: OpenOptions = {}): Promise<boolean> {
+    const retained = options.retainStage === true ? layer : null;
     close(retained !== null);
     const mine = opening, request = new AbortController();
     openingRequest = request;
-    // §3.1：创建与挂载都发生在第一个 await 之前——"点了没反应"就是旧实现的用户面缺陷本体。
+    // §3.1：创建与挂载都发生在第一个 await 之前；W1 起同步挂出舞台骨架与卡片预填（仅公开字段）。
     const host = retained ?? createHostLayer({ mount: deps.mount, onClose: () => close() });
     layer = host;
-    host.showState('loading');
+    host.showSkeleton(options.candidate);
     keyup = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         if (detailBodyRef?.dismissOverlay() || player?.dismissOverlay()) return;
@@ -112,13 +123,14 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
     document.addEventListener('keydown', keyup);
     unregisterBack = registerBackHandler(consumeBack);
     const retry = (): void => { void open(contentId, resume); };
-    // 先取详情：私密与不存在都靠 `api.title` 的 404 收敛，宿主不猜测、不预筛。
+    // 先取详情：私密与不存在都靠统一事实缓存（底层仍是 `api.title` 路径）的 404 收敛，宿主不猜测、不预筛。
     let loaded: TitleDetail;
     try {
       await deps.runtime?.refresh();
       // 每一个 await 之后都先核代次：偏好读取一慢就被取消的话，不该再把那次详情请求发出去。
       if (mine !== opening || layer !== host) return discard(host);
-      loaded = await deps.api.title(contentId, request.signal);
+      const entry = await facts.loadDetail(contentId, { signal: request.signal });
+      loaded = entry.detail;
     } catch (error) {
       return refuse(host, mine, retry, hostErrorFor(error));
     }
@@ -141,6 +153,7 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
       api: deps.api,
       titleId: loaded.item.id,
       detail: loaded,
+      facts,
       onProgress: deps.onProgress,
       onError: (event) => { if (event.kind === 'media') watchVideo?.reset('error'); failure(event); },
       playbackPreferences: deps.runtime?.playbackPreferences ?? deps.playbackPreferences,
@@ -198,10 +211,10 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
     detailBodyRef = detailBody;
     const bindSeasons = (): void => {
       const items = deps.seriesItems?.() ?? [];
-      const s = createSeasonSwitcher(loaded.item, items, (id) => { void open(id, undefined, true); });
+      const s = createSeasonSwitcher(loaded.item, items, (id) => { void open(id, undefined, { retainStage: true }); });
       if (s) {
         detailBody.attachSeasonSwitcher(s);
-        const ds = createSeasonSwitcher(loaded.item, items, (id) => { void open(id, undefined, true); });
+        const ds = createSeasonSwitcher(loaded.item, items, (id) => { void open(id, undefined, { retainStage: true }); });
         if (ds) {
           host.sheet.querySelector('.prism-drawer [data-prism-ui="season-switcher"]')?.remove();
           host.sheet.querySelector('.prism-drawer')?.prepend(ds);

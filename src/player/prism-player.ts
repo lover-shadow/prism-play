@@ -100,8 +100,8 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
     blocked: () => drawer.isOpen() || rate.isOpen() || (options.overlayOpen?.() ?? false)
   });
   const sleep = createSleepTimer(clock, { getVolume: () => engine?.volume() ?? savedVolume, setVolume: (v) => { savedVolume = v; engine?.setVolume(v); }, stop: () => releaseHandle('sleep') });
-  /** 剧集清单（§2.2）的进程内唯一缓存：装成"当前生效的那只"，投屏侧因此不必再造一份 api 客户端重拉清单。 */
-  const manifests = installTitleManifestStore(createTitleManifestStore({ api }));
+  /** 剧集清单的进程内唯一缓存（投屏侧复用）；W1 起优先经统一事实缓存读取同一份原始响应。 */
+  const manifests = installTitleManifestStore(createTitleManifestStore(options.facts !== undefined ? { api, facts: options.facts } : { api }));
   const lines = createLineFallback({ workId: () => options.titleId, privacy: () => ({ isPrivate: detail?.item.isPrivate, channelId: detail?.item.channelId }) });
   const runner = createLineRunner({ api, manifests, lines, engine: () => engine, clock, workId: () => options.titleId, episodeNumber, localEpisodeIds: () => usesLocalEpisodeIds(detail) });
   const channels = createValueChannels({ bridge, hud, engine: () => engine, seed: (channel, value) => gesture.seed(channel, value) });

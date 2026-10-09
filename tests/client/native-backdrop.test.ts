@@ -41,10 +41,27 @@ describe('原生播放与全屏海报底片层叠样式（AC-R07）', () => {
     expect(computed.visibility).toBe('hidden');
   });
 
+  it('原生激活 + 暂停（无 is-playing）：底片仍 hidden——“原生画面不得被任何 WebView 层遮挡”不因播放状态回退', () => {
+    const backdrop = setupDom(true, true, false);
+    expect(window.getComputedStyle(backdrop).visibility).toBe('hidden');
+  });
+
+  it('原生激活 + 非全屏（详情台）：底片同样 hidden（规则不依赖全屏态）', () => {
+    const backdrop = setupDom(true, false, true);
+    expect(window.getComputedStyle(backdrop).visibility).toBe('hidden');
+  });
+
   it('非原生网页播放时，全屏且播放中的海报底片为 visible 充当留白背景', () => {
     const backdrop = setupDom(false, true, true);
     const computed = window.getComputedStyle(backdrop);
     expect(computed.visibility).toBe('visible');
     expect(computed.opacity).toBe('1');
+  });
+
+  it('非原生 + 非全屏 + 播放中：底片淡出（opacity 0 / hidden），画面不被海报覆盖', () => {
+    const backdrop = setupDom(false, false, true);
+    const computed = window.getComputedStyle(backdrop);
+    expect(computed.opacity).toBe('0');
+    expect(computed.visibility).toBe('hidden');
   });
 });

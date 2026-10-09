@@ -1,26 +1,30 @@
 /**
  * 剧集清单（§2.2 `/api/titles/{workId}`）的惰性拉取与两级缓存（SPEC-APP-REFACTOR A-7.2）。
  *
- * 架构定案：视频流不再经云端 `/proxy/media/` 转发（打爆 Workers 配额且上游会封 Cloudflare IP），
- * 上游地址在打开剧目时才拿到，所以"清单"是播放地址的唯一入口，也是私密性最敏感的一份数据。三条纪律：
+ * W1 起的取数纪律：**优先生效的 `facts` 注入**（统一事实缓存 `core/api/title-facts`）——
+ * 宿主先读过详情时，清单直接从同一份原始响应解析，不再发第二次网络，磁盘也统一归 facts 管；
+ * 未注入 `facts` 的装配（旧测试、Web 降级）保持本文件的原两级缓存实现，行为逐条不变。
  *
+ * 原三条纪律（无 facts 的降级路径继续适用）：
  * 1. **私密清单永不落盘**。落盘动作只发生在 `persist()` 这一处，它在任何 I/O 之前依次过
  *    `isPrivateSubject()`（读载荷，不信调用方自述）与 `assertWritable()`（存储闸门，同一口径的第二把锁）；
- *    私密剧目仍会进**内存**缓存——本进程内的播放与切线要靠它，进程一死即散，AC-02-2 的"开启状态严禁持久化"
- *    与 AGENTS.md 的"私密零落盘"到此都是可证的，而不是靠调用方自觉。
+ *    私密剧目仍会进**内存**缓存——本进程内的播放与切线要靠它，进程一死即散。
  * 2. **旧云端不白屏**。Track 2 尚未切换的域名下 `/api/titles/{id}` 回来的仍是旧 `TitleDetail`，
  *    `parseTitleManifest` 认不下它便返回 null，调用方（播放器）据此退回 `/api/episodes/{id}/playback` 代理链。
  * 3. **一次打开只拉一次**。内存命中 + 并发去重（同一 workId 的在途请求共享同一个 Promise），
  *    切集不再回网络；清单过期（TTL）或 `force` 才重新拉。
  *
- * 落盘键位于公开缓存域的 `cache/` 命名空间内，因此【清理缓存】与备份排除规则天然覆盖它，
- * 本模块不自建第二个存储入口（`src/core/storage/**` 属别的施工包，这里只消费其既有接口与闸门）。
+ * 形状校验与口径工具在 `title-manifest-parse.ts`（§10 红线拆分）；此处保留同名导出保持导入面稳定。
  */
 import type { PlaybackLine, TitleManifest } from '../../edge/src/types/api';
+import type { TitleFactsStore } from '../core/api/title-facts';
 import { logger } from '../core/diagnostics';
 import { createCacheDisk } from '../core/native/platform-adapters';
 import type { CacheDisk } from '../core/storage/public-cache';
-import { assertWritable, isPrivateSubject } from '../core/storage/storage-domains';
+import { assertWritable } from '../core/storage/storage-domains';
+import { isPrivateManifest, parseTitleManifest } from './title-manifest-parse';
+
+export { HLS_MIME_TYPE, MP4_MIME_TYPE, isPrivateManifest, mimeTypeOfMediaUrl, parseTitleManifest } from './title-manifest-parse';
 
 /** 清单文件与索引的命名空间前缀：`cache/` 之内才谈得上被【清理缓存】枚举到。 */
 export const TITLE_MANIFEST_KEY_PREFIX = 'cache/titles/';
@@ -30,9 +34,6 @@ export const TITLE_MANIFEST_MEMORY_LIMIT = 12;
 export const TITLE_MANIFEST_DISK_LIMIT = 24;
 /** 上游线路会轮换，清单再省请求也不能当永久事实；六小时后视为过期。 */
 export const TITLE_MANIFEST_TTL_SECONDS = 6 * 3_600;
-/** 平台侧 HLS 清单的声明口径，与 `art-engine.ts` 的 `customType.m3u8` 分流一致。 */
-export const HLS_MIME_TYPE = 'application/vnd.m3u8+playlist';
-export const MP4_MIME_TYPE = 'video/mp4';
 
 /** 播放器与投屏共用的一只门：只有 `titleManifest` 在场时才谈直连，缺席即回退代理。 */
 export interface TitleManifestSource {
@@ -41,7 +42,9 @@ export interface TitleManifestSource {
 
 export interface TitleManifestStoreDeps {
   api: TitleManifestSource;
-  /** 显式传 null = 只要内存缓存（Web 构建与单测）；不传 = 按需解析原生缓存盘。 */
+  /** 统一事实缓存（W1 起的生产装配路径）：注入后缓存/磁盘/网络全归它，本文件旧实现不执行。 */
+  facts?: TitleFactsStore;
+  /** 显式传 null = 只要内存缓存（Web 构建与单测）；不传 = 按需解析原生缓存盘。仅无 facts 时生效。 */
   disk?: CacheDisk | null;
   nowSeconds?: () => number;
   memoryLimit?: number;
@@ -63,74 +66,23 @@ interface CachedManifest { manifest: TitleManifest; at: number }
 const isSafeKeyPart = (value: string): boolean =>
   typeof value === 'string' && value.length > 0 && value.length <= 120 && /^[A-Za-z0-9._-]+$/.test(value) && !value.startsWith('.') && !value.includes('..');
 
-/**
- * 形状校验而不是类型断言：磁盘上的文件与云端返回都可能来自旧版本，认不下就整体当作"没有清单"，
- * 绝不半信半疑地把半份线路交给播放器——那会让回退链永远走不到。
- */
-export function parseTitleManifest(value: unknown): TitleManifest | null {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
-  const raw = value as Record<string, unknown>;
-  if (typeof raw.workId !== 'string' || raw.workId === '') return null;
-  if (typeof raw.title !== 'string') return null;
-  if (raw.isPrivate !== true && raw.isPrivate !== false) return null;
-  if (!Array.isArray(raw.episodes)) return null;
-  const episodes: TitleManifest['episodes'] = [];
-  for (const entry of raw.episodes) {
-    if (entry === null || typeof entry !== 'object') return null;
-    const episode = entry as Record<string, unknown>;
-    if (!Number.isInteger(episode.episodeNumber) || (episode.episodeNumber as number) < 1) return null;
-    if (!Array.isArray(episode.lines)) return null;
-    const lines: PlaybackLine[] = [];
-    for (const candidate of episode.lines) {
-      if (candidate === null || typeof candidate !== 'object') return null;
-      const line = candidate as Record<string, unknown>;
-      if (typeof line.providerId !== 'string' || line.providerId === '') return null;
-      if (line.mediaUrl !== undefined && (typeof line.mediaUrl !== 'string' || !/^https?:\/\//i.test(line.mediaUrl))) return null;
-      if ('native' in line) {
-        const native = line.native as Record<string, unknown> | null;
-        if (line.providerId !== 'provider_s1' || !native || typeof native !== 'object' || Array.isArray(native) ||
-          Object.keys(native).length !== 2 || Object.keys(native).some((key) => key !== 'kind' && key !== 'videoId') ||
-          native.kind !== 's1-cenc' || typeof native.videoId !== 'string' || !/^\d{1,32}$/.test(native.videoId)) return null;
-        lines.push({ providerId: line.providerId, ...(line.mediaUrl === undefined ? {} : { mediaUrl: line.mediaUrl as string }),
-          native: { kind: 's1-cenc', videoId: native.videoId } });
-      } else {
-        if (typeof line.mediaUrl !== 'string') return null;
-        lines.push({ providerId: line.providerId, mediaUrl: line.mediaUrl });
-      }
-    }
-    episodes.push({
-      episodeNumber: episode.episodeNumber as number,
-      title: typeof episode.title === 'string' ? episode.title : undefined,
-      durationSeconds: Number.isFinite(episode.durationSeconds) ? (episode.durationSeconds as number) : undefined,
-      lines
-    });
-  }
-  return {
-    workId: raw.workId,
-    title: raw.title,
-    channelId: typeof raw.channelId === 'string' ? (raw.channelId as TitleManifest['channelId']) : 'drama',
-    isPrivate: raw.isPrivate === true,
-    episodes,
-    generatedAt: Number.isFinite(raw.generatedAt) ? (raw.generatedAt as number) : 0
-  };
-}
-
-/** 私密判定只读载荷本身：清单若自称公开却挂在 private 频道，仍按私密处置（`isPrivateSubject` 唯一口径）。 */
-export function isPrivateManifest(manifest: TitleManifest): boolean {
-  return isPrivateSubject({ isPrivate: manifest.isPrivate, channelId: manifest.channelId, contentId: manifest.workId });
-}
-
-/** 上游地址没有独立的 MIME 字段，只有后缀可依据；非 mp4 一律按 HLS 清单解析（与分享页同一口径）。 */
-export function mimeTypeOfMediaUrl(url: string): string {
-  const path = url.split('#')[0].split('?')[0].toLowerCase();
-  return path.endsWith('.mp4') || path.endsWith('.m4v') ? MP4_MIME_TYPE : HLS_MIME_TYPE;
-}
-
 function manifestKey(workId: string): string {
   return `${TITLE_MANIFEST_KEY_PREFIX}${workId}.json`;
 }
 
+/** facts 直连版（W1 装配路径）：缓存/磁盘/网络全部委托统一事实缓存，本层只剩播放器要的接口形状。 */
+function createFactsBackedStore(facts: TitleFactsStore): TitleManifestStore {
+  return {
+    load: (workId, options) => facts.loadManifest(workId, options),
+    linesFor: async (workId, episodeNumber) =>
+      (await facts.loadManifest(workId))?.episodes.find((entry) => entry.episodeNumber === episodeNumber)?.lines ?? [],
+    cached: (workId) => facts.cachedManifest(workId),
+    size: () => facts.size()
+  };
+}
+
 export function createTitleManifestStore(deps: TitleManifestStoreDeps): TitleManifestStore {
+  if (deps.facts !== undefined) return createFactsBackedStore(deps.facts);
   const memoryLimit = deps.memoryLimit ?? TITLE_MANIFEST_MEMORY_LIMIT;
   const diskLimit = deps.diskLimit ?? TITLE_MANIFEST_DISK_LIMIT;
   const ttl = deps.ttlSeconds ?? TITLE_MANIFEST_TTL_SECONDS;

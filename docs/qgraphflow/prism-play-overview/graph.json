@@ -4,7 +4,7 @@
       "meta": {
         "title": "光影Play · 系统分工",
         "subtitle": "先看谁负责什么：本机目录浏览、云端调度与按需发现、加密线路由手机原生内核直连。点击卡片查看说明与依据。",
-        "sourceRef": "prism-play@0d78bc0 (working-tree 2026-10-09, v2.6.7 + 广告清单清洗)",
+        "sourceRef": "prism-play@working-tree-2026-10-10 (v2.6.7 + W0/W1)",
         "scope": "当前代码的主要产品链路；不是线上运行证明",
         "diagramType": "architecture",
         "locale": "zh-CN"
@@ -65,7 +65,7 @@
           ],
           "source": {
             "file": "src/main.ts",
-            "lineStart": 144,
+            "lineStart": 145,
             "lineEnd": 156
           },
           "position": {
@@ -368,8 +368,8 @@
           ],
           "source": {
             "file": "src/player/host-layer.ts",
-            "lineStart": 32,
-            "lineEnd": 38
+            "lineStart": 37,
+            "lineEnd": 42
           },
           "position": {
             "x": 1212,
@@ -1215,8 +1215,8 @@
           "module": "浏览发现",
           "source": {
             "file": "src/player-host.ts",
-            "lineStart": 96,
-            "lineEnd": 103
+            "lineStart": 108,
+            "lineEnd": 110
           },
           "position": {
             "x": 957.5,
@@ -1237,8 +1237,8 @@
           ],
           "source": {
             "file": "src/player-host.ts",
-            "lineStart": 100,
-            "lineEnd": 103
+            "lineStart": 113,
+            "lineEnd": 116
           },
           "position": {
             "x": 955.5,
@@ -1255,13 +1255,13 @@
           "kind": "input",
           "module": "云端内容",
           "facts": [
-            "私密与不存在都靠同一份 404 收敛，宿主不猜测、不预筛",
+            "私密与不存在都靠统一事实缓存的 404 收敛，宿主不猜测、不预筛",
             "被退出或切剧替代时取消旧请求与退避"
           ],
           "source": {
             "file": "src/player-host.ts",
-            "lineStart": 114,
-            "lineEnd": 120
+            "lineStart": 127,
+            "lineEnd": 133
           },
           "position": {
             "x": 957.5,
@@ -1279,8 +1279,8 @@
           "module": "观看播放",
           "source": {
             "file": "src/player-host.ts",
-            "lineStart": 124,
-            "lineEnd": 126
+            "lineStart": 134,
+            "lineEnd": 137
           },
           "position": {
             "x": 1113,
@@ -1302,8 +1302,8 @@
           ],
           "source": {
             "file": "src/player-host.ts",
-            "lineStart": 25,
-            "lineEnd": 32
+            "lineStart": 26,
+            "lineEnd": 34
           },
           "position": {
             "x": 310,
@@ -1544,8 +1544,8 @@
           ],
           "source": {
             "file": "src/player/host-layer.ts",
-            "lineStart": 32,
-            "lineEnd": 38
+            "lineStart": 37,
+            "lineEnd": 42
           },
           "position": {
             "x": 106.5,
@@ -2140,8 +2140,8 @@
           ],
           "source": {
             "file": "src/player-host.ts",
-            "lineStart": 96,
-            "lineEnd": 142
+            "lineStart": 108,
+            "lineEnd": 141
           },
           "size": {
             "width": 166,
