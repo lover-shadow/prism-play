@@ -8,6 +8,10 @@
 
 - **执行主体**：流光逸影（Master 战略定调与实测验收）& MVP开发专家团（净室切片萃取、门面重塑与公域发布）
 - **触发**：基于宣传海报 (`poster-template.html`) 信任增强诉求，决定借势核心资产 `github.com/AIOS-Lab` 释放纯净播放内核，建立技术背书图腾；同时规避版权与平台连坐风险，实行严格单向防火墙策略。
+- **后续追加批次（同日）**：
+  1. **生产官网信任徽章与 Cookie 合规化**：`play.prismos.org` 首页 Hero 区挂载 3 连 Trust Badges、下载页与页脚标注 `AIOS-Lab/prism-play-core (Apache-2.0)` 开源核心；将缩在角落的裸隐私链接升级为底部毛玻璃 Cookie 悬浮横幅（醒目文案 + 原生表单「同意统计」入口），零脚本纯静态合规；
+  2. **Cookie 同意 403 根因修复**：真实用户实测发现「同意统计」被误杀 403，根因为 `handleAnalyticsConsent` 的 `Sec-Fetch-Site` 校验仅放行 `same-origin`，漏掉浏览器经协议升级/重定向后如实上报的 `same-site`；修复保持 Origin 精确等值校验不变、放行集合扩展为双值，并顺带把 FORBIDDEN 文案改为 DNT/GPC 可行动提示；测试矩阵新增 `same-site` 放行与 `cross-site`/`none` 拒绝用例；
+  3. **部署与验证**：全量 170 套 / 1,817 项测试全绿，P0 扫描 528 文件与 Gate G0 通过；生产 Worker 版本 `bd74024f-4a56-4bac-aa09-6b934c165e2b` 上线，curl 实测 `same-origin`/`same-site` 均 200 下发 Cookie、`cross-site` 仍 403；主工程提交 `22b6b6b` 同步推送远程。
 - **核心成果与交付总账**：
   1. **独立净室工程萃取 (`D:\DEV\prism-play-core`)**：
      - 彻底剥离云端抓取、D1 数据库与商业私有接口，保留 ArtPlayer 5.4 + Hls.js 双引擎调度、移动端手势 HUD、选集滑轨与 Design Tokens；
