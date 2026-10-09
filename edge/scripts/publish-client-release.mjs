@@ -16,12 +16,18 @@ function runTool(command, args) {
   if (result.error || result.status !== 0) throw new Error(`APK inspection failed: ${result.error?.message ?? result.stderr}`);
   return result.stdout;
 }
+/** aapt badging 输出 → 版本元数据；包名或 probe 标记不符一律拒绝（AC-OPT-12 的实际元数据来源）。 */
+export function parseAaptBadging(badging) {
+  const info = /package: name='([^']+)' versionCode='(\d+)' versionName='([^']+)'/.exec(badging);
+  if (!info || info[1] !== 'org.prismos.play' || info[3].includes('probe')) throw new Error('APK package or probe identity mismatch');
+  return { versionCode: Number(info[2]), versionName: info[3] };
+}
+
 export function inspectApk(apkPath, options = {}) {
   const buildTools = options.buildTools ?? path.join(TOOLS, 'sdk/build-tools/35.0.0');
   const aapt = path.join(buildTools, process.platform === 'win32' ? 'aapt.exe' : 'aapt');
   const badging = runTool(aapt, ['dump', 'badging', path.resolve(apkPath)]);
-  const info = /package: name='([^']+)' versionCode='(\d+)' versionName='([^']+)'/.exec(badging);
-  if (!info || info[1] !== 'org.prismos.play' || info[3].includes('probe')) throw new Error('APK package or probe identity mismatch');
+  const { versionCode, versionName } = parseAaptBadging(badging);
   const java = options.java ?? path.join(TOOLS, 'jdk-21.0.12.1+1/bin', process.platform === 'win32' ? 'java.exe' : 'java');
   const cert = runTool(java, ['-jar', path.join(buildTools, 'lib/apksigner.jar'), 'verify', '--print-certs', path.resolve(apkPath)]);
   const signatures = [...cert.matchAll(/Signer #\d+ certificate SHA-256 digest: ([0-9a-f]+)/g)].map((m) => m[1]);
@@ -29,7 +35,7 @@ export function inspectApk(apkPath, options = {}) {
   const seed = JSON.parse(runTool(options.python ?? 'python', ['-c',
     'import json,sys,zipfile; z=zipfile.ZipFile(sys.argv[1]); b=json.loads(z.read("assets/public/seed/catalog-bundle.json")); print(json.dumps({"revision":b["revision"],"items":len(b["items"]),"private":any(i.get("isPrivate") is not False or i.get("channelId") not in ["drama","movie","anime","documentary"] for i in b["items"])}))', path.resolve(apkPath)]));
   if (!Number.isSafeInteger(seed.revision) || seed.revision < 1 || seed.items < 1 || seed.private) throw new Error('APK public seed invalid');
-  return { versionCode: Number(info[2]), versionName: info[3], signature: signatures[0], seed };
+  return { versionCode, versionName, signature: signatures[0], seed };
 }
 
 export function calculateApkChecksum(filePath) {
@@ -61,7 +67,8 @@ export function runPreflight(apkPath, options = {}) {
   if (typeof apkPath !== 'string' || !fs.existsSync(apkPath)) throw new Error('Specify an existing APK file path');
   const fileName = path.basename(apkPath);
   if (fileName.includes('.probe')) throw new Error('正式发布包严禁包含 .probe 调试标记');
-  const info = inspectApk(apkPath, options);
+  // 解析器可注入（隔离夹具/测试）；默认使用本机 Android 工具链解析真实 APK。
+  const info = (options.inspect ?? inspectApk)(apkPath, options);
   if (options.versionCode !== undefined && options.versionCode !== info.versionCode) throw new Error('Expected versionCode does not match APK');
   if (options.versionName !== undefined && options.versionName !== info.versionName) throw new Error('Expected versionName does not match APK');
   if (options.previousVersionCode !== undefined && info.versionCode <= options.previousVersionCode) throw new Error('versionCode must increase for promotion');
