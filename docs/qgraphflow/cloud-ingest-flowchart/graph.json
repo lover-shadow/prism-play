@@ -1,0 +1,772 @@
+{
+  "meta": {
+    "title": "云端源内容获取与渐进摄入流程",
+    "subtitle": "从定时巡检/被动唤醒到多阶取流、首集准入、分布式租约与不可变事实包发布",
+    "sourceRef": "edge/src (working-tree 2026-10-09, v2.7.0 架构)",
+    "scope": "云端边缘内容获取、协议解析、防封调度与渐进式资产沉淀全链路",
+    "diagramType": "flowchart",
+    "locale": "zh-CN",
+    "notes": [
+      "首集准入破局：首集有效即可发布，彻底废除全剧一票否决",
+      "多阶协议穿透：Tier 2 模拟 Android 原生协议突破 Web 试看 3 集截流",
+      "分布式并发锁：D1 租约 300 秒独占控制，防止多边缘实例并发打爆上游",
+      "内容寻址存证：私有 R2 以 SHA-256 哈希命名存储不可变事实包",
+      "滑动窗口切片：未完结剧目以 8 集/批次断点续传异步补全"
+    ]
+  },
+  "layout": {
+    "primaryPath": [
+      "start",
+      "switch_check",
+      "acquire_lease",
+      "lease_ok",
+      "safe_transport",
+      "tiered_resolve",
+      "admission_check",
+      "persist_r2",
+      "commit_d1",
+      "all_episodes_done",
+      "publish_success"
+    ],
+    "direction": "down",
+    "version": "templates-v4-clearance-compact-elkjs-0.11.0",
+    "strategy": "template-workflow-spine-1"
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "label": "源内容获取触发",
+      "kind": "start",
+      "module": "触发调度",
+      "subtitle": "定时巡检或被动唤醒",
+      "facts": [
+        "Cron 定时任务每 12 小时（UTC 04:00/16:00）全网巡检追新",
+        "用户点开连载中剧目通过 ctx.waitUntil 被动唤醒轻量刷新"
+      ],
+      "source": {
+        "file": "edge/src/index.ts",
+        "lineStart": 161,
+        "lineEnd": 176
+      },
+      "size": {
+        "width": 240,
+        "height": 72
+      },
+      "position": {
+        "x": 219.5,
+        "y": 172
+      }
+    },
+    {
+      "id": "switch_check",
+      "label": "发现与采集特性已开启？",
+      "kind": "decision",
+      "module": "触发调度",
+      "subtitle": "云端配置与存储桶双重检查",
+      "facts": [
+        "SEARCH_DISCOVERY_ENABLED 为 true 且绑定私有 DISCOVERY_BUCKET 桶",
+        "任一未配置则安全休眠，避免无桶写入抛出致命异常"
+      ],
+      "source": {
+        "file": "edge/src/search/scheduled-discovery.ts",
+        "lineStart": 47,
+        "lineEnd": 55
+      },
+      "size": {
+        "width": 313,
+        "height": 237
+      },
+      "position": {
+        "x": 183,
+        "y": 324
+      }
+    },
+    {
+      "id": "skip_end",
+      "label": "跳过本次获取",
+      "kind": "end",
+      "module": "触发调度",
+      "subtitle": "特性未启用或已有节点在处理",
+      "facts": [
+        "特性关闭时不记录错误日志，安全静默跳过",
+        "未抢到租约表示已有并发边缘 Worker 正在抓取，避免重复拉取"
+      ],
+      "size": {
+        "width": 300,
+        "height": 72
+      },
+      "position": {
+        "x": 571,
+        "y": 1110
+      }
+    },
+    {
+      "id": "acquire_lease",
+      "label": "申请分布式互斥租约",
+      "kind": "process",
+      "module": "并发控制",
+      "subtitle": "D1 租约表防并发竞争",
+      "facts": [
+        "写入 discovery_leases 表申请针对特定作品的排他租约锁",
+        "租期锁定 300 秒，到期自动失效，防止任务崩溃造成死锁"
+      ],
+      "source": {
+        "file": "edge/src/search/discovery-refresh.ts",
+        "lineStart": 26,
+        "lineEnd": 28
+      },
+      "size": {
+        "width": 267,
+        "height": 72
+      },
+      "position": {
+        "x": 206,
+        "y": 641
+      }
+    },
+    {
+      "id": "lease_ok",
+      "label": "成功获得租约所有权？",
+      "kind": "decision",
+      "module": "并发控制",
+      "subtitle": "CAS 租约竞争裁决",
+      "facts": [
+        "成功抢占独占令牌者进入网络抓取阶段",
+        "未抢到锁直接退出，由正在持有租约的实例完成同步"
+      ],
+      "source": {
+        "file": "edge/src/search/discovery-refresh.ts",
+        "lineStart": 28,
+        "lineEnd": 28
+      },
+      "size": {
+        "width": 290,
+        "height": 237
+      },
+      "position": {
+        "x": 194.5,
+        "y": 793
+      }
+    },
+    {
+      "id": "safe_transport",
+      "label": "安全网络探测与预算控制",
+      "kind": "process",
+      "module": "安全传输",
+      "subtitle": "域名白名单与配额熔断",
+      "facts": [
+        "严格比对 originAllowlist 白名单，杜绝 SSRF 任意网络穿透",
+        "预算约束：单次任务上限 8 次请求，硬超时 15 秒",
+        "单包体大小限制 ≤ 4MB，重定向最多跟踪 3 跳"
+      ],
+      "source": {
+        "file": "edge/src/search/providers/transport.ts",
+        "lineStart": 31,
+        "lineEnd": 52
+      },
+      "size": {
+        "width": 313,
+        "height": 72
+      },
+      "position": {
+        "x": 183,
+        "y": 1110
+      }
+    },
+    {
+      "id": "tiered_resolve",
+      "label": "多阶协议解析与原生取流",
+      "kind": "process",
+      "module": "协议解析",
+      "subtitle": "Tier 1~3 渐进式突破试看截流",
+      "facts": [
+        "Tier 1 网页轻量元数据探测：快速获取标题、封面与分集大纲",
+        "Tier 2 模拟 Android 原生协议：突破 Web 端第 4 集试看截流",
+        "Tier 3 解密算法：还原 spade_a 参数获取 AES-128 CENC 播放密钥"
+      ],
+      "source": {
+        "file": "edge/src/search/discovery-refresh.ts",
+        "lineStart": 45,
+        "lineEnd": 45
+      },
+      "size": {
+        "width": 325,
+        "height": 72
+      },
+      "position": {
+        "x": 177,
+        "y": 1262
+      }
+    },
+    {
+      "id": "admission_check",
+      "label": "首集可播且元数据合规？",
+      "kind": "decision",
+      "module": "准入核验",
+      "subtitle": "首集准入法则与防回退校验",
+      "facts": [
+        "首集准入法则：第一集取得真实可用流即可准入，无需等全剧完备",
+        "一致性核验：集数不得倒退、标题与一级频道必须与基础索引一致"
+      ],
+      "source": {
+        "file": "edge/src/search/discovery-refresh.ts",
+        "lineStart": 51,
+        "lineEnd": 55
+      },
+      "size": {
+        "width": 313,
+        "height": 237
+      },
+      "position": {
+        "x": 183,
+        "y": 1414
+      }
+    },
+    {
+      "id": "handle_failure",
+      "label": "登记失败墓碑并释放租约",
+      "kind": "end",
+      "module": "准入核验",
+      "subtitle": "异常风控熔断与资源清理",
+      "facts": [
+        "将 job 标记为 failed，写入最近失败时间戳",
+        "冷却期内不再重复拉取，避免雪崩冲击上游",
+        "finally 块安全释放 D1 租约锁"
+      ],
+      "source": {
+        "file": "edge/src/search/discovery-refresh.ts",
+        "lineStart": 64,
+        "lineEnd": 69
+      },
+      "size": {
+        "width": 313,
+        "height": 72
+      },
+      "position": {
+        "x": 571,
+        "y": 1731
+      }
+    },
+    {
+      "id": "persist_r2",
+      "label": "内容寻址写入私有 R2",
+      "kind": "process",
+      "module": "存储沉淀",
+      "subtitle": "不可变事实包物理固化",
+      "facts": [
+        "计算事实 JSON 的 SHA-256 哈希值",
+        "以 discovery/facts/{hash}.json 键名写入私有 R2 桶",
+        "内容寻址特性：同名对象必须哈希一致，杜绝任何中间人篡改"
+      ],
+      "source": {
+        "file": "edge/src/search/discovery-store.ts",
+        "lineStart": 70,
+        "lineEnd": 82
+      },
+      "size": {
+        "width": 289,
+        "height": 72
+      },
+      "position": {
+        "x": 195,
+        "y": 1731
+      }
+    },
+    {
+      "id": "commit_d1",
+      "label": "D1 事务持久化与释放租约",
+      "kind": "process",
+      "module": "存储沉淀",
+      "subtitle": "原子更新索引表与清理锁",
+      "facts": [
+        "D1 batch 事务：条件更新 discovery_works 索引元数据",
+        "乐观锁防护：校验 updated_at 与 fact_hash 防止覆盖更新版本",
+        "事务内同步 DELETE discovery_leases 释放分布式租约"
+      ],
+      "source": {
+        "file": "edge/src/search/discovery-store.ts",
+        "lineStart": 89,
+        "lineEnd": 105
+      },
+      "size": {
+        "width": 335,
+        "height": 72
+      },
+      "position": {
+        "x": 172,
+        "y": 1883
+      }
+    },
+    {
+      "id": "all_episodes_done",
+      "label": "全剧集数已完整解析？",
+      "kind": "decision",
+      "module": "增量发布",
+      "subtitle": "检查是否需要滑动窗口切片续传",
+      "facts": [
+        "当前已就绪集数 == 剧目总分集数则直接完成",
+        "若仍有后续集数未解析（如 100 集长剧只拉了前 8 集），转入后台异步补全"
+      ],
+      "source": {
+        "file": "edge/src/search/discovery-refresh.ts",
+        "lineStart": 46,
+        "lineEnd": 48
+      },
+      "size": {
+        "width": 318,
+        "height": 237
+      },
+      "position": {
+        "x": 180.5,
+        "y": 2035
+      }
+    },
+    {
+      "id": "save_checkpoint",
+      "label": "登记滑动窗口补全游标",
+      "kind": "process",
+      "module": "增量发布",
+      "subtitle": "保存断点游标待后续轮询",
+      "facts": [
+        "更新 discovery_jobs 状态为 pending 并记录已达游标 cursor_key",
+        "下次 Cron 唤醒或端侧选集触发时自动从断点继续推进 8 集"
+      ],
+      "source": {
+        "file": "edge/src/search/discovery-refresh.ts",
+        "lineStart": 46,
+        "lineEnd": 47
+      },
+      "size": {
+        "width": 290,
+        "height": 72
+      },
+      "position": {
+        "x": 571,
+        "y": 2352
+      }
+    },
+    {
+      "id": "publish_success",
+      "label": "发布生效并入增量账本",
+      "kind": "end",
+      "module": "增量发布",
+      "subtitle": "全网客户端免搜即时共享",
+      "facts": [
+        "作品首集即刻可播，状态标记为 published",
+        "触发变更增量账本，全网客户端静默同步",
+        "达成‘一人点开检索，全网设备免搜共享’"
+      ],
+      "source": {
+        "file": "edge/src/search/discovery-refresh.ts",
+        "lineStart": 56,
+        "lineEnd": 62
+      },
+      "size": {
+        "width": 290,
+        "height": 72
+      },
+      "position": {
+        "x": 194.5,
+        "y": 2504
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start",
+      "target": "switch_check",
+      "kind": "flow",
+      "label": "唤醒检查",
+      "evidence": "source",
+      "route": {
+        "via": [
+          {
+            "x": 339.5,
+            "y": 256
+          },
+          {
+            "x": 339.5,
+            "y": 312
+          }
+        ],
+        "labelAt": {
+          "x": 339.5,
+          "y": 284
+        }
+      }
+    },
+    {
+      "id": "e2",
+      "source": "switch_check",
+      "target": "acquire_lease",
+      "kind": "yes",
+      "label": "已启用",
+      "evidence": "source",
+      "route": {
+        "via": [
+          {
+            "x": 171,
+            "y": 442.5
+          },
+          {
+            "x": 171,
+            "y": 661
+          },
+          {
+            "x": 194,
+            "y": 661
+          }
+        ],
+        "labelAt": {
+          "x": 171,
+          "y": 600.01
+        }
+      }
+    },
+    {
+      "id": "e3",
+      "source": "switch_check",
+      "target": "skip_end",
+      "kind": "no",
+      "label": "未配置",
+      "evidence": "source",
+      "route": {
+        "via": [
+          {
+            "x": 508,
+            "y": 442.5
+          },
+          {
+            "x": 643,
+            "y": 442.5
+          },
+          {
+            "x": 643,
+            "y": 1098
+          }
+        ],
+        "labelAt": {
+          "x": 569.5,
+          "y": 442.5
+        }
+      }
+    },
+    {
+      "id": "e4",
+      "source": "acquire_lease",
+      "target": "lease_ok",
+      "kind": "flow",
+      "label": "租约裁决",
+      "evidence": "source",
+      "route": {
+        "via": [
+          {
+            "x": 339.5,
+            "y": 725
+          },
+          {
+            "x": 339.5,
+            "y": 781
+          }
+        ],
+        "labelAt": {
+          "x": 339.5,
+          "y": 753
+        }
+      }
+    },
+    {
+      "id": "e5",
+      "source": "lease_ok",
+      "target": "safe_transport",
+      "kind": "yes",
+      "label": "获取成功",
+      "evidence": "source",
+      "route": {
+        "via": [
+          {
+            "x": 182.5,
+            "y": 911.5
+          },
+          {
+            "x": 171,
+            "y": 911.5
+          },
+          {
+            "x": 171,
+            "y": 1130
+          }
+        ],
+        "labelAt": {
+          "x": 171,
+          "y": 1069.01
+        }
+      }
+    },
+    {
+      "id": "e6",
+      "source": "lease_ok",
+      "target": "skip_end",
+      "kind": "no",
+      "label": "并发占用",
+      "evidence": "source",
+      "route": {
+        "via": [
+          {
+            "x": 496.5,
+            "y": 911.5
+          },
+          {
+            "x": 591,
+            "y": 911.5
+          },
+          {
+            "x": 591,
+            "y": 1101.750969006806
+          }
+        ],
+        "labelAt": {
+          "x": 591,
+          "y": 1012.625484503403
+        }
+      }
+    },
+    {
+      "id": "e7",
+      "source": "safe_transport",
+      "target": "tiered_resolve",
+      "kind": "flow",
+      "label": "报文送达",
+      "evidence": "source",
+      "route": {
+        "via": [
+          {
+            "x": 351.5,
+            "y": 1194
+          },
+          {
+            "x": 351.5,
+            "y": 1250
+          }
+        ],
+        "labelAt": {
+          "x": 351.5,
+          "y": 1222
+        }
+      }
+    },
+    {
+      "id": "e8",
+      "source": "tiered_resolve",
+      "target": "admission_check",
+      "kind": "flow",
+      "label": "提取结果",
+      "evidence": "source",
+      "route": {
+        "via": [
+          {
+            "x": 339.5,
+            "y": 1346
+          },
+          {
+            "x": 339.5,
+            "y": 1402
+          }
+        ],
+        "labelAt": {
+          "x": 339.5,
+          "y": 1374
+        }
+      }
+    },
+    {
+      "id": "e9",
+      "source": "admission_check",
+      "target": "persist_r2",
+      "kind": "yes",
+      "label": "核验通过",
+      "evidence": "source",
+      "route": {
+        "via": [
+          {
+            "x": 171,
+            "y": 1532.5
+          },
+          {
+            "x": 171,
+            "y": 1751
+          },
+          {
+            "x": 183,
+            "y": 1751
+          }
+        ],
+        "labelAt": {
+          "x": 171,
+          "y": 1690.01
+        }
+      }
+    },
+    {
+      "id": "e10",
+      "source": "admission_check",
+      "target": "handle_failure",
+      "kind": "no",
+      "label": "不可播或冲突",
+      "evidence": "source",
+      "route": {
+        "via": [
+          {
+            "x": 508,
+            "y": 1532.5
+          },
+          {
+            "x": 591,
+            "y": 1532.5
+          },
+          {
+            "x": 591,
+            "y": 1722.750969006806
+          }
+        ],
+        "labelAt": {
+          "x": 591,
+          "y": 1633.625484503403
+        }
+      }
+    },
+    {
+      "id": "e11",
+      "source": "persist_r2",
+      "target": "commit_d1",
+      "kind": "flow",
+      "label": "写入完成",
+      "evidence": "source",
+      "route": {
+        "via": [
+          {
+            "x": 327.5,
+            "y": 1815
+          },
+          {
+            "x": 327.5,
+            "y": 1871
+          }
+        ],
+        "labelAt": {
+          "x": 327.5,
+          "y": 1843
+        }
+      }
+    },
+    {
+      "id": "e12",
+      "source": "commit_d1",
+      "target": "all_episodes_done",
+      "kind": "flow",
+      "label": "索引就绪",
+      "evidence": "source",
+      "route": {
+        "via": [
+          {
+            "x": 339.5,
+            "y": 1967
+          },
+          {
+            "x": 339.5,
+            "y": 2023
+          }
+        ],
+        "labelAt": {
+          "x": 339.5,
+          "y": 1995
+        }
+      }
+    },
+    {
+      "id": "e13",
+      "source": "all_episodes_done",
+      "target": "publish_success",
+      "kind": "yes",
+      "label": "全剧完备",
+      "evidence": "source",
+      "route": {
+        "via": [
+          {
+            "x": 168.5,
+            "y": 2153.5
+          },
+          {
+            "x": 168.5,
+            "y": 2524
+          },
+          {
+            "x": 186.2509690068058,
+            "y": 2524
+          }
+        ],
+        "labelAt": {
+          "x": 168.5,
+          "y": 2352
+        }
+      }
+    },
+    {
+      "id": "e14",
+      "source": "all_episodes_done",
+      "target": "save_checkpoint",
+      "kind": "no",
+      "label": "尚有分集",
+      "evidence": "source",
+      "route": {
+        "via": [
+          {
+            "x": 510.5,
+            "y": 2153.5
+          },
+          {
+            "x": 591,
+            "y": 2153.5
+          },
+          {
+            "x": 591,
+            "y": 2340
+          }
+        ],
+        "labelAt": {
+          "x": 591,
+          "y": 2252.75
+        }
+      }
+    },
+    {
+      "id": "e15",
+      "source": "save_checkpoint",
+      "target": "publish_success",
+      "kind": "flow",
+      "label": "断点就绪",
+      "evidence": "source",
+      "route": {
+        "via": [
+          {
+            "x": 591,
+            "y": 2436
+          },
+          {
+            "x": 591,
+            "y": 2524
+          },
+          {
+            "x": 492.7490309931942,
+            "y": 2524
+          }
+        ],
+        "labelAt": {
+          "x": 591,
+          "y": 2485
+        }
+      }
+    }
+  ]
+}
