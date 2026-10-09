@@ -236,6 +236,16 @@ jobs:
 - **底层成因**：Vite 默认 `base: '/'`，在浏览器或网页服务器上正常，但在 Capacitor 的本地 scheme（`https://localhost`）或混合打包中，会导致静态资源寻址错位；
 - **解决铁律**：`vite.config.ts` 必须显式声明 **`base: './'`**，生成相对路径资产标签。
 
+### 8. GitHub Secrets 密钥体系与云端日更凭据配置（2026-10-10 配置；正式发布待验证）
+- **踩坑现象**：`.github/workflows/content-sync.yml` 自 10-02 起每日半夜定时运行全部 22 秒报 `Missing CLOUDFLARE_API_TOKEN` 挂掉；
+- **底层机理**：本地终端依赖 `~/.wrangler/config/default.toml` 的 OAuth 浏览器登录凭据，而 GitHub 临时 runner 是裸机环境，必须由 GitHub 仓库 Secrets 显式注入 API 凭据；
+- **解决铁律**：仓库 `lover-shadow/prism-play` 必须双向绑定两项 Actions Secrets（本文件只记名称，**严禁在此或任何入库文档记录明文值**）：
+  1. `CLOUDFLARE_ACCOUNT_ID`
+  2. `CLOUDFLARE_API_TOKEN`（具备 Workers/R2/KV/D1 操作权限）
+  - **实测记录（诚实口径）**：2026-10-10 02:15 手动触发 Run `37971942390` 为 **`dry_run=true`** 的成功记录（约 13~19 秒）——该模式**跳过真实 R2 写入与 KV revision 推进**，因此**不能**证明 Token 权限有效或正式日更发布闭环。
+  - **待验证项（W0）**：必须验证一次真实增量采集（非 dry-run）：采集请求、上传 R2、切 KV revision、客户端读取新代均有回执；完成之前状态为「**Secrets 已配置、正式发布待验证**」。失败排查:查看该次 Run 的 step 日志与 Artifacts 中的 `catalog-manifest-*.json`；重跑方法:GitHub Actions 页面 `Run workflow` 且 `dry_run=false`（需授权）。
+  - **凭据卫生**：任何历史明文 Token（本地文档/记忆）在入库与提交前必须排除；曾暴露于本地非受控副本的 Token 建议轮换（另行授权运维项）。
+
 ---
 
 ## 六、 常用开发与流水线操作命令手册 (Runbook)
