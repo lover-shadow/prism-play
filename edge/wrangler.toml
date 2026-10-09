@@ -39,7 +39,9 @@ bucket_name = "prism-play-discovery"
 JWT_KID = "p2026"
 SEARCH_DISCOVERY_ENABLED = "true"
 ANALYTICS_ENABLED = "true"
-APK_PUBLIC_BASE_URL = "https://pub-8736c44ed0664684b20530e52f7717ca.r2.dev"
+# 广告清单清洗（provider_m1 公开 HLS 专用）：白名单为精确主机匹配，与下发包裹端共用同一口径。
+AD_STRIP_ENABLED = "true"
+AD_STRIP_TARGET_HOSTS = "play.modujx17.com,bf.modujx17.com"
 # 敏感密钥已由 wrangler secret 管道以加密方式注入云端，严禁明文入库：
 # JWT_PRIVATE_KEY_JWK / PRIVATE_SESSION_SECRET / PROXY_SIGNING_SECRET
 

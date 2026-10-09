@@ -4,7 +4,7 @@
       "meta": {
         "title": "光影Play · 系统分工",
         "subtitle": "先看谁负责什么：本机目录浏览、云端调度与按需发现、加密线路由手机原生内核直连。点击卡片查看说明与依据。",
-        "sourceRef": "prism-play@d5e5655 (working-tree 2026-10-08, v2.6.5 修订版)",
+        "sourceRef": "prism-play@0d78bc0 (working-tree 2026-10-09, v2.6.7 + 广告清单清洗)",
         "scope": "当前代码的主要产品链路；不是线上运行证明",
         "diagramType": "architecture",
         "locale": "zh-CN"
@@ -216,7 +216,8 @@
           "facts": [
             "向手机提供公开内容与播放线路",
             "私密与未知剧目共用同一份 404，不泄露任何元信息",
-            "当前主播放链路不是默认经过云端转发视频"
+            "当前主播放链路不是默认经过云端转发视频",
+            "对已知插广告来源的播放清单实时剥离广告块，视频分片仍由客户端直连"
           ],
           "source": {
             "file": "edge/src/routes/titles.ts",
@@ -1184,7 +1185,7 @@
       "meta": {
         "title": "点开影片 · 播放流程",
         "subtitle": "从点击到起播；普通地址走网页内核，加密线路先复核身份再交给原生内核。",
-        "sourceRef": "prism-play@d5e5655 (working-tree 2026-10-08, v2.6.5 修订版)",
+        "sourceRef": "prism-play@0d78bc0 (working-tree 2026-10-09, v2.6.7 + 广告清单清洗)",
         "scope": "当前主链路；旧详情兼容取址见「取得本集播放线路」卡片说明",
         "diagramType": "flowchart",
         "locale": "zh-CN"
@@ -1320,7 +1321,8 @@
           "module": "观看播放",
           "facts": [
             "优先读本机缓存的播放清单，未命中才再取详情",
-            "清单缺席时存在旧代理取址兜底；本机集号不走旧接口"
+            "清单缺席时存在旧代理取址兜底；本机集号不走旧接口",
+            "公开 m1 线路的清单地址是云端清洗入口，播放时实时剔除广告块"
           ],
           "source": {
             "file": "src/player/line-runner.ts",
@@ -2106,7 +2108,7 @@
       "meta": {
         "title": "开始观看 · 先后时序",
         "subtitle": "先取详情，再取线路；加密线路在起播前多一次云端身份复核，取址与解密都发生在手机本机。",
-        "sourceRef": "prism-play@d5e5655 (working-tree 2026-10-08, v2.6.5 修订版)",
+        "sourceRef": "prism-play@0d78bc0 (working-tree 2026-10-09, v2.6.7 + 广告清单清洗)",
         "scope": "主链路成功场景；普通地址线路由网页内核直接加载，不经过原生内核这一段",
         "diagramType": "sequence",
         "locale": "zh-CN"
@@ -2572,7 +2574,7 @@
       "meta": {
         "title": "内容更新 · 从采集到手机",
         "subtitle": "两条流：云端预先采集打包发布，手机先用本机目录再增量更新；检索补全与发现日志把未入库的标题也接进来。",
-        "sourceRef": "prism-play@d5e5655 (working-tree 2026-10-08, v2.6.5 修订版)",
+        "sourceRef": "prism-play@0d78bc0 (working-tree 2026-10-09, v2.6.7 + 广告清单清洗)",
         "scope": "已实现的数据处理机制；自动日更与按需发现的线上稳定性待验证，不代表生产调度已闭环",
         "diagramType": "dataflow",
         "locale": "zh-CN"

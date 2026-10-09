@@ -30,12 +30,12 @@ export interface Env extends EdgeSecrets {
   CF_VERSION_METADATA?: { id: string; timestamp: string; tag?: string };
   SEARCH_DISCOVERY_ENABLED?: string;
   SEARCH_DISCOVERY_CONFIG?: string;
-  /**
-   * Public base of the R2 bucket, used only to build the 302 target of `/dl/latest/android`. Unset
-   * until the supervision agent attaches a domain to `prism-play-releases`; then no artifact and no
-   * invented host — the route answers 404 (API-SPEC §五.3).
-   */
-  APK_PUBLIC_BASE_URL?: string;
+  /** 广告清单清洗总开关（'true' 启用）；与白名单同时成立才生效，默认关闭。 */
+  AD_STRIP_ENABLED?: string;
+  /** 逗号分隔的目标主机白名单（精确匹配）；包裹端与入口端共用同一份口径。 */
+  AD_STRIP_TARGET_HOSTS?: string;
+  /** 可选 JSON 参数覆盖（dominantRatio / repeatBlocks / maxBlockSeconds / maxSegments / maxBytes）。 */
+  AD_STRIP_CONFIG?: string;
 }
 
 export interface RequestContext {

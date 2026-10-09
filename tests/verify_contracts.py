@@ -47,7 +47,9 @@ def check_openapi():
         "/assets/{file}",
         "/robots.txt",
         "/sitemap.xml",
-        "/proxy/{kind}/{handle}"
+        "/proxy/{kind}/{handle}",
+        # 广告清单清洗入口（2026-10-09 随播放链路广告剔除能力一并入约；与 /proxy/{kind}/{handle} 同级的安全纪律）。
+        "/proxy/hls/clean"
     ]
     admin_paths = {
         '/api/admin/' + suffix for suffix in [

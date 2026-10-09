@@ -1832,6 +1832,39 @@ paths:
         "404":
           description: 目标不存在、已撤片，或私密内容未获当次双重授权；响应体不区分原因
 
+  /proxy/hls/clean:
+    get:
+      tags: [系统]
+      summary: HLS 清单广告清洗入口（受白名单约束的实时净化）
+      description: |
+        仅服务已确认会向清单拼接推广切片的上游来源：目标必须为 https 且在服务端主机精确白名单内（非子串匹配），
+        实时剥离被 #EXT-X-DISCONTINUITY 包裹、重复出现、时长受限且目录签名远离主流的离群切片块后返回净化清单；
+        视频分片仍由客户端直连上游，不经过本入口。真实加密（AES-128）与初始化段清单一律不做手术；
+        清洗失败或解析放弃一律原样透传，总开关关闭时 302 回目标地址；重定向不自动跟随、逐跳复核白名单；
+        每次实际剔除写入服务端审计（不含任何敏感凭据）。仅对公开 provider_m1 线路下发本入口，私密内容永不经过。
+      parameters:
+        - name: target
+          in: query
+          required: true
+          schema:
+            type: string
+          description: "已编码的上游清单地址；仅 https 且主机在服务端白名单内，越界一律拒绝"
+        - name: work
+          in: query
+          required: false
+          schema:
+            type: string
+          description: "作品标识，仅用于审计归属；非法值不影响清洗结果"
+      responses:
+        "200":
+          description: 净化后或原样透传的 M3U8 清单；X-Ad-Strip-Mode 诊断头说明处置结果
+        "302":
+          description: 总开关关闭时重定向回目标地址
+        "400":
+          description: 缺失或不在白名单内的目标
+        "502":
+          description: 上游不可达或响应超限；客户端按失败处理并自行重试
+
   /api/admin/login:
     post:
       tags:

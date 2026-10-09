@@ -16,6 +16,7 @@ import { handlePlayback } from './routes/playback';
 import { handleNativePlayback } from './routes/native-playback';
 import { handlePrivateSessions } from './routes/private-sessions';
 import { handleProxy } from './routes/proxy';
+import { handleCleanHls } from './routes/hls-clean';
 import { handleRedeem } from './routes/redeem';
 import { handleRelated } from './routes/related';
 import { handleSearch } from './routes/search';
@@ -79,6 +80,7 @@ const ROUTES: readonly Route[] = [
   { pattern: ['dl'], allow: ['GET'], handle: handleDownloadLanding },
   { pattern: ['assets', '{file}'], allow: ['GET'], handle: handleStaticAsset },
   { pattern: [], allow: ['GET'], handle: handlePortal },
+  { pattern: ['proxy', 'hls', 'clean'], allow: ['GET'], handle: handleCleanHls },
   { pattern: ['proxy', '{kind}', '{handle}'], allow: ['GET'], handle: handleProxy }
 ];
 

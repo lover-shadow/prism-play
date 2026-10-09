@@ -6,9 +6,10 @@ import { PRIVATE_SESSION_TTL_SECONDS } from '../core/constants';
 import { configUnavailableResponse } from '../config/kv-config';
 import { jsonResponse, noStoreJson } from '../http/json';
 import { originOf, publicCoverProxyUrl, signedCoverProxyUrl } from '../http/serialize';
-import type { TitleAsset, TitleRead } from '../library/title-asset';
+import type { TitleAsset, TitleCleanContext, TitleRead } from '../library/title-asset';
 import { readTitleAt, titleAssetResponse } from '../library/title-asset';
 import { readPrivateManifest, readPublicManifest } from '../library/manifest';
+import { readAdStripSettings } from '../media/ad-strip-config';
 import { publicDiscoveryContext, readPublicFact } from '../search/public-facts';
 import { readDiscoveryConfig } from '../search/discovery-config';
 import { resolveCardDetail } from '../search/discovery-cards';
@@ -123,6 +124,7 @@ async function servePrivateTitle(
     const ttl = Math.max(1, Math.min(PRIVATE_SESSION_TTL_SECONDS, session.exp - now));
     coverUrl = await signedCoverProxyUrl(origin, env.PROXY_SIGNING_SECRET, titleId, now, ttl);
   }
+  // 私密线路不接广告清洗：清洗入口不校验双准入凭据，绝不让私密媒体地址流经它。
   return noStoreJson(titleAssetResponse(read.asset, coverUrl));
 }
 
@@ -134,6 +136,10 @@ export async function handleTitles(request: Request, env: Env, clock: Clock): Pr
   const bucket = env.APK_BUCKET;
   if (bucket === undefined) return configUnavailableResponse();
   const origin = originOf(request);
+  const adStrip = readAdStripSettings(env);
+  const clean: TitleCleanContext | undefined = adStrip.enabled
+    ? { cleanBase: `${origin}/proxy/hls/clean`, hosts: adStrip.hosts }
+    : undefined;
 
   const manifest = await readPublicManifest(env.KV);
   if (manifest === null) return configUnavailableResponse();
@@ -141,7 +147,7 @@ export async function handleTitles(request: Request, env: Env, clock: Clock): Pr
   if (manifest.workFacts !== undefined) {
     const read = await readPublicFact(env, manifest, titleId, clock.nowSeconds());
     if (read.status === 'rejected') return configUnavailableResponse();
-    if (read.status === 'ok') return publicTitleResponse(titleAssetResponse(read.fact.asset, read.fact.asset.hasCover ? publicCoverProxyUrl(origin, titleId) : undefined));
+    if (read.status === 'ok') return publicTitleResponse(titleAssetResponse(read.fact.asset, read.fact.asset.hasCover ? publicCoverProxyUrl(origin, titleId) : undefined, clean));
   } else {
     const publicRead = await readTitleWithFallback(bucket, titleKey(manifest.revision, titleId), stableTitleKey(titleId), titleId);
     if (publicRead.status === 'ok') {
@@ -149,7 +155,7 @@ export async function handleTitles(request: Request, env: Env, clock: Clock): Pr
         console.error('private title stored under the public prefix', titleId);
       } else {
         const asset: TitleAsset = publicRead.asset;
-        return publicTitleResponse(titleAssetResponse(asset, asset.hasCover ? publicCoverProxyUrl(origin, titleId) : undefined));
+        return publicTitleResponse(titleAssetResponse(asset, asset.hasCover ? publicCoverProxyUrl(origin, titleId) : undefined, clean));
       }
     } else if (publicRead.status === 'rejected') {
       return assetIntegrityFailure(titleKey(manifest.revision, titleId), publicRead.reason);
@@ -162,7 +168,7 @@ export async function handleTitles(request: Request, env: Env, clock: Clock): Pr
       const serverConfig = readDiscoveryConfig(env);
       const onDemandAsset = await resolveCardDetail(context, titleId, serverConfig.providers);
       if (onDemandAsset) {
-        return publicTitleResponse(titleAssetResponse(onDemandAsset, onDemandAsset.hasCover ? publicCoverProxyUrl(origin, titleId) : undefined));
+        return publicTitleResponse(titleAssetResponse(onDemandAsset, onDemandAsset.hasCover ? publicCoverProxyUrl(origin, titleId) : undefined, clean));
       }
     } catch {
       console.error('[titles] on-demand detail resolution failed');
@@ -173,7 +179,7 @@ export async function handleTitles(request: Request, env: Env, clock: Clock): Pr
   if (manifest.workFacts === undefined && env.DB !== undefined) {
     const d1Asset = await findTitleAssetFromDb(env.DB, titleId, clock.nowSeconds());
     if (d1Asset !== null && !d1Asset.isPrivate) {
-      return publicTitleResponse(titleAssetResponse(d1Asset, d1Asset.hasCover ? publicCoverProxyUrl(origin, titleId) : undefined));
+      return publicTitleResponse(titleAssetResponse(d1Asset, d1Asset.hasCover ? publicCoverProxyUrl(origin, titleId) : undefined, clean));
     }
   }
 

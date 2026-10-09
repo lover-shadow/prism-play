@@ -19,6 +19,7 @@ import type { AssetRejection, AssetVerdict } from './contract';
 import { accept, isCount, isHttpUrl, isNonEmptyText, isRecord, isSafeWorkId, reject } from './contract';
 import { sanitizePublicMetadata } from './metadata-policy.mjs';
 import { readReleaseProgress, type ReleaseProgress } from './release-progress';
+import { isCleanableMediaUrl } from '../media/ad-strip-config';
 
 export interface EpisodeLine {
   /** Abstract provider code (`provider_m1` style): never a brand name, per AGENTS.md §二.1. */
@@ -193,13 +194,41 @@ export function itemFromAsset(asset: TitleAsset, coverUrl?: string): ContentItem
  * player indexes by episode number, so the manifest is sorted on the way out rather than trusting the
  * order CI happened to write. Nothing else about the payload is touched.
  */
-export function titleAssetResponse(asset: TitleAsset, coverUrl?: string): TitleAssetResponse {
+export interface TitleCleanContext {
+  /** 清洗入口基址（同源）。 */
+  cleanBase: string;
+  /** 目标主机白名单；与入口路由共用同一份配置口径。 */
+  hosts: ReadonlySet<string>;
+}
+
+/**
+ * 广告清洗接驳：只对 provider_m1 的公开 HLS 线路把 mediaUrl 换成清洗入口。
+ * 私密剧目（调用方不传 clean）与原生加密线路完全不动。
+ */
+export function titleAssetResponse(
+  asset: TitleAsset,
+  coverUrl?: string,
+  clean?: TitleCleanContext
+): TitleAssetResponse {
+  const sanitizeLine = (line: EpisodeLine): EpisodeLine => {
+    if (clean === undefined || line.mediaUrl === undefined) return line;
+    if (line.providerId !== 'provider_m1') return line;
+    if (!isCleanableMediaUrl(line.mediaUrl, clean.hosts)) return line;
+    const query = `target=${encodeURIComponent(line.mediaUrl)}&work=${encodeURIComponent(asset.workId)}`;
+    return { ...line, mediaUrl: `${clean.cleanBase}?${query}` };
+  };
+
   return {
     workId: asset.workId,
     title: asset.title,
     channelId: asset.channelId,
     isPrivate: asset.isPrivate,
-    episodes: [...asset.episodes].sort((left, right) => left.episodeNumber - right.episodeNumber),
+    episodes: [...asset.episodes]
+      .sort((left, right) => left.episodeNumber - right.episodeNumber)
+      .map((ep) => ({
+        ...ep,
+        lines: ep.lines.map(sanitizeLine)
+      })),
     generatedAt: asset.generatedAt,
     item: itemFromAsset(asset, coverUrl)
   };

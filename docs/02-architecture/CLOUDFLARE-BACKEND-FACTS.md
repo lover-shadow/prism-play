@@ -65,6 +65,9 @@
 | **`ADMIN_AUTH_VERSION`** | 云端密文 | `1`（正整数数值字符串） | **管理员会话全局版本门禁**。递增此值可强制全网已颁发的所有存量 `__Host-prism_admin_session` 会话瞬间失效。 |
 | **`ANALYTICS_HASH_SECRET`** | 云端密文 | 256 位随机十六进制串 | **访客分析标识单向签名密钥**。服务端通过 HMAC-SHA256 生成 `visitor_hash`，数据库绝不保存原始 `p_vid` Cookie 明文。 |
 | **`ANALYTICS_ENABLED`** | 纯文本变量 | `"true"` / `"false"` | **边缘统计写入全局熔断开关**。配置为 `"false"` 时，系统跳过所有异步聚合写与 Cookie 植入，作为防写放大紧急安全网。 |
+| **`AD_STRIP_ENABLED`** | 纯文本变量 | `"true"` / `"false"` | **广告清单清洗总开关**。与白名单同时成立才生效；关闭时清洗入口 302 回目标地址，行为与未部署完全一致（紧急熔断位）。 |
+| **`AD_STRIP_TARGET_HOSTS`** | 纯文本变量 | `play.modujx17.com,bf.modujx17.com` | **清洗目标主机精确白名单**（逗号分隔、非子串匹配）。下发包裹端与入口路由共用同一份口径，半开状态在配置层就不可能发生。 |
+| **`AD_STRIP_CONFIG`** | 纯文本变量（可选） | `{"dominantRatio":0.55,...}` | **判定引擎参数覆盖**（可选）。支持 `dominantRatio` / `repeatBlocks` / `maxBlockSeconds` / `maxSegments` / `maxBytes`；越界或损坏一律退回默认，不阻断播放。 |
 
 ---
 
@@ -169,6 +172,14 @@ D1 物理建表定义按序分布在 `edge/migrations/0001_initial_schema.sql` ~
   Referrer-Policy: no-referrer
   Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'
   ```
+
+### 4. 广告清单清洗入口（`GET /proxy/hls/clean?target=&work=`）
+上游切片站会向 m3u8 清单里动态拼接赌博类推广切片（实测：广告块恒被 `#EXT-X-DISCONTINUITY` 包裹、单块 17.64s、跨剧逐字节复用、目录与正片完全不同）。本入口在云端实时剥离这类块，视频分片仍由客户端直连上游 CDN（零视频带宽、零转码）：
+- **判定引擎（`edge/src/media/ad-stripper.ts`）**：五道闸门——格式安检 → 主流确认（累计时长占比 ≥ `dominantRatio`，默认 0.55）→ 少数派圈定 → 重复验证（同签名 ≥2 个独立块）→ 结构验证（存在 DISCONTINUITY 边界且单块 ≤45s）。任一道不过即原样放行，宁可漏杀绝不错杀；
+- **校准依据**：短剧集正片占比实测 63%~80%（2 分钟正片夹 2 条广告），长剧集 98%+，故门槛取 0.55；真实加密（AES-128）与 `EXT-X-MAP` 的清单一律不动刀，`METHOD=NONE` 明文声明随段处置；
+- **安全边界**：仅 https + 精确白名单主机；重定向逐跳复核、最多 2 跳；全程 8s 超时预算 + 响应体字节上限；清洗失败/解析放弃一律透传原清单；总开关关闭时 302 回目标；
+- **下发口径**：`/api/titles/{id}` 仅对 `provider_m1` 的公开 `.m3u8` 线路包裹本入口并携带 `work` 参数（`edge/src/library/title-asset.ts`）；私密剧目与原生加密线路永不经过本入口；
+- **审计（`edge/src/media/ad-strip-audit.ts`）**：每次实际剔除写入 KV `adstrip/audit/{ts}-{rand}`（30 天过期），记录作品、主机、块数、秒数、主流占比；本期只审计、不参与过滤决策。
 
 ---
 
