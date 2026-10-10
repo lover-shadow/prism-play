@@ -3,6 +3,7 @@ import type { EngineFactory, MediaEvent } from './engine-seam';
 import type { LineFailureCode } from '../core/native/telemetry';
 import { containedRect } from './media-frame';
 import { createNativeControls } from './native-controls';
+import { acquireNativeComposition } from './native-composition';
 
 interface Bounds { left: number; top: number; width: number; height: number }
 interface NativeEvent {
@@ -36,10 +37,6 @@ export const createExoEngine: EngineFactory = async ({ container, onError, resol
   let requestedRate = 1;
   let queue = Promise.resolve();
   let controls: ReturnType<typeof createNativeControls> | null = null;
-  const ancestors: HTMLElement[] = [];
-  for (let el: HTMLElement | null = container; el; el = el.parentElement) ancestors.push(el);
-  ancestors.forEach((el) => el.classList.add('prism-native-transparent'));
-  document.documentElement.classList.add('prism-native-active');
   const box = (): Bounds => {
     const rect = container.getBoundingClientRect();
     const width = Number(container.dataset.nativeVideoWidth), height = Number(container.dataset.nativeVideoHeight);
@@ -72,11 +69,11 @@ export const createExoEngine: EngineFactory = async ({ container, onError, resol
     });
     await pendingRelease; await plugin.create({ sessionId, bounds: box() });
   } catch (error) {
-    ancestors.forEach((el) => el.classList.remove('prism-native-transparent'));
-    document.documentElement.classList.remove('prism-native-active');
     await subscription?.remove();
     throw error;
   }
+  // Acquire only for an established native session: pending/failed creation must not hide the app.
+  const releaseComposition = acquireNativeComposition(container);
   const observer = new ResizeObserver(resize);
   observer.observe(container);
   window.addEventListener('scroll', resize, true);
@@ -147,8 +144,7 @@ export const createExoEngine: EngineFactory = async ({ container, onError, resol
       observer.disconnect(); window.removeEventListener('scroll', resize, true); window.removeEventListener('resize', resize);
       void subscription?.remove();
       pendingRelease = plugin.release({ sessionId }).catch(() => {});
-      ancestors.forEach((el) => el.classList.remove('prism-native-transparent'));
-      document.documentElement.classList.remove('prism-native-active');
+      releaseComposition();
       delete container.dataset.nativeVideoWidth; delete container.dataset.nativeVideoHeight;
       listeners.clear();
     }

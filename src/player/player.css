@@ -24,6 +24,8 @@
 /* `isolate` + `contain` 把内核的 DOM 与层叠一起关进这只盒子：它自己的 z-index 再高也出不来。 */
 .prism-player__stage { position: absolute; inset: 0; z-index: var(--prism-z-media); isolation: isolate; contain: layout paint; }
 .prism-native-transparent { background: transparent !important; }
+/* Hide whole background branches: descendant posters can otherwise paint through a transparent host. */
+.prism-native-occluded, .prism-native-occluded * { visibility: hidden !important; pointer-events: none !important; }
 .prism-native-active .prism-player__backdrop { visibility: hidden; }
 .prism-native-controls { position: absolute; inset-inline: 0; bottom: 0; z-index: var(--prism-z-chrome); display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2); background: var(--player-chrome-scrim); }
 .prism-native-controls[hidden] { display: none; }
