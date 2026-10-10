@@ -95,7 +95,7 @@
       "label": "阶段二｜APP播放与交互",
       "kind": "component",
       "module": "端侧核心",
-      "subtitle": "端侧代码已收口 · 进入出包阶段",
+      "subtitle": "端侧修复已推真机 · 体验验收中",
       "source": {
         "kind": "document",
         "file": "docs/plans/2026-10-10-system-perfection-and-live-update-spec-and-plan.md",
@@ -103,13 +103,13 @@
         "lineEnd": 591
       },
       "facts": [
-        "W1/W2/W3-client端侧核心能力已全量合流实现并落地。",
-        "卡片秒显海报、首帧到达前骨架遮盖防黑底、切季事实复用、两阶段起播、三区手势与中央横滑时间HUD全绿。",
-        "全量182套单测/集成测试（1931用例）与98项Edge测试全绿，557文件守住P0红线。"
+        "W1/W2/W3-client 端侧核心能力已全量合流实现。",
+        "commit 7a25436 完成 native-composition 原生背景隔离，解决 152 集原生流遮挡问题。",
+        "全量 182 套测试（1937 用例）全绿，真机已安装，当前正处于真机视听体验阶段。"
       ],
       "overviewText": [
-        "状态：review_ready，端侧核心闭环代码已全量就绪。",
-        "前端构建完成且Capacitor原生同步就绪，已进入CI云端出包阶段。"
+        "状态：review_ready，原生合成修复已推送到测试机。",
+        "真机 CDP 确证出画正常，体验确认后将推进版本号提升与正式发版。"
       ],
       "badges": [
         {
@@ -132,7 +132,7 @@
       "label": "交付出口｜完整集成验收APK",
       "kind": "system",
       "module": "交付产物",
-      "subtitle": "正在触发 CI 编译 · 产出后真机验收",
+      "subtitle": "CI 38056029375 出包 · ADB已安装",
       "source": {
         "kind": "document",
         "file": "docs/04-spec/RELEASE-SOP-AND-PIPELINE.md",
@@ -140,17 +140,17 @@
         "lineEnd": 30
       },
       "facts": [
-        "端侧功能物理大合流集中收口，统一编译单一大包，绝不碎片化出包。",
-        "CI 触发 assembleDebug 构建 Android Debug APK 并归档 Artifacts。",
-        "用户真机验收通过后，再行决定官网下载入口发布。"
+        "端侧功能大合流，由 CI Run 38056029375 自动编译（35MB Debug APK）。",
+        "已通过 ADB 静默安装至 Master 手机（机型 25053RT47C，Android 16）。",
+        "真机现场体验通过后，再行触发官网下载入口与版本号递增发布。"
       ],
       "overviewText": [
-        "首个核心体验验收 APK 编译中。",
-        "待产出后获取构建产物并提供直连下载进行真机测试。"
+        "修复版 APK 已装入手机，现场处于实测中。",
+        "真机视听体验确认后，推进 P2-08 官网发布。"
       ],
       "badges": [
         {
-          "label": "building",
+          "label": "review_ready",
           "role": "status",
           "evidence": "document"
         }
