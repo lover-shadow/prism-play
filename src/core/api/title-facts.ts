@@ -14,7 +14,7 @@
  * 消费语义分离：`loadDetail` 失败抛出（宿主落错误卡）；`loadManifest` 任何失败/不支持都返回 null
  * （播放器静默回退代理链，不落错误卡）——与两个既有消费点的行为逐条对齐。
  */
-import type { PlaybackLine, TitleDetail, TitleManifest } from '../../../edge/src/types/api';
+import type { ContentItem, PlaybackLine, TitleDetail, TitleManifest } from '../../../edge/src/types/api';
 import type { CacheDisk } from '../storage/public-cache';
 import { assertWritable } from '../storage/storage-domains';
 import { adaptTitleDetail } from './title-detail';
@@ -63,6 +63,12 @@ export interface TitleFactsDeps {
 /** `loadDetail` 的返回：契约保证 `detail` 可用（null 仅是尚未组装完成的内部中间态）。 */
 export interface ResolvedTitleFact extends TitleFactEntry { detail: TitleDetail }
 
+export interface TitleBootstrapResult {
+  workId: string; revision: number; item: ContentItem;
+  targetEpisode: { episodeNumber: number; title?: string; durationSeconds?: number; lines: PlaybackLine[] };
+  catalogStatus?: string; persistenceStatus?: string;
+}
+
 export interface TitleFactsStore {
   /** 详情事实：命中缓存（内存/磁盘）不发网络；失败抛出（调用方落错误卡），失败绝不缓存。 */
   loadDetail(workId: string, options?: { force?: boolean; signal?: AbortSignal }): Promise<ResolvedTitleFact>;
@@ -76,6 +82,8 @@ export interface TitleFactsStore {
   invalidate(workId: string): void;
   /** 快速线路直通：优先缓存，未命中时优先走 bootstrap 单集，后台补全清单。 */
   linesFor?(workId: string, episodeNumber: number, signal?: AbortSignal): Promise<PlaybackLine[]>;
+  /** 目标集快速起播结果：两阶段起播第一阶段直接消费。 */
+  loadBootstrap?(workId: string, episodeNumber?: number, signal?: AbortSignal): Promise<TitleBootstrapResult | null>;
   size(): number;
 }
 
@@ -230,6 +238,26 @@ export function createTitleFactsStore(deps: TitleFactsDeps): TitleFactsStore {
     cachedManifest: (workId) => memory.get(workId)?.manifest ?? null,
     peek: (workId) => fresh(workId),
     invalidate: (workId) => void memory.delete(workId),
+    loadBootstrap: async (workId, episodeNumber = 1, signal) => {
+      if (deps.fetchBootstrap === undefined) return null;
+      try {
+        const raw = await deps.fetchBootstrap(workId, episodeNumber, signal);
+        if (record(raw) && record(raw.item) && record(raw.targetEpisode) && Array.isArray((raw.targetEpisode as any).lines)) {
+          return {
+            workId: String(raw.workId ?? workId), revision: Number(raw.revision ?? 0), item: raw.item as unknown as ContentItem,
+            targetEpisode: {
+              episodeNumber: Number((raw.targetEpisode as any).episodeNumber ?? episodeNumber),
+              title: typeof (raw.targetEpisode as any).title === 'string' ? (raw.targetEpisode as any).title : undefined,
+              durationSeconds: typeof (raw.targetEpisode as any).durationSeconds === 'number' ? (raw.targetEpisode as any).durationSeconds : 0,
+              lines: (raw.targetEpisode as any).lines as PlaybackLine[]
+            },
+            catalogStatus: typeof raw.catalogStatus === 'string' ? raw.catalogStatus : undefined,
+            persistenceStatus: typeof raw.persistenceStatus === 'string' ? raw.persistenceStatus : undefined
+          };
+        }
+        return null;
+      } catch { return null; }
+    },
     linesFor: async (workId, episodeNumber, signal) => {
       const cached = (memory.get(workId)?.manifest ?? null)?.episodes.find((ep) => ep.episodeNumber === episodeNumber);
       if (cached && cached.lines.length > 0) return cached.lines;
@@ -240,9 +268,7 @@ export function createTitleFactsStore(deps: TitleFactsDeps): TitleFactsStore {
             if (!memory.has(workId)) void loadDetail(workId).catch(() => {});
             return raw.targetEpisode.lines as PlaybackLine[];
           }
-        } catch {
-          // fallback to manifest
-        }
+        } catch {}
       }
       const manifest = await loadManifest(workId);
       return manifest?.episodes.find((ep) => ep.episodeNumber === episodeNumber)?.lines ?? [];

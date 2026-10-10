@@ -35,23 +35,25 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
   let phase: PlayerPhase = 'idle', errorKind: PlayerErrorKind | null = null, direct: number | null = null;
   let locked = false, destroyed = false, token = 0, backgroundAudioOn = false, backgroundAudioDisabled = false;
   let mediaGeneration = 0, savedVolume = 1, firstFrameNotified = false, prefetchFired = false;
+  let prefetchAbort: AbortController | null = null;
   const guard = createEndedGuard(() => mediaGeneration);
 
   function setLocked(v: boolean): void { rate.cancel(); locked = v; engine?.setControlsLocked?.(v); render(); }
   function scheduleSleep(m: SleepMode): void { sleep.schedule(m); render(); }
 
   const triggerPrefetchProbe = (): void => {
-    if (prefetchFired || !engine || destroyed || !api.titlePrefetch) return;
+    if (prefetchFired || !engine || destroyed || !api.titlePrefetch || !engine.playing()) return;
     const duration = engine.duration(), current = engine.currentTime();
     if (duration > 10 && current / duration >= 0.7) {
       prefetchFired = true;
       const currentEp = episodeNumber(), count = detail?.item.episodeCount ?? 999;
       const nextEpisodes = [currentEp + 1, currentEp + 2, currentEp + 3].filter((n) => n <= count);
       if (nextEpisodes.length > 0 && detail?.item.isPrivate === false) {
+        prefetchAbort = new AbortController();
         void api.titlePrefetch(options.titleId, {
           requestId: `probe-${options.titleId}-${currentEp}-${clock.now()}`,
           episodeNumbers: nextEpisodes, reason: 'lookahead'
-        }).catch(() => {});
+        }, prefetchAbort.signal).catch(() => {});
       }
     }
   };
@@ -62,12 +64,11 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
     if (video && typeof (video as any).requestVideoFrameCallback === 'function') {
       const g = mediaGeneration;
       (video as any).requestVideoFrameCallback(() => { if (!destroyed && g === mediaGeneration) notifyFirstFrame(); });
-    } else notifyFirstFrame();
+    }
   };
   const listen = (target: EventTarget, type: string, handler: EventListener): void => { target.addEventListener(type, handler); bound.push([target, type, handler]); };
   const report = (failure: PlayerFailure): void => void options.onError?.(failure);
-  const msg = (error: unknown): string => String(error instanceof Error ? error.message : error);
-  const episodeNumber = (): number => detail?.episodes.find((item) => item.episodeId === episodeId)?.episodeNumber ?? 0;
+  const msg = (err: unknown): string => String(err instanceof Error ? err.message : err); const episodeNumber = (): number => detail?.episodes.find((item) => item.episodeId === episodeId)?.episodeNumber ?? 0;
   const readSurface = (): GestureBounds => { const r = chrome.surface.getBoundingClientRect(); return { width: r.width, height: r.height, top: r.top, left: r.left, topBandPx: 0, bottomBandPx: 0 }; };
 
   const { speedPill, overlay, hud, chrome } = createPlayerDom(
@@ -126,6 +127,7 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
     onSeek: (delta) => { if (engine !== null && delta !== 0) engine.setCurrentTime(engine.currentTime() + delta); },
     onTap: () => { engine?.toggleControls(); idle.tap(); },
     onCenterTap: () => { if (engine !== null) { if (engine.playing()) engine.pause(); else engine.play(); idle.tap(); } },
+    onStepEpisode: (offset) => stepEpisode(offset),
     onScrubPreview: (p) => hud.showSeek?.(p.targetSeconds, p.durationSeconds, p.deltaSeconds),
     onScrubCommit: (s) => { hud.hideSeek?.(); if (engine !== null) engine.setCurrentTime(s); },
     onScrubCancel: () => hud.hideSeek?.()
@@ -165,11 +167,12 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
       root.classList.add('is-playing'); interruption.noteUserAction(); void bridge.setKeepScreenOn(true); ensureBackgroundAudio();
       guard.confirmPlayback(episodeId);
     } else if (event === 'playing') {
-      guard.confirmPlayback(episodeId); hookVideoFirstFrame(); notifyFirstFrame();
+      guard.confirmPlayback(episodeId); hookVideoFirstFrame();
+    } else if (event === 'firstframe') {
+      notifyFirstFrame();
     } else if (event === 'pause') {
       root.classList.remove('is-playing'); if (!interruption.pausingForCall()) interruption.noteUserAction(); progress.emit(true);
     } else if (event === 'timeupdate') {
-      if (engine !== null && engine.currentTime() > 0) notifyFirstFrame();
       if (progress.due()) progress.emit();
       triggerPrefetchProbe();
     } else if (event === 'loadedmetadata') {
@@ -197,22 +200,27 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
   }
   function retireEngine(): void {
     const live = engine; if (live !== null) savedVolume = live.volume();
-    engine = null; mediaGeneration += 1; guard.beginLoad(); direct = null; firstFrameNotified = false; prefetchFired = false;
+    engine = null; mediaGeneration += 1; guard.beginLoad(); direct = null; firstFrameNotified = false; prefetchFired = false; prefetchAbort?.abort(); prefetchAbort = null;
     for (const off of mediaOff.splice(0)) off();
     root.classList.remove('is-playing');
     if (live !== null) { live.pause(); live.destroy(); }
   }
-  /** AC-09 归零瞬间：暂停并释放播放句柄（hls 实例与 MediaSource 一并解除）。 */
   function releaseHandle(reason: 'sleep' | 'destroy'): void {
-    options.onSourceChange?.();
-    retireEngine();
-    void bridge.setKeepScreenOn(false);
+    options.onSourceChange?.(); retireEngine(); void bridge.setKeepScreenOn(false);
     if (backgroundAudioOn) { backgroundAudioOn = false; void bridge.stopBackgroundAudio(); }
     if (reason === 'sleep') phase = 'idle';
   }
-  /** Flush the outgoing source before its state is replaced, so a valid breakpoint is never silently lost. */
-  function commitPreviousSource(): void {
-    if (guard.ownsReading(episodeId)) progress.emit(true);
+  function commitPreviousSource(): void { if (guard.ownsReading(episodeId)) progress.emit(true); }
+  function stepEpisode(offset: number): void {
+    if (destroyed || detail === null || episodeId === null) return;
+    const episodes = detail.episodes ?? [];
+    if (episodes.length <= 1) return;
+    const ordered = [...episodes].sort((a, b) => a.episodeNumber - b.episodeNumber);
+    const at = ordered.findIndex((item) => item.episodeId === episodeId);
+    if (at < 0) return;
+    const next = ordered[at + offset];
+    if (!next) { report({ kind: 'media', message: offset < 0 ? '已经是第一集' : '已经是最后一集' }); return; }
+    void load(next.episodeId, 0);
   }
   async function load(id: number, resumeSeconds = 0): Promise<void> {
     if (destroyed) return;
@@ -273,7 +281,7 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
     setPlaybackRate: rate.set, dismissOverlay: () => rate.close() || (drawer.isOpen() ? (drawer.close(), true) : false),
     notifyAudioFocus: (v) => { if (v === 'lost') rate.cancel(); interruption.audioFocus(v); },
     notifyLeave: () => { rate.cancel(); interruption.noteUserAction(); progress.emit(true); },
-    relayout,
+    relayout, stepEpisode,
     state: (): PlayerState => ({
       phase, errorKind, episodeId, contentId: detail?.item.id ?? null, playing: engine?.playing() ?? false,
       locked, sleepMode: sleep.mode(), isPrivate: isPrivateSubject(detail?.item ?? {}),
@@ -285,9 +293,7 @@ export function createPlayer(options: PrismPlayerOptions): PrismPlayer {
       destroyed = true; phase = 'destroyed'; token += 1; progress.emit(true);
       idle.destroy(); rate.destroy(); sleep.destroy(); gesture.destroy(); hud.destroy(); drawer.destroy(); overlay.destroy(); chrome.destroy();
       for (const [target, type, handler] of bound) target.removeEventListener(type, handler);
-      bound.length = 0;
-      for (const dispose of disposers.splice(0)) dispose();
-      releaseHandle('destroy');
+      bound.length = 0; for (const dispose of disposers.splice(0)) dispose(); releaseHandle('destroy');
     }
   };
 }

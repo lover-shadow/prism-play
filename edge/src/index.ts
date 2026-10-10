@@ -31,6 +31,7 @@ import { handleTitlePrefetch } from './routes/title-prefetch';
 import { handleUserSync } from './routes/user-sync';
 import { handleTelemetryLines } from './routes/telemetry';
 import { handleVersion } from './routes/version';
+import { handleLiveUpdateCheck } from './routes/live-updates';
 import { handleAnnouncements } from './routes/announcements';
 import { handleRobots, handleSitemap } from './routes/seo';
 import { handleAdminRequest, isAdminPath } from './routes/admin-request';
@@ -74,6 +75,7 @@ const ROUTES: readonly Route[] = [
   { pattern: ['api', 'device', 'ping'], allow: ['GET'], handle: handleDevicePing },
   { pattern: ['api', 'user', 'sync'], allow: ['GET', 'POST'], handle: handleUserSync },
   { pattern: ['api', 'telemetry', 'lines'], allow: ['POST'], handle: handleTelemetryLines },
+  { pattern: ['api', 'updates', 'check'], allow: ['GET'], handle: handleLiveUpdateCheck },
   { pattern: ['api', 'version'], allow: ['GET'], handle: handleVersion },
   { pattern: ['api', 'announcements'], allow: ['GET'], handle: handleAnnouncements },
   { pattern: ['robots.txt'], allow: ['GET'], handle: handleRobots },

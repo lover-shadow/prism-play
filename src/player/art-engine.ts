@@ -82,6 +82,7 @@ export const createArtEngine: EngineFactory = async ({ container, theme, poster,
     currentTime: () => art.currentTime, setCurrentTime: (s) => void (art.currentTime = s),
     duration: () => art.duration, volume: () => art.video.volume, setVolume: (v) => void (art.video.volume = clamp(v, 0, 1)),
     toggleControls: () => art.controls.toggle(),
+    setControlsVisible: (visible) => { if (art.controls) art.controls.show = visible; },
     playbackRate: () => art.video.playbackRate,
     setPlaybackRate: (rate) => { art.video.defaultPlaybackRate = rate; art.video.playbackRate = rate; },
     setSource: (u, m) => {

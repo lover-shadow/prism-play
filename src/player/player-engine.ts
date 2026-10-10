@@ -54,7 +54,7 @@ export async function buildPlayerEngine(
   live.setVolume(ctx.savedVolume);
   live.setControlsLocked?.(ctx.locked);
   live.setBackgroundAllowed?.(ctx.backgroundAudioOn);
-  const mediaOff = (['ended', 'timeupdate', 'play', 'playing', 'pause', 'waiting', 'seeking', 'seeked', 'error', 'loadedmetadata'] as const).map(
+  const mediaOff = (['ended', 'timeupdate', 'play', 'playing', 'pause', 'waiting', 'seeking', 'seeked', 'error', 'loadedmetadata', 'firstframe'] as const).map(
     (event) => created.on(event, () => { ctx.handleMediaEvent(event, generation); })
   );
   await ctx.channels.sync();

@@ -5,6 +5,7 @@ import { createPlayerHost } from '../../src/player-host';
 import type { PlayerHostDeps } from '../../src/player-host';
 import type { PlayerEngine } from '../../src/player/engine-seam';
 import type { CallState, PrismNativeBridge } from '../../src/core/native/bridge';
+import type { PlayerApi } from '../../src/player/player-contract';
 import type { TitleDetail } from '../../edge/src/types/api';
 import type { WatchHistoryRow } from '../../src/core/storage/storage-domains';
 import { detailOf } from './player-harness';
@@ -49,14 +50,17 @@ export function host(
   document.body.replaceChildren(mount);
   const engine = fakeEngine();
   const calls = { playback: [] as number[], progress: [] as unknown[][], privacy: [] as boolean[], closed: 0, blocked: [] as string[], background: [] as string[] };
+  const mockTitle = vi.fn(respondTitle ?? (async () => {
+    if (titleGate !== undefined) await titleGate;
+    if (titleError !== undefined) throw titleError;
+    return detail;
+  }));
+  const mockPlayback = vi.fn(async (id: number) => { calls.playback.push(id); return { episodeId: id, url: 'https://play.prismos.org/proxy/m3u8/h1', mimeType: 'application/vnd.m3u8+playlist', durationSeconds: 100 }; });
   const api = {
-    title: vi.fn(respondTitle ?? (async () => {
-      if (titleGate !== undefined) await titleGate;
-      if (titleError !== undefined) throw titleError;
-      return detail;
-    })),
-    playback: vi.fn(async (id: number) => { calls.playback.push(id); return { episodeId: id, url: 'https://play.prismos.org/proxy/m3u8/h1', mimeType: 'application/vnd.m3u8+playlist', durationSeconds: 100 }; })
-  };
+    ...over.api,
+    title: (over.api?.title as any) ?? mockTitle,
+    playback: (over.api?.playback as any) ?? mockPlayback
+  } as PlayerApi & { title: typeof mockTitle; playback: typeof mockPlayback };
   const bridge = {
     getSystemVolume: async () => ({ volume: 1, supported: false }),
     getBrightness: async () => ({ brightness: 1, supported: false }),

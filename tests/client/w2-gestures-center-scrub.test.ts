@@ -118,4 +118,40 @@ describe('W2 中央单点/双击与水平定位手势仲裁（SPEC §4.3）', ()
     expect(commits).toHaveLength(1);
     expect(commits[0]).toBe(previews[previews.length - 1].targetSeconds);
   });
+
+  it('中央区域上滑下一集（offset=+1）、下滑上一集（offset=-1），位移不足或横向过大时取消', () => {
+    const steps: number[] = [];
+    const controller = createGestureController({
+      clock: systemClock,
+      measure: () => BOUNDS, isLocked: () => false, currentTime: () => 50, duration: () => 100,
+      onVolume: vi.fn(), onBrightness: vi.fn(), onSeek: vi.fn(), onTap: vi.fn(),
+      onStepEpisode: (offset) => steps.push(offset)
+    });
+
+    // 1. 中央上滑 (500, 300) -> (502, 200)，位移 dy = -100px (满足 >= max(48, 500*0.12=60))，横向仅 2px
+    controller.pointerDown(point(500, 300));
+    controller.pointerMove(point(501, 280));
+    controller.pointerMove(point(502, 200));
+    controller.pointerUp(point(502, 200));
+    expect(steps).toEqual([1]); // 上滑下一集
+
+    // 2. 中央下滑 (500, 200) -> (501, 320)，位移 dy = +120px
+    controller.pointerDown(point(500, 200));
+    controller.pointerMove(point(501, 230));
+    controller.pointerMove(point(501, 320));
+    controller.pointerUp(point(501, 320));
+    expect(steps).toEqual([1, -1]); // 下滑上一集
+
+    // 3. 纵向位移不足（仅 30px < 60px），抬手取消不切集
+    controller.pointerDown(point(500, 250));
+    controller.pointerMove(point(500, 220));
+    controller.pointerUp(point(500, 220));
+    expect(steps).toHaveLength(2);
+
+    // 4. 横向混杂过大（dy = 80px，但 dx = 70px，不满足 dy > dx * 1.5），抬手取消
+    controller.pointerDown(point(500, 250));
+    controller.pointerMove(point(570, 170));
+    controller.pointerUp(point(570, 170));
+    expect(steps).toHaveLength(2);
+  });
 });

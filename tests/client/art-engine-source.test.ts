@@ -20,6 +20,7 @@ vi.mock('artplayer', () => ({
   default: class {
     type = '';
     video = mocks.video;
+    controls = { show: true };
     play = vi.fn(() => Promise.resolve());
     destroy = vi.fn();
     constructor(private options: { customType: { m3u8(video: unknown, url: string): void } }) {
@@ -143,5 +144,13 @@ describe('Art engine HLS source identity', () => {
     expect(mocks.video.muted).toBe(false);
     expect(mocks.video.play).toHaveBeenCalledTimes(1);
     expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('controls show state is updated via setControlsVisible', async () => {
+    const { engine } = await setup();
+    engine.setControlsVisible?.(false);
+    expect((mocks.art as any)?.controls.show).toBe(false);
+    engine.setControlsVisible?.(true);
+    expect((mocks.art as any)?.controls.show).toBe(true);
   });
 });

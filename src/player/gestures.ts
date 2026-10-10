@@ -13,32 +13,19 @@ import type { Clock } from './sleep-timer';
 import {
   BRIGHTNESS_ZONE_MAX, VOLUME_ZONE_MIN, DOUBLE_TAP_WINDOW_MS, SEEK_STEP_SECONDS,
   DEFAULT_TOP_BAND_PX, DEFAULT_BOTTOM_BAND_PX, MOVE_SLOP_PX, DOUBLE_TAP_SLOP_PX,
-  clamp, clamp01, classifyTouch, type GestureZone, type ValueChannel,
+  clamp, clamp01, classifyTouch, isCenterPoint, classifyVerticalStep,
+  attachGestureLayer, type GestureBounds, type PointerLike,
+  type GestureZone, type ValueChannel,
   type TouchGeometryInput, type TouchClassification
 } from './gestures-geometry';
 export {
   BRIGHTNESS_ZONE_MAX, VOLUME_ZONE_MIN, DOUBLE_TAP_WINDOW_MS, SEEK_STEP_SECONDS,
   DEFAULT_TOP_BAND_PX, DEFAULT_BOTTOM_BAND_PX, MOVE_SLOP_PX, DOUBLE_TAP_SLOP_PX,
-  clamp, clamp01, classifyTouch, type GestureZone, type ValueChannel,
+  clamp, clamp01, classifyTouch, isCenterPoint, classifyVerticalStep,
+  attachGestureLayer, type GestureBounds, type PointerLike,
+  type GestureZone, type ValueChannel,
   type TouchGeometryInput, type TouchClassification
 };
-
-export interface GestureBounds {
-  width: number;
-  height: number;
-  top: number;
-  left: number;
-  topBandPx?: number;
-  bottomBandPx?: number;
-}
-
-/** Structural so a test can hand in a literal; a real `PointerEvent` satisfies it. */
-export interface PointerLike {
-  pointerId: number;
-  clientX: number;
-  clientY: number;
-  target?: unknown;
-}
 
 export interface GestureControllerOptions {
   measure(): GestureBounds;
@@ -50,6 +37,8 @@ export interface GestureControllerOptions {
   onTap(point: { x: number; y: number }): void;
   /** Central tap (play/pause toggle) per SPEC §4.3 */
   onCenterTap?(): void;
+  /** Central vertical swipe step (offset = +1 for up/next, -1 for down/prev) */
+  onStepEpisode?(offset: 1 | -1): void;
   /** Horizontal scrub preview during drag (delta in seconds, target time) */
   onScrubPreview?(preview: { deltaSeconds: number; targetSeconds: number; durationSeconds: number }): void;
   /** Horizontal scrub commit on pointer up */
@@ -88,7 +77,7 @@ interface GestureSession {
   startX: number;
   startY: number;
   lastY: number;
-  zone: 'undecided' | ValueChannel | 'scrub' | 'blocked';
+  zone: 'undecided' | ValueChannel | 'scrub' | 'vertical-step' | 'blocked';
   travelled: boolean;
   targetSeconds?: number;
 }
@@ -151,8 +140,10 @@ export function createGestureController(options: GestureControllerOptions): Gest
       if (Math.abs(dy) < Math.abs(dx)) {
         session.zone = options.duration() > 0 ? 'scrub' : 'blocked';
       } else {
-        const start = zoneAt({ x: point.x, y: session.startY }, 0).zone;
-        session.zone = start === 'volume' || start === 'brightness' ? start : 'blocked';
+        const start = zoneAt({ x: session.startX, y: session.startY }, 0).zone;
+        if (start === 'volume' || start === 'brightness') session.zone = start;
+        else if (start === 'dead-band' && options.onStepEpisode) session.zone = 'vertical-step';
+        else session.zone = 'blocked';
       }
       if (session.zone === 'blocked') return;
       // Fall through so the travel that decided the axis already counts: a short flick still moves the value.
@@ -184,9 +175,7 @@ export function createGestureController(options: GestureControllerOptions): Gest
     const now = clock.now();
     const window = options.doubleTapWindowMs ?? DOUBLE_TAP_WINDOW_MS;
     const b = options.measure();
-    const xFrac = b.width > 0 ? point.x / b.width : 0.5;
-    const yFrac = b.height > 0 ? point.y / b.height : 0.5;
-    const isCenter = xFrac >= 0.3 && xFrac <= 0.7 && yFrac >= 0.2 && yFrac <= 0.8;
+    const isCenter = isCenterPoint(point.x, point.y, b.width, b.height);
     const near = lastTap !== null && now - lastTap.at < window &&
       Math.abs(point.x - lastTap.x) < DOUBLE_TAP_SLOP_PX && Math.abs(point.y - lastTap.y) < DOUBLE_TAP_SLOP_PX;
     if (!near) {
@@ -249,6 +238,13 @@ export function createGestureController(options: GestureControllerOptions): Gest
         }
         return;
       }
+      if (mine && travelled && currentSession?.zone === 'vertical-step') {
+        const point = localPoint(event);
+        const b = options.measure();
+        const step = classifyVerticalStep(point.x - currentSession.startX, point.y - currentSession.startY, b.height);
+        if (step.valid) options.onStepEpisode?.(step.offset);
+        return;
+      }
       if (mine && !travelled && !options.isLocked()) handleTap(event);
     },
     cancel: () => {
@@ -264,34 +260,6 @@ export function createGestureController(options: GestureControllerOptions): Gest
       session = null;
       lastTap = null;
       pointers.clear();
-    }
-  };
-}
-
-/**
- * Binds a controller to real events. move/up live on the window so a drag that leaves the player keeps
- * tracking, which is exactly what a full-height swipe needs.
- */
-export function attachGestureLayer(target: HTMLElement, controller: GestureController): { destroy(): void } {
-  const moveTarget: EventTarget = target.ownerDocument?.defaultView ?? target;
-  const isPointer = (event: Event): boolean => typeof (event as PointerEvent).pointerId === 'number';
-  const down = (event: Event) => void (isPointer(event) && controller.pointerDown(event as PointerEvent));
-  const move = (event: Event) => void (isPointer(event) && controller.pointerMove(event as PointerEvent));
-  const up = (event: Event) => void (isPointer(event) && controller.pointerUp(event as PointerEvent));
-  const cancel = (event: Event) => { controller.cancel(); up(event); };
-
-  target.addEventListener('pointerdown', down);
-  moveTarget.addEventListener('pointermove', move);
-  moveTarget.addEventListener('pointerup', up);
-  moveTarget.addEventListener('pointercancel', cancel);
-
-  return {
-    destroy: () => {
-      target.removeEventListener('pointerdown', down);
-      moveTarget.removeEventListener('pointermove', move);
-      moveTarget.removeEventListener('pointerup', up);
-      moveTarget.removeEventListener('pointercancel', cancel);
-      controller.destroy();
     }
   };
 }

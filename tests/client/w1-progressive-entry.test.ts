@@ -68,7 +68,7 @@ describe('W1 真实打开语义：已知信息不等待详情与配置', () => {
     expect(h.mount.querySelector('.detail-main-title')?.textContent).toBe(a.title);
     expect(h.mount.querySelector('.detail-synopsis-text')?.textContent).toBe(a.synopsis);
     await settle();
-    expect(h.api.title.mock.calls.filter(([id]) => id === a.id)).toHaveLength(1);
+    expect(h.api.title.mock.calls.filter((call: any) => call[0] === a.id)).toHaveLength(1);
     gate.resolve(); await settle(); h.player.close();
   });
 
@@ -85,5 +85,27 @@ describe('W1 真实打开语义：已知信息不等待详情与配置', () => {
     expect(h.mount.textContent).toContain(source.synopsis);
     expect(h.api.title).toHaveBeenCalledTimes(1);
     h.player.close(); gate.resolve(); expect(await opening).toBe(false);
+  });
+
+  it('两阶段起播：冷启动未缓存详情时优先消费 bootstrap 快速起播，不等待后台全量详情', async () => {
+    const gate = delayed();
+    const source = item('boot_1', '两阶段起播剧');
+    const bootedEpisode = { episodeNumber: 1, title: '第1集', lines: [{ providerId: 'p1', mediaUrl: 'https://cdn.test/ep1.m3u8' }] };
+    const bootstrapRaw = {
+      schema: 1, workId: source.id, revision: 1, factVersion: 'abc',
+      item: source, targetEpisode: bootedEpisode, catalogStatus: 'complete', persistenceStatus: 'stored'
+    };
+    const h = host({
+      titleGate: gate.promise,
+      respondTitle: async () => { await gate.promise; return detailOf(source); },
+      api: { titleBootstrap: vi.fn(async () => bootstrapRaw) } as any
+    });
+    const openTask = h.player.open(source.id);
+    await settle();
+    expect(h.player.isOpen()).toBe(true);
+    expect(h.player.state()?.episodeId).toBe(1);
+    gate.resolve();
+    expect(await openTask).toBe(true);
+    h.player.close();
   });
 });

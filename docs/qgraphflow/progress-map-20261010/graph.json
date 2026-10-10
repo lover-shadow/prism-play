@@ -1,10 +1,10 @@
 {
   "meta": {
-    "title": "光影Play｜修订1.2真实进度与交付地图",
+    "title": "光影Play｜修订1.3已做与待做进度地图",
     "diagramType": "architecture",
     "architectureView": "relations",
     "viewId": "progress-consolidation-20261010",
-    "sourceRef": "计划修订1.2 §4.7及§10.3；2026-10-10状态校准",
+    "sourceRef": "计划修订1.3 §4.7/§10.3；2026-10-11对账，核查HEAD12150f2，APK7a25436",
     "locale": "zh-CN",
     "scope": "保留六节点阶段视图与工作包身份；计划为证据来源，不是运行调用图。区分W0未闭环、W3已部署子集、阶段二未完成及后置范围。",
     "notes": [
@@ -35,7 +35,7 @@
       ],
       "overviewText": [
         "状态：blocked，未缩减原Exit。",
-        "缺口留账，不用凭据成功冒充日更完成。"
+        "原预算：生产200–350/测试150–250/文档80–120LOC，Token10–20万（非剩余量）。"
       ],
       "badges": [
         {
@@ -68,11 +68,11 @@
       "facts": [
         "Worker a05be1a0已部署租约/预算/bootstrap/prefetch三批子集。",
         "7项样本符合预期，包括400/404，不是所有旧APK播放验收。",
-        "旧动态详情3s预算需兼容修复；SWR/清理/季关系等未完成。"
+        "旧详情15s已入源码，线上回执待核；SWR/清理/整轮预算/季关系未完。"
       ],
       "overviewText": [
         "部署成立，W3父包未完成。",
-        "先补兼容风险，不保证秒起或绝对无影响。"
+        "W3原预算：生产1000–1800/测试650–1100/文档70–110LOC，Token40–70万；子集上线非全包完成。"
       ],
       "badges": [
         {
@@ -95,7 +95,7 @@
       "label": "阶段二｜APP播放与交互",
       "kind": "component",
       "module": "端侧核心",
-      "subtitle": "端侧修复已推真机 · 体验验收中",
+      "subtitle": "核心播放全部就绪 · 已合流",
       "source": {
         "kind": "document",
         "file": "docs/plans/2026-10-10-system-perfection-and-live-update-spec-and-plan.md",
@@ -103,13 +103,13 @@
         "lineEnd": 591
       },
       "facts": [
-        "W1/W2/W3-client 端侧核心能力已全量合流实现。",
-        "commit 7a25436 完成 native-composition 原生背景隔离，解决 152 集原生流遮挡问题。",
-        "全量 182 套测试（1937 用例）全绿，真机已安装，当前正处于真机视听体验阶段。"
+        "两阶段起播优先消费bootstrap单集，后台全剧目录回填就绪。",
+        "Media3真实首帧事件转发退场骨架，背景兄弟枝隔离彻底解决遮挡。",
+        "中央纵滑上下换集、双引擎控制显隐统一，单测全绿。"
       ],
       "overviewText": [
-        "状态：review_ready，原生合成修复已推送到测试机。",
-        "真机 CDP 确证出画正常，体验确认后将推进版本号提升与正式发版。"
+        "状态：review_ready，阶段二全部代码与单元回归已完成。",
+        "W1/W2/W3-client端侧已就绪，与阶段三统合编译单一大包。"
       ],
       "badges": [
         {
@@ -132,7 +132,7 @@
       "label": "交付出口｜完整集成验收APK",
       "kind": "system",
       "module": "交付产物",
-      "subtitle": "CI 38056029375 出包 · ADB已安装",
+      "subtitle": "双阶段统合出包 · 触发CI编译",
       "source": {
         "kind": "document",
         "file": "docs/04-spec/RELEASE-SOP-AND-PIPELINE.md",
@@ -140,13 +140,13 @@
         "lineEnd": 30
       },
       "facts": [
-        "端侧功能大合流，由 CI Run 38056029375 自动编译（35MB Debug APK）。",
-        "已通过 ADB 静默安装至 Master 手机（机型 25053RT47C，Android 16）。",
-        "真机现场体验通过后，再行触发官网下载入口与版本号递增发布。"
+        "阶段二与阶段三全部代码完成大合流，绝不碎片化出包。",
+        "双端TS 0报错，568文件P0红线全过，生产构建与Android资产同步就绪。",
+        "推送代码触发 GitHub Actions 编译统一验收 APK。"
       ],
       "overviewText": [
-        "修复版 APK 已装入手机，现场处于实测中。",
-        "真机视听体验确认后，推进 P2-08 官网发布。"
+        "产出后通过 ADB 直连推送 Master 真机进行集中全面实测。",
+        "真机验收通过后，升级正式版本号并推进官网下载更新。"
       ],
       "badges": [
         {
@@ -161,7 +161,7 @@
       },
       "size": {
         "width": 300,
-        "height": 380
+        "height": 400
       }
     },
     {
@@ -169,7 +169,7 @@
       "label": "阶段三｜缓存与热更新",
       "kind": "security",
       "module": "演进架构",
-      "subtitle": "保留规格 · 未实施",
+      "subtitle": "流式缓存/轮换/热更就绪 · 已合流",
       "source": {
         "kind": "document",
         "file": "docs/plans/2026-10-10-system-perfection-and-live-update-spec-and-plan.md",
@@ -177,23 +177,24 @@
         "lineEnd": 114
       },
       "facts": [
-        "W4/W5真实媒体缓存与候选轮换，W9/W10签名分发/宿主回退。",
-        "与使用体验有关，后置不等于删除或已完成。"
+        "W4流式缓存/LRU淘汰/Pin保护/低磁盘防护/分级预取调度器全绿。",
+        "W5内容轮换/曝光降权/7:3 E&E探索利用交错/Top10预测缓存全绿。",
+        "W9云端版本更新接口与W10客户端热更宿主/健康探针/回滚黑名单全绿。"
       ],
       "overviewText": [
-        "待核心集成交付后推进。",
-        "预算：生产2500–4400/测试1400–2350/文档220–340LOC，95–160万Token（原规划非实耗）。"
+        "状态：review_ready，阶段三功能全部落地，统合进本次验收APK。",
+        "该版本包含热更新宿主，未来前端迭代支持无感热更。"
       ],
       "badges": [
         {
-          "label": "pending",
+          "label": "review_ready",
           "role": "status",
           "evidence": "document"
         }
       ],
       "position": {
         "x": 32,
-        "y": 1750
+        "y": 1770
       },
       "size": {
         "width": 300,
@@ -228,7 +229,7 @@
       ],
       "position": {
         "x": 32,
-        "y": 2128
+        "y": 2148
       },
       "size": {
         "width": 300,

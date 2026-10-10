@@ -126,15 +126,23 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
     unregisterBack = registerBackHandler(consumeBack);
     const retry = (): void => { void open(contentId, resume, { candidate }); };
     // 先取详情：私密与不存在都靠统一事实缓存（底层仍是 `api.title` 路径）的 404 收敛，宿主不猜测、不预筛。
-    let loaded: TitleDetail;
+    let loaded: TitleDetail, backgroundDetail: Promise<{ detail: TitleDetail }> | null = null;
     const refresh = Promise.resolve().then(() => deps.runtime?.refresh());
-    void refresh.catch(() => undefined); // 并行任务仍在本代次正式等待并处理错误
+    void refresh.catch(() => undefined);
     try {
       if (!candidate) await refresh;
-      // 每一个 await 之后都先核代次：偏好读取一慢就被取消的话，不该再把那次详情请求发出去。
       if (mine !== opening || layer !== host) return discard(host);
-      const entry = await facts.loadDetail(contentId, { signal: request.signal });
-      loaded = entry.detail; trace('详情事实就绪');
+      const cached = facts.peek(contentId)?.detail;
+      const targetEp = resume?.last_episode_number ?? 1;
+      const booted = !cached && typeof facts.loadBootstrap === 'function' ? await facts.loadBootstrap(contentId, targetEp, request.signal) : null;
+      if (booted && booted.targetEpisode.lines.length > 0) {
+        loaded = { item: booted.item, episodes: [{ episodeId: booted.targetEpisode.episodeNumber, episodeNumber: booted.targetEpisode.episodeNumber, title: booted.targetEpisode.title, durationSeconds: booted.targetEpisode.durationSeconds ?? 0 }] };
+        backgroundDetail = facts.loadDetail(contentId);
+      } else {
+        const entry = await facts.loadDetail(contentId, { signal: request.signal });
+        loaded = entry.detail;
+      }
+      trace('详情事实就绪');
     } catch (error) {
       return refuse(host, mine, retry, hostErrorFor(error));
     }
@@ -239,7 +247,7 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
     host.shell.querySelector('.prism-player__chrome')?.append(cast);
     await player.load(target.episode.episodeId, target.seconds > 0 ? target.seconds : undefined);
     host.dismissSkeleton();
-    // load 在途期间被关掉/被抢占时如实报 false：调用方不该拿到一个"成功但已经没有层"的结果。
+    if (backgroundDetail) void backgroundDetail.then((full) => { if (mine === opening && layer === host && full?.detail) { detail = full.detail; detailBodyRef?.markEpisode(player?.state().episodeId ?? target.episode.episodeId); } }).catch(() => undefined);
     return mine === opening && layer === host;
   }
   function close(retainStage = false): void {
@@ -248,10 +256,9 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
     watchVideo?.destroy(); watchVideo = null;
     void deps.runtime?.watch?.setScope('unknown');
     nudge?.close(); nudge = null;
-    if (keyup !== null) document.removeEventListener('keydown', keyup);
-    keyup = null;
-    if (unregisterBack !== null) unregisterBack(); unregisterBack = null;
-    if (resizeHandler !== null) window.removeEventListener('resize', resizeHandler); resizeHandler = null;
+    if (keyup !== null) { document.removeEventListener('keydown', keyup); keyup = null; }
+    if (unregisterBack !== null) { unregisterBack(); unregisterBack = null; }
+    if (resizeHandler !== null) { window.removeEventListener('resize', resizeHandler); resizeHandler = null; }
     if (!retainStage) { isFullscreen = false; videoAspect = null; void fullscreenPolicy(false); }
     detailBodyRef?.body.remove(); detailBodyRef?.destroy(); detailBodyRef = null;
     const instance = player;
@@ -262,8 +269,7 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
     layer = null;
     // 从未装配过内核的层（loading / error）不是一次"播放退出"：不报断点、也不谎报 onClose。
     if (instance !== null) {
-      instance.destroy();
-      deps.onPrivacyChange(false);
+      instance.destroy(); deps.onPrivacyChange(false);
       if (report !== null) deps.onExit?.(report);
       if (!retainStage) deps.onClose?.();
     }
@@ -279,17 +285,14 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
   }
   return {
     open, close,
-    isOpen: () => layer !== null,
-    suspend: () => watchVideo?.reset('blur'),
+    isOpen: () => layer !== null, suspend: () => watchVideo?.reset('blur'),
     playingPrivateContent: () => player !== null && player.state().isPrivate,
     state: () => player?.state() ?? null,
     onNotification(action) {
       if (action === 'toggle') act((current) => (current.state().playing ? current.pause() : current.play()));
       else if (action === 'next') step(1);
       else if (action === 'previous') step(-1);
-      else if (action === 'focus-lost' || action === 'focus-regained') {
-        act((current) => current.notifyAudioFocus(action === 'focus-lost' ? 'lost' : 'restored'));
-      }
+      else if (action === 'focus-lost' || action === 'focus-regained') act((c) => c.notifyAudioFocus(action === 'focus-lost' ? 'lost' : 'restored'));
     }
   };
 }

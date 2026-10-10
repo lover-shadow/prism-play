@@ -57,3 +57,73 @@ export function classifyTouch(input: TouchGeometryInput): TouchClassification {
   if (xFraction > VOLUME_ZONE_MIN) return { zone: 'volume', xFraction, deltaRatio };
   return { zone: 'dead-band', xFraction, deltaRatio };
 }
+
+export const CENTER_ZONE_X_MIN = 0.3;
+export const CENTER_ZONE_X_MAX = 0.7;
+export const CENTER_ZONE_Y_MIN = 0.2;
+export const CENTER_ZONE_Y_MAX = 0.8;
+export const STEP_MIN_TRAVEL_PX = 48;
+export const STEP_TRAVEL_HEIGHT_RATIO = 0.12;
+export const STEP_DOMINANT_RATIO = 1.5;
+
+export function isCenterPoint(x: number, y: number, width: number, height: number): boolean {
+  if (width <= 0 || height <= 0) return false;
+  const xFraction = x / width, yFraction = y / height;
+  return xFraction >= CENTER_ZONE_X_MIN && xFraction <= CENTER_ZONE_X_MAX &&
+         yFraction >= CENTER_ZONE_Y_MIN && yFraction <= CENTER_ZONE_Y_MAX;
+}
+
+export function classifyVerticalStep(dx: number, dy: number, height: number): { valid: boolean; offset: 1 | -1 } {
+  const absY = Math.abs(dy), absX = Math.abs(dx);
+  const minTravel = Math.max(STEP_MIN_TRAVEL_PX, height * STEP_TRAVEL_HEIGHT_RATIO);
+  if (absY < minTravel || absY <= absX * STEP_DOMINANT_RATIO) return { valid: false, offset: 1 };
+  return { valid: true, offset: dy < 0 ? 1 : -1 };
+}
+
+export interface GestureBounds {
+  width: number;
+  height: number;
+  top: number;
+  left: number;
+  topBandPx?: number;
+  bottomBandPx?: number;
+}
+
+export interface PointerLike {
+  pointerId: number;
+  clientX: number;
+  clientY: number;
+  target?: unknown;
+}
+
+export interface GestureDispatcher {
+  pointerDown(event: PointerLike): void;
+  pointerMove(event: PointerLike): void;
+  pointerUp(event: PointerLike): void;
+  cancel(): void;
+  destroy(): void;
+}
+
+export function attachGestureLayer(target: HTMLElement, controller: GestureDispatcher): { destroy(): void } {
+  const moveTarget: EventTarget = target.ownerDocument?.defaultView ?? target;
+  const isPointer = (e: Event): boolean => typeof (e as PointerEvent).pointerId === 'number';
+  const down = (e: Event) => void (isPointer(e) && controller.pointerDown(e as PointerEvent));
+  const move = (e: Event) => void (isPointer(e) && controller.pointerMove(e as PointerEvent));
+  const up = (e: Event) => void (isPointer(e) && controller.pointerUp(e as PointerEvent));
+  const cancel = (e: Event) => { controller.cancel(); up(e); };
+
+  target.addEventListener('pointerdown', down);
+  moveTarget.addEventListener('pointermove', move);
+  moveTarget.addEventListener('pointerup', up);
+  moveTarget.addEventListener('pointercancel', cancel);
+
+  return {
+    destroy: () => {
+      target.removeEventListener('pointerdown', down);
+      moveTarget.removeEventListener('pointermove', move);
+      moveTarget.removeEventListener('pointerup', up);
+      moveTarget.removeEventListener('pointercancel', cancel);
+      controller.destroy();
+    }
+  };
+}

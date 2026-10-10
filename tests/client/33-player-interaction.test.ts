@@ -157,4 +157,34 @@ describe('定时、来电、抽屉与拆除', () => {
     h.player.destroy();
     expect(h.calls.stopBackground).toBe(1);
   });
+
+  it('central vertical swipe switches to next episode on swipe up and previous on swipe down', async () => {
+    const h = setup({ detail: detailOf() });
+    await h.player.load(11); await settle();
+    expect(h.player.state().episodeId).toBe(11);
+
+    // 1. 中央上滑 (x=200, y=150 -> y=50, dy=-100) -> 上滑下一集 -> episode 12
+    h.pointer('pointerdown', 200, 150);
+    h.pointer('pointermove', 200, 130);
+    h.pointer('pointermove', 200, 50);
+    h.pointer('pointerup', 200, 50);
+    await settle();
+    expect(h.player.state().episodeId).toBe(12);
+
+    // 2. 中央下滑 (x=200, y=50 -> y=150, dy=+100) -> 下滑上一集 -> episode 11
+    h.pointer('pointerdown', 200, 50);
+    h.pointer('pointermove', 200, 70);
+    h.pointer('pointermove', 200, 150);
+    h.pointer('pointerup', 200, 150);
+    await settle();
+    expect(h.player.state().episodeId).toBe(11);
+
+    // 3. 在第一集下滑 -> 边界反馈 "已经是第一集"
+    h.pointer('pointerdown', 200, 50);
+    h.pointer('pointermove', 200, 150);
+    h.pointer('pointerup', 200, 150);
+    await settle();
+    expect(h.player.state().episodeId).toBe(11);
+    expect(h.failures.some((f) => f.message === '已经是第一集')).toBe(true);
+  });
 });

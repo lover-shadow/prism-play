@@ -76,4 +76,5 @@ export interface PrismPlayer {
   /** 视口几何变了（进出全屏、转屏）：重算画面矩形与面板模式，不触碰任何全屏通道（SPEC §1.2.0）。 */
   relayout(): void;
   setPlaybackRate(rate: number): boolean; dismissOverlay(): boolean;
+  stepEpisode?(offset: number): void;
 }

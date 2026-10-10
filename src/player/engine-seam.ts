@@ -13,7 +13,7 @@
  * 内核向上转发的媒体事件闭集，与 `<video>` 原生事件同名（ArtPlayer 以 `video:` 前缀透传）。
  * `waiting`/`seeking` 是控件收起判据的输入（AC-19：缓冲与拖动期间控件必须留在屏幕上）。
  */
-export type MediaEvent = 'ended' | 'timeupdate' | 'play' | 'playing' | 'pause' | 'waiting' | 'seeking' | 'seeked' | 'error' | 'loadedmetadata';
+export type MediaEvent = 'ended' | 'timeupdate' | 'play' | 'playing' | 'pause' | 'waiting' | 'seeking' | 'seeked' | 'error' | 'loadedmetadata' | 'firstframe';
 
 /**
  * 失败码闭集（A-8 / 云端 §C-4）从遥测层取用，不在这里另立一套：线路记账与内核分类必须共用同一份口径，

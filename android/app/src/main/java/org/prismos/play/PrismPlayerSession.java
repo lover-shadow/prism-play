@@ -20,7 +20,7 @@ import java.util.function.Consumer;
 @UnstableApi
 final class PrismPlayerSession implements AutoCloseable {
     enum Event {
-        ended, timeupdate, play, playing, pause, waiting, seeking, seeked, error, loadedmetadata
+        ended, timeupdate, play, playing, pause, waiting, seeking, seeked, error, loadedmetadata, firstframe
     }
     final String id;
     final PrismPlayerSurface surface;
@@ -150,6 +150,9 @@ final class PrismPlayerSession implements AutoCloseable {
                 }
                 @Override public void onVideoSizeChanged(VideoSize size) {
                     if (live() && metadata) emit(Event.loadedmetadata, null);
+                }
+                @Override public void onRenderedFirstFrame() {
+                    if (live()) emit(Event.firstframe, null);
                 }
             });
             player.setMediaItem(new MediaItem.Builder().setUri(result.url)
