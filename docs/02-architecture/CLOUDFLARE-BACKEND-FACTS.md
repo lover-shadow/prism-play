@@ -281,6 +281,35 @@ cd edge && npx wrangler d1 execute prism-play-db --remote --file=scripts/sync-in
 
 ---
 
+### 6. W3 服务端第一批：刷新协调与预算（2026-10-10，本地实现，未部署）
+
+- 实现范围：`edge/src/search/discovery-refresh.ts` 查询租约30s、10s心跳、任务占用跟随查询租约；`discovery-query.ts` owner条件续租（过期不能复活），`discovery-jobs.ts` owner条件续期/释放。异常及时释放，进程中断后任务不再保留独立300s占用。
+- 写入围栏：`discovery-store.ts` work发布锁30s，refresh传入父租约；发布前检查父owner，最终D1 `INSERT…SELECT` 同时校验work/parent owner与时效，再原子更新指针及changes。INSERT候选不成立则UPSERT也不会执行；失锁期间至多留下私有R2孤儿，不产生可读指针。撤片与原有timestamp+hash CAS保持。
+- 预算同源：`discovery-budget.ts` 前台2请求/3000ms，后台24请求/25000ms；目前按**单次provider resolve**计，重定向与读体共用该预算。`discovery-cards.ts` 前台冷详情接预算；`s1-directory.ts`及生产registry不再忽略调用方预算。已知card的上游超预算/blocked进入title路由503，不伪装成功或未知404。
+- refresh最多3个provider resolve并行，默认每批仍2部。初始化batch在单isolate内部串行，其他解析并发；该链不是跨isolate锁，真正互斥靠D1 owner条件。**本地测试适配器不能重叠batch，这不是生产D1要求所有批次串行。**
+- **不能宣称完成的边界**：整轮DB/R2/provider墙钟deadline、共享provider累计请求池、jitter尚未施工；work发布锁暂无心跳，R2慢于30s安全拒写而非自动延长；旧`discovery-service.ts`查询300s锁仍残留。数据库校验使用提交前采样时间，不证明排队后实际执行时间仍未过期；已落库的owner接管/撤片仍被围栏拒写。
+- 快速起播事实：生产S1一次目录得到全部videoId，M1一次详情得到全部播放组，未证实目标集独立上游接口；只缩小响应不等于冷详情获取已解耦。bootstrap候选只有lineSummary不足以起播，实施时必须正式约定真实lines/native、索引、事实版本、pending与后台任务；本批未新增路径或后台完整事实任务。
+- 本地验证：SQLite真实迁移与可控R2/provider夹具，失锁发布先Red后Green；续租/重领/心跳清理/并发发布/前台预算/S1贯通回归，云端73套800项过。P0、Edge类型与契约绿；无生产请求/部署/迁移/新资源，旧API路径和表数未增。
+- 运维/回退：线上保持原版本，不执行release。后续获部署授权后按标准流水线；排查先分辨lease key/owner/expiry、job lease_until及失败冷却，不人工删生产锁绕过条件。回退代码不删schema或事实对象；本地新增回归保留。工作包状态与下一动作以计划§10.3为准。
+
+### 7. W3 bootstrap 与后台完整事实（2026-10-10，本地实现，未部署）
+
+- 新入口 `GET /api/titles/{titleId}/bootstrap?ep=1..5000`；只ep且最多一次，非法/注入400，不存在/未准入/缺目标同构404，空线路/目录切代/临时失败503，所有响应no-store。响应schema1、目标实际线路(保持lineIndex)、item、公开revision、完整title投影SHA256 factVersion、generatedAt/servedAt、catalogStatus=complete、persistenceStatus=stored/scheduled。
+- 准入沿用handleTitles完整事实验证和私密双准入；新增可选resolveCard接缝仅供bootstrap从已核验全目录RAM读。`discovery-prepared.ts`身份/完整性验证后再核候选，发布前再核；store最终D1匹配candidate_json，删除/替换发生在上传中也阻止旧pointer。cold authority每次从KV重读目录，返回前若公共revision已变则503，下次重新按新代查，不返回旧target。
+- complete表示已读取核验全目录，不表示所有视频已解码。scheduled只表示ctx.waitUntil登记背景发布，不保证持久化；失败不产生新pointer，客户端完整title读取须可重试。无ctx冷结果503，不同步持久化冒充非阻塞。原生native-playback生产ctx复用bootstrap，仍由服务端选目标与线路，不接受客户端videoId；背景未完成时可能重复目录fetch，不能宣称所有重复网络已消除。
+- 真实收益仅“目标响应小+前台不等待R2写入”；现有S1/M1仍一次抓取完整目录/详情，后台不是虚构新上游单集协议。RAM核验未发布不构成内容授权依据，继续现行准入，不新增DRM处理或密钥返回。
+- 回归入口tests/edge/w3-bootstrap.test.ts：slow-R2 gate先200后背景完成旧title兼容、发布失败不冒称stored、原生复核不等慢写、卡片上传期删除、warm读中revision变化503、未准入私密同构、空lines503、非法参数400；只本地SQLite/R2/provider固定夹具，未真实边缘验证。
+- 运行/回滚：本批无新表/资源；部署仍等待整个最小核心出口及标准review/全量门禁/旧版本回滚记录。Master05:09已给条件式Worker部署授权，达出口后不重复询问；不包含官网APK指针/公告发布。出现bootstrap异常可让新APP退旧完整title，旧APP请求路径未变；不得删除完整事实补救。具体部署ID和生产回执须实际部署后补入，当前为空。
+
+### 8. W3公开元数据预热（2026-10-10，本地未部署）
+
+- POST `/api/titles/{titleId}/prefetch`仅公开作品（私密即使有效双准入也404，不进入后台存储），严格requestId/episodeNumbers/reason三键、JSON原始体4KiB流式限额、最多4个唯一1..5000集且窗口跨度≤3。200表示现存完整目录已就绪且不触上游；202只表示waitUntil登记或合并，不承诺预热成功/可播放。
+- 防放大：平台CF-Connecting-IP摘要为caller，每60s最多12请求（ready同样计数）、超限429 Retry-After；同work原子30s租约合并、每work+episode30s窗口去重；后台10s心跳且续租MAX不缩短。预热限流独立于兑换限流，复用discovery_rate_windows，无新表。
+- 后台只请求目录元数据；复用prepareCardDetail完整公共身份/集数/线路校验，24请求/25s单provider预算。登记失败不启动fetch；无ctx冷请求503。发布检查当前候选、当前manifest authority、父owner以及最终D1候选JSON+NOT EXISTS disabled，防在途旧任务复活已撤回条目；失败/清理异常记录类别日志，TTL最终回收。
+- 禁止夸大：后台不是durable队列，KV authority和D1提交不是跨存储原子；IO整体hard deadline、shared budget/jitter、资源/SWR治理未完成。私密后台不存；metadata-ready不是RAM媒体缓存，也不是视频预下载，分片不经本入口。
+- 证据：w3-prefetch18项(真实SQLite迁移、可控provider/R2、分块超4KiB取消、有效私密凭证也拒绝、ready/cold限流、登记失败、后台失败)，publication追加disabled不复活、lease追加乱序续期不缩短均先Red后Green；云端75套836项过，最后新增单调续租45项专项过，前端/edge类型/契约31路径/P0552绿。部署ID仍无。
+- 运维回退：无生产变更；当前无需迁移。日后部署后观察prefetch失败类别与429、owner过期、实际目录请求数；不得把accepted作为播放成功统计。回退Worker时旧完整title继续用，不清历史/事实。APP70%探针接线未施工，计划TODO保留。
+
 ## 七、 技术演进与储备规划 (v2.1+ Backlog)
 
 1. **边缘大模型推荐引擎 (Workers AI)**：
@@ -289,3 +318,14 @@ cd edge && npx wrangler d1 execute prism-play-db --remote --file=scripts/sync-in
 2. **多语言与语义检索 (Vectorize + BGE-M3)**：
    - 演进接入 Cloudflare Vectorize 向量数据库，支持意图检索（如“类似狂飙的年代反黑剧”）；
    - 当前 v2.0 保持 D1 FTS5 零外部依赖，具备确定性与极低资源消耗。
+
+---
+
+## 八、 生产部署履历与回滚快照
+
+- **2026-10-10 16:49 阶段一部署**：
+  - 部署版本：`a05be1a0-d74c-479b-abbf-d08c43665117`
+  - 部署前服务buildId留档：`c3941935-a785-47a0-81fb-5f6884bf0986`；实际回滚需先核验Cloudflare版本/部署列表的可用目标，不将服务响应ID直接当作已经演练的一键回滚证明。
+  - 部署内容：W3 服务端（30s 刷新租约续期、失锁原子发布围栏、前后台双轨预算、`/api/titles/{id}/bootstrap` 快速当前集起播、`/api/titles/{id}/prefetch` 邻集元数据预热）
+  - 生产冒烟验证：7 项端点全绿（版本状态 200、四频道 200、旧详情 `/api/titles/:id` 200 向下兼容、新起播 `/bootstrap` 200、新预热 `/prefetch` 200、广告清洗 `/proxy/hls/clean` 400 校验正常、私密边界 `/api/catalog?channel=private` 404 隔离正常）。
+  - 结论（修订1.2校准）：已实现三批子集接口可达；单样本详情200及无参清洗400不证明旧APK全面播放/授权/广告净化无退化。旧动态详情3s预算兼容补验、W3剩余机制与真机验收仍未完成，见计划§4.7/§10.3.1。

@@ -59,9 +59,20 @@ export async function initializeDiscoveryJobs(db: D1Database, key: DiscoveryQuer
   return (await db.batch(statements))[1].meta.changes === 1;
 }
 export async function claimDiscoveryJob(db: D1Database, job: DiscoveryJob, lease: DiscoveryLease, now: number): Promise<boolean> {
-  return (await db.prepare(`UPDATE discovery_jobs SET lease_token = ?, lease_until = ?
+  return (await db.prepare(`UPDATE discovery_jobs SET lease_token = ?, lease_until =
+    (SELECT expires_at FROM discovery_leases WHERE lease_key = ? AND owner_token = ?)
     WHERE job_id = ? AND status = 'pending' AND lease_until <= ? AND ${leaseGuard}`)
-    .bind(lease.token, now + 300, job.job_id, now, lease.key, lease.token, now).run()).meta.changes === 1;
+    .bind(lease.token, lease.key, lease.token, job.job_id, now, lease.key, lease.token, now).run()).meta.changes === 1;
+}
+export async function renewDiscoveryJob(db: D1Database, job: DiscoveryJob, lease: DiscoveryLease, now: number): Promise<boolean> {
+  return (await db.prepare(`UPDATE discovery_jobs SET lease_until =
+    (SELECT expires_at FROM discovery_leases WHERE lease_key = ? AND owner_token = ?)
+    WHERE job_id = ? AND status = 'pending' AND lease_token = ? AND lease_until > ? AND ${leaseGuard}`)
+    .bind(lease.key, lease.token, job.job_id, lease.token, now, lease.key, lease.token, now).run()).meta.changes === 1;
+}
+export async function releaseDiscoveryJob(db: D1Database, job: DiscoveryJob, lease: DiscoveryLease): Promise<boolean> {
+  return (await db.prepare(`UPDATE discovery_jobs SET lease_token = NULL, lease_until = 0
+    WHERE job_id = ? AND lease_token = ?`).bind(job.job_id, lease.token).run()).meta.changes === 1;
 }
 function cursorBucket(context: DiscoveryContext): R2Bucket {
   const bucket = context.bindings.DISCOVERY_BUCKET;

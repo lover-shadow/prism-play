@@ -7,6 +7,7 @@ import { discoveryCanonicalId } from './discovery-facts';
 import { resolveS1Directory } from './providers/s1-directory';
 import { createM1Provider } from './providers/m1';
 import type { TitleAsset } from '../library/title-asset';
+import { DISCOVERY_FRONT_BUDGET } from './discovery-budget';
 
 export interface DiscoveryCard { candidate: DiscoveryCandidate; item: ContentItem }
 interface CardRow { candidate_json: string; card_json: string }
@@ -48,7 +49,8 @@ export async function readDiscoveryCard(context: DiscoveryContext, workId: strin
 export async function resolveCardDetail(
   context: DiscoveryContext,
   workId: string,
-  configs: Partial<Record<DiscoveryProviderId, DiscoveryConfig>>
+  configs: Partial<Record<DiscoveryProviderId, DiscoveryConfig>>,
+  budget = DISCOVERY_FRONT_BUDGET
 ): Promise<TitleAsset | null> {
   const existing = await readDiscoveryFact(context, workId, context.nowSeconds());
   if (existing.status === 'ok') return existing.fact.asset;
@@ -59,7 +61,9 @@ export async function resolveCardDetail(
   if (candidate.providerId === 'provider_s1') {
     const config = configs.provider_s1;
     if (!config) return null;
-    const fact = await resolveS1Directory(candidate, config);
+    let fact;
+    try { fact = await resolveS1Directory(candidate, config, budget); }
+    catch { throw new Error('Discovery detail temporarily unavailable'); } // 真实title路由映射503，不能伪装作品404
     fact.lastSyncedEpisode = fact.episodes.length;
     fact.lastSyncedAt = context.nowSeconds();
     const pub = await publishDiscoveryFact(context, 'provider_s1', candidate.sourceItemId, fact, context.nowSeconds(), 86400, workId);
@@ -73,7 +77,8 @@ export async function resolveCardDetail(
     const config = configs.provider_m1;
     if (!config) return null;
     const m1 = createM1Provider(config);
-    const resolved = await m1.resolve(candidate, undefined, { maxRequests: 8, timeoutMs: 15000 });
+    const resolved = await m1.resolve(candidate, undefined, budget);
+    if (resolved.status !== 'complete') throw new Error('Discovery detail temporarily unavailable');
     if (resolved.status === 'complete') {
       const pub = await publishDiscoveryFact(context, 'provider_m1', candidate.sourceItemId, resolved.fact, context.nowSeconds(), 86400, workId);
       if (pub.status === 'published' || pub.status === 'superseded') {

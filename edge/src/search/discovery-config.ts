@@ -56,8 +56,8 @@ export function createDiscoveryProviders(config: DiscoveryServerConfig): Discove
   const providers: DiscoveryProvider[] = [];
   if (config.providers.provider_m1) providers.push(createM1Provider(config.providers.provider_m1));
   const s1 = config.providers.provider_s1;
-  if (s1) providers.push({ ...createS1Provider(s1), resolve: async (candidate) => {
-    try { return { status: 'complete', fact: await resolveS1Directory(candidate, s1) }; }
+  if (s1) providers.push({ ...createS1Provider(s1), resolve: async (candidate, _cursor, budget) => {
+    try { return { status: 'complete', fact: await resolveS1Directory(candidate, s1, budget) }; }
     catch { return { status: 'blocked', providerId: 'provider_s1', reason: 'unavailable' }; }
   } });
   return providers;

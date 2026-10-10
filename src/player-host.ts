@@ -19,6 +19,8 @@ import type { OpenOptions, PlayerHost, PlayerHostDeps } from './player/host-cont
 import { createTitleFactsStore, type TitleFactsStore } from './core/api/title-facts';
 import './player/player-host.css';
 import { createSeasonSwitcher } from './player/season-switcher';
+import { publicOpenCandidate } from './player/open-candidate';
+import { logger } from './core/diagnostics';
 
 export type { OpenCandidate, OpenOptions, PlayerHost, PlayerHostApi, PlayerHostDeps } from './player/host-contract';
 
@@ -42,7 +44,8 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
   const facts: TitleFactsStore = deps.facts ?? createTitleFactsStore({
     fetchRaw: typeof deps.api.titleRaw === 'function' ? (id, signal) => deps.api.titleRaw!(id, signal) : undefined,
     fetchDetail: (id, signal) => deps.api.title(id, signal),
-    fetchManifest: typeof deps.api.titleManifest === 'function' ? (id) => deps.api.titleManifest!(id) : undefined
+    fetchManifest: typeof deps.api.titleManifest === 'function' ? (id) => deps.api.titleManifest!(id) : undefined,
+    fetchBootstrap: typeof deps.api.titleBootstrap === 'function' ? (id, ep, signal) => deps.api.titleBootstrap!(id, ep, signal) : undefined
   });
   /** 当前这一层（loading / error / ready 三态同一条记录）：`layer !== null` 就是"界面被挡住"的真相。 */
   let layer: HostLayer | null = null;
@@ -65,7 +68,7 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
   const fullscreenPolicy = createFullscreenPolicy(orientation, deps.bridge);
   /** AC-19/20：仅横屏影视全屏锁横屏；竖屏不强转，退出解锁。 */
   async function syncOrientation(): Promise<void> {
-    await fullscreenPolicy(isFullscreen && videoAspect === 'landscape');
+    await fullscreenPolicy(isFullscreen, isFullscreen && videoAspect === 'landscape');
   }
   function toggleFullscreen(on?: boolean): void {
     if (layer === null) return;
@@ -77,7 +80,6 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
   }
   /** 播放器是异步构造的（ArtPlayer/hls.js 动态导入），动作必须始终打在"当前那一个"实例上。 */
   const act = (action: (current: PrismPlayer) => void): void => { if (player !== null) action(player); };
-  /** 进度写入被闸门拒绝时播放器不再叠加界面提示，由宿主如实回报给组合根。 */
   const failure = (event: PlayerFailure): void => {
     if (event.kind === 'progress-blocked') deps.onBlocked?.(event.message);
   };
@@ -86,12 +88,8 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
     const current = player;
     if (current === null) { close(); return true; }
     if (detailBodyRef?.dismissOverlay() || current.dismissOverlay()) return true;
-    if (isFullscreen) {
-      toggleFullscreen(false);
-      return true;
-    }
-    close();
-    return true;
+    if (isFullscreen) { toggleFullscreen(false); return true; }
+    close(); return true;
   }
   /** 失败必须停在层内给出出口；但代次已被抢走时旧结果一个节点都不许留下（不得复活画面）。 */
   function refuse(host: HostLayer, mine: number, retry: () => void, kind: OverlayState): false {
@@ -113,7 +111,11 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
     // §3.1：创建与挂载都发生在第一个 await 之前；W1 起同步挂出舞台骨架与卡片预填（仅公开字段）。
     const host = retained ?? createHostLayer({ mount: deps.mount, onClose: () => close() });
     layer = host;
-    host.showSkeleton(options.candidate);
+    const candidate = options.candidate ?? publicOpenCandidate(facts.peek(contentId)?.detail?.item);
+    host.showSkeleton(candidate);
+    const startedAt = performance.now();
+    const trace = (phase: string): void => logger.info('W1加载', phase, { generation: mine, elapsedMs: Math.round(performance.now() - startedAt), preview: candidate !== undefined });
+    trace('已有内容显示');
     keyup = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         if (detailBodyRef?.dismissOverlay() || player?.dismissOverlay()) return;
@@ -122,15 +124,17 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
     };
     document.addEventListener('keydown', keyup);
     unregisterBack = registerBackHandler(consumeBack);
-    const retry = (): void => { void open(contentId, resume); };
+    const retry = (): void => { void open(contentId, resume, { candidate }); };
     // 先取详情：私密与不存在都靠统一事实缓存（底层仍是 `api.title` 路径）的 404 收敛，宿主不猜测、不预筛。
     let loaded: TitleDetail;
+    const refresh = Promise.resolve().then(() => deps.runtime?.refresh());
+    void refresh.catch(() => undefined); // 并行任务仍在本代次正式等待并处理错误
     try {
-      await deps.runtime?.refresh();
+      if (!candidate) await refresh;
       // 每一个 await 之后都先核代次：偏好读取一慢就被取消的话，不该再把那次详情请求发出去。
       if (mine !== opening || layer !== host) return discard(host);
       const entry = await facts.loadDetail(contentId, { signal: request.signal });
-      loaded = entry.detail;
+      loaded = entry.detail; trace('详情事实就绪');
     } catch (error) {
       return refuse(host, mine, retry, hostErrorFor(error));
     }
@@ -139,7 +143,9 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
     // 核验过身份的公开剧目返回空清单：这是"暂无可用播放源"，不是"内容不存在"，两者不得互相冒充。
     if (target.episode === undefined) return refuse(host, mine, retry, 'retryable');
     detail = loaded;
-    // 走到这一行才有资格升级：详情身份已核验、且确实有可播集，标题槽此刻才被写入。
+    host.showSkeleton(publicOpenCandidate(loaded.item));
+    try { await refresh; trace('运行配置就绪'); } catch (error) { return refuse(host, mine, retry, hostErrorFor(error)); }
+    if (mine !== opening || layer !== host) return discard(host);
     host.promote(loaded.item.title);
     if (deps.runtime) {
       await deps.runtime.watch?.setScope(isPrivateSubject(loaded.item) ? 'private' : 'public');
@@ -154,6 +160,7 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
       titleId: loaded.item.id,
       detail: loaded,
       facts,
+      onFirstFrame: () => { host.dismissSkeleton(); },
       onProgress: deps.onProgress,
       onError: (event) => { if (event.kind === 'media') watchVideo?.reset('error'); failure(event); },
       playbackPreferences: deps.runtime?.playbackPreferences ?? deps.playbackPreferences,
@@ -203,7 +210,7 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
           return [];
         }
       },
-      (contentId) => { void open(contentId); },
+      (contentId, item) => { void open(contentId, undefined, { candidate: publicOpenCandidate(item) }); },
       deps.following ? { store: deps.following, report: deps.onBlocked } : undefined,
       // 菜单互斥：详情台的投屏一开，选集与倍速必须先收——同一时刻只允许一个菜单（R26-05）。
       { beforeMenuOpen: () => void player?.dismissOverlay() }
@@ -211,10 +218,10 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
     detailBodyRef = detailBody;
     const bindSeasons = (): void => {
       const items = deps.seriesItems?.() ?? [];
-      const s = createSeasonSwitcher(loaded.item, items, (id) => { void open(id, undefined, { retainStage: true }); });
+      const s = createSeasonSwitcher(loaded.item, items, (id, item) => { void open(id, undefined, { retainStage: true, candidate: publicOpenCandidate(item) }); });
       if (s) {
         detailBody.attachSeasonSwitcher(s);
-        const ds = createSeasonSwitcher(loaded.item, items, (id) => { void open(id, undefined, { retainStage: true }); });
+        const ds = createSeasonSwitcher(loaded.item, items, (id, item) => { void open(id, undefined, { retainStage: true, candidate: publicOpenCandidate(item) }); });
         if (ds) {
           host.sheet.querySelector('.prism-drawer [data-prism-ui="season-switcher"]')?.remove();
           host.sheet.querySelector('.prism-drawer')?.prepend(ds);
@@ -231,6 +238,7 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
     cast.addEventListener('click', () => { player?.dismissOverlay(); detailBody.openCast(); });
     host.shell.querySelector('.prism-player__chrome')?.append(cast);
     await player.load(target.episode.episodeId, target.seconds > 0 ? target.seconds : undefined);
+    host.dismissSkeleton();
     // load 在途期间被关掉/被抢占时如实报 false：调用方不该拿到一个"成功但已经没有层"的结果。
     return mine === opening && layer === host;
   }
@@ -267,22 +275,19 @@ export function createPlayerHost(deps: PlayerHostDeps): PlayerHost {
     const ordered = [...detail.episodes].sort((a, b) => a.episodeNumber - b.episodeNumber);
     const at = ordered.findIndex((item) => item.episodeId === player?.state().episodeId);
     const next = ordered[Math.min(ordered.length - 1, Math.max(0, at + offset))];
-    if (next !== undefined) {
-      void player.load(next.episodeId);
-    }
+    if (next !== undefined) void player.load(next.episodeId);
   }
   return {
-    open,
-    close,
+    open, close,
     isOpen: () => layer !== null,
     suspend: () => watchVideo?.reset('blur'),
     playingPrivateContent: () => player !== null && player.state().isPrivate,
     state: () => player?.state() ?? null,
     onNotification(action) {
       if (action === 'toggle') act((current) => (current.state().playing ? current.pause() : current.play()));
-      if (action === 'next') step(1);
-      if (action === 'previous') step(-1);
-      if (action === 'focus-lost' || action === 'focus-regained') {
+      else if (action === 'next') step(1);
+      else if (action === 'previous') step(-1);
+      else if (action === 'focus-lost' || action === 'focus-regained') {
         act((current) => current.notifyAudioFocus(action === 'focus-lost' ? 'lost' : 'restored'));
       }
     }

@@ -43,6 +43,13 @@ export async function acquireDiscoveryLease(db: D1Database, key: string, now: nu
     WHERE discovery_leases.expires_at <= ?`).bind(key, token, now + ttl, now).run();
   return result.meta.changes === 1 ? { key, token } : null;
 }
+export async function renewDiscoveryLease(db: D1Database, lease: DiscoveryLease, now: number, ttl = 30): Promise<boolean> {
+  boundedKey(lease.key); boundedKey(lease.token); discoveryTime(now);
+  if (!Number.isSafeInteger(ttl) || ttl < 1 || ttl > 300) throw new Error('Invalid lease TTL');
+  return (await db.prepare(`UPDATE discovery_leases SET expires_at = MAX(expires_at, ?)
+    WHERE lease_key = ? AND owner_token = ? AND expires_at > ?`)
+    .bind(now + ttl, lease.key, lease.token, now).run()).meta.changes === 1;
+}
 export async function releaseDiscoveryLease(db: D1Database, lease: DiscoveryLease): Promise<boolean> {
   boundedKey(lease.key); boundedKey(lease.token);
   const result = await db.prepare('DELETE FROM discovery_leases WHERE lease_key = ? AND owner_token = ?')

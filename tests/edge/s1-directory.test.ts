@@ -20,6 +20,18 @@ describe('production S1 directory adapter', () => {
     expect(f.fetcher).toHaveBeenCalledTimes(1);
     expect(new URL(f.fetcher.mock.calls[0][0] as string).pathname).toBe('/detail');
   });
+  it('honors caller request budget across redirects instead of hardcoding four requests', async () => {
+    let calls = 0;
+    const cfg: DiscoveryConfig = { origin: 'https://api.example', originAllowlist: new Set(['https://api.example']),
+      coverAllowlist: new Set(['https://cover.example']), mediaAllowlist: new Set(['https://media.example']),
+      fetcher: async () => { calls++; return calls <= 2 ? new Response(null, { status: 302, headers: { Location: '/next' } })
+        : new Response(JSON.stringify({ loaderData: { detail_page: { seriesDetail: {
+          series_id_str: '10', series_title: '故事', episode_cnt: 1, vid_list: ['100']
+        } } } })); } };
+    const provider = createDiscoveryProviders({ enabled: true, providers: { provider_s1: cfg } })[0];
+    expect((await provider.resolve(candidate, undefined, { maxRequests: 2, timeoutMs: 3000 })).status).toBe('blocked');
+    expect(calls).toBe(2);
+  });
   it.each([{ vid_list: ['100', '100'] }, { vid_list: ['100', 101] }, { episode_cnt: 3 },
     { series_id_str: '11' }, { series_title: '另一部剧' }])('rejects inconsistent directory %j', async (extra) => {
     const f = fixture(extra);

@@ -25,7 +25,7 @@ export interface BrowseTarget {
 export interface SearchViewDeps {
   api: SearchApi;
   root: HTMLElement;
-  onOpenTitle(contentId: string): void;
+  onOpenTitle(contentId: string, item?: ContentItem): void;
   hotWords?: string[];
   onBrowse?: (target: BrowseTarget) => void;
   localItems?: () => readonly ContentItem[];
@@ -94,7 +94,7 @@ export function createSearchView(deps: SearchViewDeps): SearchView {
     const railHost = make('div', 'srch-rail-host');
     railHost.dataset.el = 'rank-host';
     deps.root.append(railHost);
-    rail = createRankingsRail({ root: railHost, items: deps.localItems, onOpenTitle: (contentId) => deps.onOpenTitle(contentId) });
+    rail = createRankingsRail({ root: railHost, items: deps.localItems, onOpenTitle: deps.onOpenTitle });
     railHost.hidden = true;
   }
   function syncRail(next = mode): void {
@@ -168,7 +168,7 @@ export function createSearchView(deps: SearchViewDeps): SearchView {
     card.setAttribute('aria-label', `${item.title}：${reason}`);
     coverInto(poster, item.coverUrl, item.title, 'image', 16);
     card.append(poster, make('span', 'srch-result-title', item.title), make('span', 'pv-meta', `${item.category} · ${reason}`));
-    card.addEventListener('click', () => deps.onOpenTitle(item.id));
+    card.addEventListener('click', () => deps.onOpenTitle(item.id, item));
     return card;
   }
   function paintResults(active: Session): void {

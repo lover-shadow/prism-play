@@ -1,22 +1,8 @@
 import type {
-  CatalogChangesResponse,
-  CatalogResponse,
-  ChannelsResponse,
-  DevicePingResponse,
-  DeviceTier,
-  ErrorCode,
-  ErrorResponse,
-  MonetizationConfig,
-  PlaybackInfo,
-  RelatedResponse,
-  RedeemRequest,
-  RedeemSuccessResponse,
-  SearchResponse,
-  SourcesResponse,
-  SuggestionsResponse,
-  TitleDetail,
-  TitleManifest,
-  VersionResponse
+  CatalogChangesResponse, CatalogResponse, ChannelsResponse, DevicePingResponse, DeviceTier,
+  ErrorCode, ErrorResponse, MonetizationConfig, PlaybackInfo, RelatedResponse, RedeemRequest,
+  RedeemSuccessResponse, SearchResponse, SourcesResponse, SuggestionsResponse, TitleDetail,
+  TitleManifest, VersionResponse
 } from '../../../edge/src/types/api';
 import { logger } from '../diagnostics';
 import { createPosterUrls } from '../poster-urls';
@@ -35,26 +21,14 @@ export class ApiError extends Error {
   readonly status: number;
 
   constructor(code: ErrorCode | 'NETWORK_ERROR' | 'UNEXPECTED_RESPONSE', status: number, message: string) {
-    super(message);
-    this.name = 'ApiError';
-    this.code = code;
-    this.status = status;
+    super(message); this.name = 'ApiError'; this.code = code; this.status = status;
   }
-
   /** 404 is the contract's anti-probing answer for "missing", "withdrawn" and "private, not admitted". */
-  get treatedAsMissing(): boolean {
-    return this.code === 'NOT_FOUND' || this.status === 404;
-  }
+  get treatedAsMissing(): boolean { return this.code === 'NOT_FOUND' || this.status === 404; }
 }
 
-export interface FetchLike {
-  (input: string, init?: RequestInit): Promise<Response>;
-}
-
-export interface ApiClientOptions {
-  baseUrl?: string;
-  fetchImpl?: FetchLike;
-}
+export interface FetchLike { (input: string, init?: RequestInit): Promise<Response>; }
+export interface ApiClientOptions { baseUrl?: string; fetchImpl?: FetchLike; }
 
 export type QueryValue = string | number | undefined;
 
@@ -106,7 +80,7 @@ export class PrismApiClient {
     logger.net('api', `${init.method ?? 'GET'} ${targetUrl}`);
     let response: Response, text: string;
     try {
-      const playbackRead = (init.method ?? 'GET') === 'GET' && /^\/api\/(?:titles\/[^/?]+(?:\/episodes\/\d+\/native-playback)?|episodes\/\d+\/playback)(?:\?|$)/.test(path);
+      const playbackRead = (init.method ?? 'GET') === 'GET' && /^\/api\/(?:titles\/[^/?]+(?:\/episodes\/\d+\/native-playback|\/bootstrap)?|episodes\/\d+\/playback)(?:\?|$)/.test(path);
       if (playbackRead) ({ response, text } = await readWithRetry(this.fetchImpl, targetUrl, init));
       else {
         const timeoutMs = budgetForRequest(path, init.method ?? 'GET');
@@ -186,6 +160,20 @@ export class PrismApiClient {
    */
   titleManifest(workId: string): Promise<TitleManifest> {
     return this.get(`/api/titles/${encodeURIComponent(workId)}`);
+  }
+
+  titleBootstrap(titleId: string, ep?: number, signal?: AbortSignal): Promise<unknown> {
+    const query = ep !== undefined ? `?ep=${encodeURIComponent(String(ep))}` : '';
+    return this.request<unknown>(`/api/titles/${encodeURIComponent(titleId)}/bootstrap${query}`, { headers: this.headers(), signal });
+  }
+
+  titlePrefetch(titleId: string, payload: { requestId: string; episodeNumbers: number[]; reason: 'lookahead' | 'resume' }, signal?: AbortSignal): Promise<unknown> {
+    return this.request<unknown>(`/api/titles/${encodeURIComponent(titleId)}/prefetch`, {
+      method: 'POST',
+      headers: { ...this.headers(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal
+    });
   }
 
   async related(titleId: string): Promise<RelatedResponse> {

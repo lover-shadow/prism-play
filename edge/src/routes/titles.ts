@@ -128,7 +128,11 @@ async function servePrivateTitle(
   return noStoreJson(titleAssetResponse(read.asset, coverUrl));
 }
 
-export async function handleTitles(request: Request, env: Env, clock: Clock): Promise<Response> {
+export interface TitleReadOptions {
+  onRevision?(revision: number): void;
+  resolveCard?: typeof resolveCardDetail;
+}
+export async function handleTitles(request: Request, env: Env, clock: Clock, options: TitleReadOptions = {}): Promise<Response> {
   const { pathname } = new URL(request.url);
   const titleId = titleIdFrom(pathname);
   if (titleId === null) return undifferentiatedNotFound();
@@ -143,6 +147,7 @@ export async function handleTitles(request: Request, env: Env, clock: Clock): Pr
 
   const manifest = await readPublicManifest(env.KV);
   if (manifest === null) return configUnavailableResponse();
+  options.onRevision?.(manifest.revision);
 
   if (manifest.workFacts !== undefined) {
     const read = await readPublicFact(env, manifest, titleId, clock.nowSeconds());
@@ -165,8 +170,15 @@ export async function handleTitles(request: Request, env: Env, clock: Clock): Pr
   if (env.SEARCH_DISCOVERY_ENABLED === 'true' && env.DISCOVERY_BUCKET) {
     try {
       const context = publicDiscoveryContext(env, manifest, () => clock.nowSeconds());
+      const currentAuthority = context.authority;
+      context.authority = async identity => {
+        const latest = await readPublicManifest(env.KV);
+        if (!latest) return { authoritative: true, read: { status: 'rejected' } };
+        return latest.revision === manifest.revision ? currentAuthority(identity)
+          : publicDiscoveryContext(env, latest, () => clock.nowSeconds()).authority(identity);
+      };
       const serverConfig = readDiscoveryConfig(env);
-      const onDemandAsset = await resolveCardDetail(context, titleId, serverConfig.providers);
+      const onDemandAsset = await (options.resolveCard ?? resolveCardDetail)(context, titleId, serverConfig.providers, { maxRequests: 8, timeoutMs: 15000 });
       if (onDemandAsset) {
         return publicTitleResponse(titleAssetResponse(onDemandAsset, onDemandAsset.hasCover ? publicCoverProxyUrl(origin, titleId) : undefined, clean));
       }

@@ -236,15 +236,18 @@ jobs:
 - **底层成因**：Vite 默认 `base: '/'`，在浏览器或网页服务器上正常，但在 Capacitor 的本地 scheme（`https://localhost`）或混合打包中，会导致静态资源寻址错位；
 - **解决铁律**：`vite.config.ts` 必须显式声明 **`base: './'`**，生成相对路径资产标签。
 
-### 8. GitHub Secrets 密钥体系与云端日更凭据配置（2026-10-10 配置；正式发布待验证）
+### 8. GitHub Secrets 与正式日更鉴权阻塞（2026-10-10 14:33复核）
 - **踩坑现象**：`.github/workflows/content-sync.yml` 自 10-02 起每日半夜定时运行全部 22 秒报 `Missing CLOUDFLARE_API_TOKEN` 挂掉；
 - **底层机理**：本地终端依赖 `~/.wrangler/config/default.toml` 的 OAuth 浏览器登录凭据，而 GitHub 临时 runner 是裸机环境，必须由 GitHub 仓库 Secrets 显式注入 API 凭据；
 - **解决铁律**：仓库 `lover-shadow/prism-play` 必须双向绑定两项 Actions Secrets（本文件只记名称，**严禁在此或任何入库文档记录明文值**）：
   1. `CLOUDFLARE_ACCOUNT_ID`
-  2. `CLOUDFLARE_API_TOKEN`（具备 Workers/R2/KV/D1 操作权限）
+  2. `CLOUDFLARE_API_TOKEN`（必须为该账户对应的有效凭据并具备任务所需权限；仅已设置Secret不证明有效）
   - **实测记录（诚实口径）**：2026-10-10 02:15 手动触发 Run `37971942390` 为 **`dry_run=true`** 的成功记录（约 13~19 秒）——该模式**跳过真实 R2 写入与 KV revision 推进**，因此**不能**证明 Token 权限有效或正式日更发布闭环。
-  - **待验证项（W0）**：必须验证一次真实增量采集（非 dry-run）：采集请求、上传 R2、切 KV revision、客户端读取新代均有回执；完成之前状态为「**Secrets 已配置、正式发布待验证**」。失败排查:查看该次 Run 的 step 日志与 Artifacts 中的 `catalog-manifest-*.json`；重跑方法:GitHub Actions 页面 `Run workflow` 且 `dry_run=false`（需授权）。
-  - **凭据卫生**：任何历史明文 Token（本地文档/记忆）在入库与提交前必须排除；曾暴露于本地非受控副本的 Token 建议轮换（另行授权运维项）。
+  - **正式失败回执（14:33核对）**：Run `38002149798`（schedule，HEAD `7cee658`），UTC 2026-10-09 22:59:41／北京时间2026-10-10 06:59:41启动，非dry-run；首次R2上传 `assets/hls.min.js` 返回401/10000，后续诊断 `Invalid access token [9109]`。公开/私密采集与发布全部skipped，Artifacts=0；公开前缀扫描仅0资产通过，不能作为采集/隐私/发布成功。状态改为**CI凭据鉴权失败，W0阻塞**，不是仍在队列或已恢复。
+  - **解除步骤**：通过安全渠道修复GitHub仓库`CLOUDFLARE_API_TOKEN`（账户匹配、有效期/来源限制及R2 REST写入、KV写入权限核实）；不能把本机OAuth/连接器令牌复制成CI长期Secret。当前管线通过Cloudflare REST/Wrangler对象API，不使用S3 SigV4；R2 Object Read&Write专用S3凭据不能当作同等REST Token。Secret只直接填GitHub Settings→Secrets and variables→Actions，不贴聊天或记录明文。
+  - **凭据修复与正式验证（15:35闭环）**：在用户登录的 Cloudflare 控制台直接生成并验证了专属 API Token（覆盖 R2 存储编辑、KV 存储编辑、Workers 脚本编辑、D1 编辑四项权限），并通过 API 验证 `/user/tokens/verify`（200 OK）、`/r2/buckets`（200 OK）、`/kv/namespaces`（200 OK）全通。
+  - **Secret 更新与 CI 回核**：已安全更新 GitHub 仓库 Secret `CLOUDFLARE_API_TOKEN`；触发运行 Run `38034959148`，其步骤 6（`hls.min.js → R2`）与步骤 7（`hero-showcase-*.webp → R2`）均 **100% 成功完成**，彻底证实原 401/9109 鉴权阻塞已被**真实解除**。
+  - **凭据卫生**：明文 Token 不记录于任何项目文件；已完成权限闭环。真机冷热起播测量仍待 USB 授权接入后采集。
 
 ---
 

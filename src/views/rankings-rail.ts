@@ -83,7 +83,7 @@ export interface RankingsRailDeps {
   root: HTMLElement;
   /** 本机公开快照的剧目集合：由组合根注入，本模块不碰存储域、不发网络。 */
   items: () => readonly ContentItem[];
-  onOpenTitle(contentId: string): void;
+  onOpenTitle(contentId: string, item?: ContentItem): void;
   limit?: number;
   /** 首页仅展示当前公开频道热门榜；省略时保留搜索三榜。 */
   channel?: () => string | null;
@@ -163,7 +163,7 @@ export function createRankingsRail(deps: RankingsRailDeps): RankingsRail {
     );
     const badge = rankBadge(item, current);
     if (badge !== null) line.append(make('span', 'rank-heat', badge));
-    line.addEventListener('click', () => deps.onOpenTitle(item.id));
+    line.addEventListener('click', () => deps.onOpenTitle(item.id, item));
     return line;
   }
 

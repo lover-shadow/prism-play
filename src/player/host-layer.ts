@@ -4,7 +4,7 @@
  * 旧缺陷是 `open()` 先 await 偏好刷新、再 await 详情请求，之后才建层注册返回：期间界面零反馈，
  * 失败直接 `return false` 静默。本模块把"层的创建与挂载"变成**同步**动作，三态共用同一批节点，
  * 因此成功路径不需要二次重建（也就不该出现两次闪烁）：
- *   loading —— 只有语义状态，严禁任何受保护元信息：不读 `titleOf()`、不贴卡片标题/海报/剧目名；
+ *   loading —— 显示显式公开卡片/已核验公开缓存字段；未知与私密无预填，不读 `titleOf()`；
  *   error   —— 复用 `hud.ts` 的同一套口径（私密/未知/不存在三者同构），并在层内交出「返回」与「重试」
  *              两个真实出口，绝不停成一个关不掉的黑遮罩；
  *   ready   —— 详情身份核验通过后，由宿主写入标题槽并把内核装进同一个 stage。
@@ -12,6 +12,8 @@
 import { icon } from '../components/icons';
 import { ApiError } from '../core/api/client';
 import { createStateOverlay, type OverlayState } from './hud';
+import { candidateDetail } from './open-candidate';
+import type { OpenCandidate } from './host-contract';
 
 export interface HostLayer {
   shell: HTMLElement;
@@ -21,9 +23,11 @@ export interface HostLayer {
   showState(kind: OverlayState): void;
   /**
    * W1 渐进详情：首个 await 前挂出壳与舞台骨架（取代旧的整层 loading 遮罩）。
-   * `candidate` 仅允许携带卡片已展示的公开字段（title/coverUrl）；未提供时保持零元信息。
+   * `candidate` 仅携带已展示的公开字段（标题/海报/分类/剧情/集数）；未提供时零元信息。
    */
-  showSkeleton(candidate?: { title?: string; coverUrl?: string }): void;
+  showSkeleton(candidate?: OpenCandidate): void;
+  /** 首帧呈现后平滑退场，绝不提前让内核黑底或未决画面露出来。 */
+  dismissSkeleton(): void;
   /** 重试出口由宿主接线（本模块不知道要重开哪一部剧），且一个实例只允许挂一条监听。 */
   onRetry(action: (() => void) | null): void;
   /** 详情身份核验通过后才能调用：这一刻才允许把标题写进层里。 */
@@ -93,6 +97,7 @@ export function createHostLayer(deps: { mount: HTMLElement; onClose(): void }): 
   back.addEventListener('click', () => deps.onClose());
   state.el.append(back);
   state.retryButton.dataset.el = 'host-retry';
+  let preview: HTMLElement | null = null;
   let retryAction: (() => void) | null = null;
   state.retryButton.addEventListener('click', () => retryAction?.());
   deps.mount.appendChild(shell);
@@ -102,7 +107,8 @@ export function createHostLayer(deps: { mount: HTMLElement; onClose(): void }): 
     stage,
     sheet,
     showState(kind: OverlayState) {
-      skeleton.hidden = true; // 错误态不需要骨架（预填标题同时清空，防未核验身份泄露）
+      skeleton.hidden = true;
+      skeleton.replaceChildren(); preview?.remove(); preview = null; // 拒绝时连预填图片/剧情一起剔除
       title.textContent = '';
       shell.dataset.phase = kind === 'loading' ? 'loading' : 'error';
       shell.setAttribute('aria-busy', kind === 'loading' ? 'true' : 'false');
@@ -120,6 +126,9 @@ export function createHostLayer(deps: { mount: HTMLElement; onClose(): void }): 
       // 因此这里必须保证它仍在舞台内（幂等的恢复挂载），否则换季加载期就没有首屏骨架。
       if (skeleton.parentElement !== stage) stage.append(skeleton);
       title.textContent = candidate?.title ?? '';
+      preview?.remove(); preview = candidate ? candidateDetail(candidate) : null;
+      if (preview) shell.append(preview);
+      state.hide(); // 媒体载入不得用旧整页遮罩盖掉已知信息
       shell.dataset.phase = 'loading';
       shell.setAttribute('aria-busy', 'true');
       shell.setAttribute('aria-label', '正在载入');
@@ -141,12 +150,16 @@ export function createHostLayer(deps: { mount: HTMLElement; onClose(): void }): 
     onRetry(action) {
       retryAction = action;
     },
+    dismissSkeleton() {
+      skeleton.hidden = true;
+      skeleton.replaceChildren();
+    },
     promote(text: string) {
       shell.dataset.phase = 'ready';
       shell.setAttribute('aria-busy', 'false');
       shell.setAttribute('aria-label', '播放');
       title.textContent = text;
-      skeleton.hidden = true;
+      preview?.remove(); preview = null;
       state.destroy(); // 只摘状态节点，shell / stage / sheet 原样复用
     },
     destroy() {

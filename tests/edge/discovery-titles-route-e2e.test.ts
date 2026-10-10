@@ -112,5 +112,9 @@ describe('E2E on-demand discovery titles route integration', () => {
     expect(await playback.json()).toMatchObject({ workId, episodeNumber: 2,
       native: { kind: 's1-cenc', videoId: vids[1] } });
     expect(fetcher).toHaveBeenCalledTimes(1);
+    // 有已知card但上游暂不可用：预算失败必须可重试503，而非把作品伪装成未知404。
+    sqlite.execute('DELETE FROM discovery_works WHERE work_id = ?', workId);
+    vi.stubGlobal('fetch', async () => new Response(null, { status: 503 }));
+    expect((await handleTitles(req, env, clock)).status).toBe(503);
   });
 });

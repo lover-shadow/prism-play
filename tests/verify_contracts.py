@@ -30,6 +30,8 @@ def check_openapi():
         "/api/catalog/changes",
         "/api/catalog",
         "/api/titles/{titleId}",
+        "/api/titles/{titleId}/bootstrap",
+        "/api/titles/{titleId}/prefetch",
         "/api/episodes/{episodeId}/playback",
         "/api/private-sessions",
         "/api/config/monetization",
@@ -77,6 +79,102 @@ def check_openapi():
     missing_refs = set(refs) - set(schemas.keys())
     assert not missing_refs, f"OpenAPI 存在未解析的 $ref 引用: {missing_refs}"
     
+    # W3 正式 bootstrap 契约，不提前开放其余候选路径或降低旧门禁。
+    bootstrap = paths['/api/titles/{titleId}/bootstrap']['get']
+    assert bootstrap['security'] == [{'BearerAuth': []}, {'BearerAuth': [], 'PrivateSession': []}, {}], 'bootstrap 必须保留公开可选认证与私密双准入'
+    params = bootstrap['parameters']
+    assert [(p['name'], p['in']) for p in params] == [('titleId', 'path'), ('ep', 'query')], 'bootstrap 只能声明 titleId 与 ep，禁止注入参数'
+    assert params[0]['required'] is True and params[1]['required'] is False
+    assert params[1]['schema'] == {'type': 'integer', 'minimum': 1, 'maximum': 5000, 'default': 1}, 'bootstrap ep 边界漂移'
+    responses = bootstrap['responses']
+    assert set(responses) == {'200', '400', '404', '503'}, 'bootstrap 失败不得伪装成成功空集'
+    for status, response in responses.items():
+        assert response['headers']['Cache-Control']['schema'] == {'type': 'string', 'enum': ['no-store']}, f'bootstrap {status} 必须 no-store'
+        expected_ref = 'TitleBootstrapResponse' if status == '200' else 'ErrorResponse'
+        assert response['content']['application/json']['schema']['$ref'] == f'#/components/schemas/{expected_ref}'
+    result = schemas['TitleBootstrapResponse']
+    required = {'schema', 'workId', 'revision', 'factVersion', 'item', 'targetEpisode', 'catalogStatus', 'persistenceStatus', 'generatedAt', 'servedAt'}
+    assert set(result['required']) == required and set(result['properties']) == required, 'bootstrap 完整响应字段漂移'
+    props = result['properties']
+    assert props['schema'] == {'type': 'integer', 'enum': [1]}
+    assert props['revision']['type'] == 'integer'
+    assert props['factVersion']['pattern'] == '^[a-f0-9]{64}$' and props['factVersion']['type'] == 'string'
+    assert props['item']['$ref'] == '#/components/schemas/ContentItem'
+    assert props['targetEpisode']['$ref'] == '#/components/schemas/BootstrapTargetEpisode'
+    assert props['catalogStatus']['enum'] == ['complete'], 'bootstrap 当前获取完整目录，不开放虚假 pending/partial'
+    assert props['persistenceStatus']['enum'] == ['stored', 'scheduled']
+    for timestamp in ('generatedAt', 'servedAt'):
+        assert props[timestamp]['type'] == 'integer' and props[timestamp]['minimum'] == 0, 'bootstrap 时间必须 UTC Unix秒整数'
+    target = schemas['BootstrapTargetEpisode']
+    assert set(target['required']) == {'episodeNumber', 'lines'}
+    assert set(target['properties']) == {'episodeNumber', 'title', 'durationSeconds', 'lines'}, '目标集必须返回真实线路而非 lineSummary'
+    assert target['properties']['episodeNumber'] == {'type': 'integer', 'minimum': 1, 'maximum': 5000}
+    lines = target['properties']['lines']
+    assert lines['type'] == 'array' and lines['minItems'] == 1 and lines['maxItems'] == 32
+    assert lines['items']['$ref'] == '#/components/schemas/BootstrapLine'
+    line = schemas['BootstrapLine']['allOf']
+    assert line[0] == {'$ref': '#/components/schemas/EpisodeLine'}, 'bootstrap 必须复用实际 ManifestLine 形状'
+    assert line[1]['required'] == ['lineIndex']
+    assert line[1]['properties']['lineIndex'] == {'type': 'integer', 'minimum': 0, 'maximum': 31}
+    description = bootstrap['description']
+    for boundary in ('重复 ep', '同构404', '空 lines', 'ctx.waitUntil', '无 ctx', 'target-only', '原生身份复核', '聚合/季发现未实现'):
+        assert boundary in description, f'bootstrap 缺少运行边界说明: {boundary}'
+    persistence = props['persistenceStatus']['description']
+    assert '不代表持久化成功' in persistence and '保证未来成功' in persistence, 'scheduled 不得承诺持久化成功'
+    assert paths['/api/titles/{titleId}']['get']['responses']['200']['content']['application/json']['schema']['$ref'] == '#/components/schemas/TitleAssetResponse', '旧 title 响应不得改变'
+
+    # W3 仅开放公开元数据 prefetch，保留旧路径闭集和 bootstrap 门禁。
+    prefetch_path = paths['/api/titles/{titleId}/prefetch']
+    assert set(prefetch_path) == {'post'}, 'prefetch 只能 POST'
+    prefetch = prefetch_path['post']
+    assert prefetch['security'] == [{'BearerAuth': []}, {}], 'prefetch 仅公开可选Bearer，不开放私密后台存储'
+    assert prefetch['parameters'] == [{'name': 'titleId', 'in': 'path', 'required': True, 'schema': {'type': 'string'}}], 'prefetch 不允许查询或客户ID参数'
+    body = prefetch['requestBody']
+    assert body['required'] is True and set(body['content']) == {'application/json'}
+    assert body['content']['application/json']['schema'] == {'$ref': '#/components/schemas/TitlePrefetchRequest'}
+    request = schemas['TitlePrefetchRequest']
+    fields = {'requestId', 'episodeNumbers', 'reason'}
+    assert request['type'] == 'object' and request['additionalProperties'] is False
+    assert set(request['required']) == fields and set(request['properties']) == fields, 'prefetch 请求必须严格三键闭集'
+    request_id = {'type': 'string', 'minLength': 8, 'maxLength': 128, 'pattern': '^[A-Za-z0-9_-]{8,128}$'}
+    assert request['properties']['requestId'] == request_id
+    assert request['properties']['episodeNumbers'] == {'type': 'array', 'minItems': 1, 'maxItems': 4, 'uniqueItems': True, 'items': {'type': 'integer', 'minimum': 1, 'maximum': 5000}}
+    assert request['properties']['reason'] == {'type': 'string', 'enum': ['lookahead', 'resume']}
+    for boundary in ('4096 bytes', 'max-min<=3', '[K,K+3]', 'resume'):
+        assert boundary in request['description'], f'prefetch 请求缺少边界: {boundary}'
+    responses = prefetch['responses']
+    assert set(responses) == {'200', '202', '400', '404', '429', '503'}, 'prefetch 响应闭集漂移（超大body仍400，不额外413）'
+    success_refs = {'200': 'TitlePrefetchReadyResponse', '202': 'TitlePrefetchAcceptedResponse'}
+    for status, response in responses.items():
+        assert response['headers']['Cache-Control']['schema'] == {'type': 'string', 'enum': ['no-store']}, f'prefetch {status} 必须no-store'
+        expected_ref = success_refs.get(status, 'ErrorResponse')
+        assert response['content']['application/json']['schema'] == {'$ref': f'#/components/schemas/{expected_ref}'}
+    assert responses['429']['headers']['Retry-After']['schema'] == {'type': 'integer', 'minimum': 1}
+    for status, schema_name in success_refs.items():
+        result = schemas[schema_name]
+        expected_fields = {'schema', 'requestId', 'accepted', 'deduped', 'servedAt'} | ({'reason'} if status == '200' else set())
+        assert result['type'] == 'object' and result['additionalProperties'] is False
+        assert set(result['required']) == expected_fields and set(result['properties']) == expected_fields, f'{schema_name} 响应字段漂移'
+        props = result['properties']
+        assert props['schema'] == {'type': 'integer', 'enum': [1]}
+        assert props['requestId'] == request_id
+        assert props['servedAt']['type'] == 'integer' and props['servedAt']['minimum'] == 0 and 'UTC Unix秒' in props['servedAt']['description']
+        if status == '200':
+            assert props['accepted'] == {'type': 'integer', 'enum': [0]}
+            assert props['deduped'] == {'type': 'boolean', 'enum': [False]}
+            assert props['reason'] == {'type': 'string', 'enum': ['already_ready']}
+            assert '完整事实目录' in result['description'] and '不触上游' in result['description']
+        else:
+            assert props['accepted'] == {'type': 'integer', 'minimum': 0, 'maximum': 4}
+            assert props['deduped'] == {'type': 'boolean'}
+            assert 'ctx.waitUntil' in result['description'] and '不等于' in result['description'] and 'accepted=0/deduped=true' in result['description']
+    for boundary in ('私密即使已有双准入', '同构404', '不是可信客户ID', '平台可信IP哈希', '12次/60秒', '含重复请求', '同 work 原子lease30秒', '每集30秒窗口去重', 'ctx.waitUntil', '无 ctx', 'DB 临时故障', '后台失败记录并释锁', '候选card cold', '完整事实', '24次请求/25秒', 'owner + candidate/current manifest guard', '不下载视频', '不保证可播', 'max-min<=3', 'body too large', '所有响应 no-store'):
+        assert boundary in prefetch['description'], f'prefetch 缺少运行边界: {boundary}'
+    for filename in ('API-SPEC.md', 'V2.2-CANDIDATE-CONTRACTS.md'):
+        contract_text = (api_path.parent / filename).read_text(encoding='utf-8')
+        for boundary in ('/api/titles/{titleId}/prefetch', 'TitlePrefetchRequest', 'TitlePrefetchReadyResponse', 'TitlePrefetchAcceptedResponse', 'max-min<=3', '4096 bytes', '12次/60秒', 'Retry-After', '双准入', 'already_ready', 'candidate/current manifest guard'):
+            assert boundary in contract_text, f'{filename} prefetch 契约未同步: {boundary}'
+
     # MonetizationConfig 必须为正式 Schema (消除 R-4)
     assert "MonetizationConfig" in schemas, "MonetizationConfig 必须声明为正式独立 Schema"
     

@@ -60,7 +60,7 @@ export function buildDetailBody(
   onShare?: (ep: EpisodeItem) => void,
   onFullscreen?: () => void,
   loadRelated?: () => Promise<ContentItem[]>,
-  onOpenRelated?: (contentId: string) => void,
+  onOpenRelated?: (contentId: string, item?: ContentItem) => void,
   following?: { store: import('../core/storage/following-store').FollowingStore; report?(message: string): void },
   /** 菜单互斥的宿主接缝：详情台的投屏一开，选集/倍速由宿主收掉（R26-05）。 */
   menus?: { beforeMenuOpen?(): void }
@@ -256,7 +256,7 @@ export function buildDetailBody(
         const desc = document.createElement('span');
         desc.className = 'related-desc'; desc.textContent = item.synopsis || item.category || '暂无简介';
         descBox.append(title, desc); card.append(cover, descBox);
-        card.addEventListener('click', () => onOpenRelated?.(item.id));
+        card.addEventListener('click', () => onOpenRelated?.(item.id, item));
         relatedGrid.append(card);
       }
     }).catch(() => { relatedSection.remove(); });

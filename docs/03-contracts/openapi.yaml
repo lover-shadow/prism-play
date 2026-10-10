@@ -328,6 +328,105 @@ components:
         item:
           $ref: "#/components/schemas/ContentItem"
 
+    BootstrapLine:
+      description: 实际 ManifestLine（既有 EpisodeLine）加原始线路索引；筛选后保持完整事实中的 lineIndex，不重新编号。native 只标识待原生复核的身份，不是已解码媒体。
+      allOf:
+        - $ref: '#/components/schemas/EpisodeLine'
+        - type: object
+          required: [lineIndex]
+          properties:
+            lineIndex: {type: integer, minimum: 0, maximum: 31}
+
+    BootstrapTargetEpisode:
+      type: object
+      required: [episodeNumber, lines]
+      properties:
+        episodeNumber: {type: integer, minimum: 1, maximum: 5000}
+        title: {type: string}
+        durationSeconds: {type: integer, minimum: 0}
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 32
+          items:
+            $ref: '#/components/schemas/BootstrapLine'
+
+    TitleBootstrapResponse:
+      type: object
+      description: 从已核验完整 title 投影返回目标集，不是上游 target-only 解析；catalogStatus=complete 表示当前已取得完整目录，不代表持久化完成。
+      required: [schema, workId, revision, factVersion, item, targetEpisode, catalogStatus, persistenceStatus, generatedAt, servedAt]
+      properties:
+        schema: {type: integer, enum: [1]}
+        workId: {type: string}
+        revision:
+          type: integer
+          description: 当前公开 manifest 版本，不是事实生成时间或发现 seq。
+        factVersion:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: 已核验完整 title 投影的 SHA-256，小写64位hex；不是仅目标集或线路摘要的哈希。
+        item:
+          $ref: '#/components/schemas/ContentItem'
+        targetEpisode:
+          $ref: '#/components/schemas/BootstrapTargetEpisode'
+        catalogStatus: {type: string, enum: [complete]}
+        persistenceStatus:
+          type: string
+          enum: [stored, scheduled]
+          description: stored 表示已持久保存完整事实；scheduled 仅表示 ctx.waitUntil 已登记完整事实发布，不代表持久化成功或保证未来成功。
+        generatedAt:
+          type: integer
+          minimum: 0
+          description: 源事实生成时间，UTC Unix秒，不以本次服务时间覆盖。
+        servedAt:
+          type: integer
+          minimum: 0
+          description: 本次响应时间，UTC Unix秒。
+
+    TitlePrefetchRequest:
+      type: object
+      additionalProperties: false
+      required: [requestId, episodeNumbers, reason]
+      description: JSON 原始请求体最多4096 bytes；仅允许三键，拒绝任何查询参数。episodeNumbers 必须满足 max-min<=3，对应 [K,K+3] lookahead 或 resume 窗口；跨字段窗口约束由服务端严格校验。
+      properties:
+        requestId:
+          type: string
+          minLength: 8
+          maxLength: 128
+          pattern: '^[A-Za-z0-9_-]{8,128}$'
+        episodeNumbers:
+          type: array
+          minItems: 1
+          maxItems: 4
+          uniqueItems: true
+          items: {type: integer, minimum: 1, maximum: 5000}
+        reason: {type: string, enum: [lookahead, resume]}
+
+    TitlePrefetchReadyResponse:
+      type: object
+      additionalProperties: false
+      description: 已有完整事实目录且所有目标集 lines 非空，不触上游；不代表媒体可播。
+      required: [schema, requestId, accepted, deduped, reason, servedAt]
+      properties:
+        schema: {type: integer, enum: [1]}
+        requestId: {type: string, minLength: 8, maxLength: 128, pattern: '^[A-Za-z0-9_-]{8,128}$'}
+        accepted: {type: integer, enum: [0]}
+        deduped: {type: boolean, enum: [false]}
+        reason: {type: string, enum: [already_ready]}
+        servedAt: {type: integer, minimum: 0, description: 本次服务时间，UTC Unix秒。}
+
+    TitlePrefetchAcceptedResponse:
+      type: object
+      additionalProperties: false
+      description: 仅表示 ctx.waitUntil 已登记或请求已合并，不等于后台完成、持久化成功或保证可播；同 work 并发合并时 accepted=0/deduped=true。
+      required: [schema, requestId, accepted, deduped, servedAt]
+      properties:
+        schema: {type: integer, enum: [1]}
+        requestId: {type: string, minLength: 8, maxLength: 128, pattern: '^[A-Za-z0-9_-]{8,128}$'}
+        accepted: {type: integer, minimum: 0, maximum: 4}
+        deduped: {type: boolean}
+        servedAt: {type: integer, minimum: 0, description: 本次服务时间，UTC Unix秒。}
+
     PlaybackInfo:
       type: object
       description: 播放解析结果。只返回同源代理地址，**严禁**返回真实上游地址。
@@ -1279,6 +1378,155 @@ paths:
           description: 请求分页时公开目录修订号已变化，客户端须重新拉公开快照
         "404":
           description: 请求未获当次准入的私密频道时表现为不存在，响应不含内容元数据
+
+  /api/titles/{titleId}/bootstrap:
+    get:
+      tags: [频道与内容]
+      summary: 已核验完整事实的目标集渐进详情入口
+      description: |
+        仅接受可选 ep 查询参数：1..5000 的整数，缺省1；拒绝重复 ep、额外参数及 videoId/URL 等注入参数。
+        公开可匿名访问；私密仍须有效 B/Y/S Bearer 与有效 X-Private-Session 双准入。未知、未准入或目标集不存在同构404，不泄露元数据；参数非法返回400 VALIDATION_ERROR且不含作品信息；目标集空 lines 返回503。
+        所有响应 no-store。旧 GET /api/titles/{titleId} 完整响应不变。
+        provider 仍一次获取全目录；只优化返回体与存储 critical path，不宣称 target-only 上游或秒起。
+        冷结果只有 ctx.waitUntil 已登记完整事实发布才可返回 scheduled；无 ctx 冷结果只能503，不得同步存储阻塞首集。
+        native 不是已解码媒体，仍走既有 native-playback 原生身份复核；聚合/季发现未实现；prefetch 独立契约只允许公开作品元数据准备。
+      security:
+        - BearerAuth: []
+        - BearerAuth: []
+          PrivateSession: []
+        - {}
+      parameters:
+        - name: titleId
+          in: path
+          required: true
+          schema: {type: string}
+        - name: ep
+          in: query
+          required: false
+          description: 仅此查询参数允许出现且最多一次；严格整数，缺省1。
+          schema: {type: integer, minimum: 1, maximum: 5000, default: 1}
+      responses:
+        '200':
+          description: 目标集及真实完整目录/持久化状态
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TitleBootstrapResponse'
+        '400':
+          description: 非法、重复或额外查询参数，VALIDATION_ERROR且无作品元数据
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: 未知、未准入或目标集不存在，同构 NOT_FOUND 错误且无元数据
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: 完整事实不可用、目标集空 lines，或无 ctx 可登记冷事实发布；SERVICE_UNAVAILABLE，不同步存储挡首集
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/titles/{titleId}/prefetch:
+    post:
+      tags: [频道与内容]
+      summary: 公开作品邻近集元数据后台准备
+      description: |
+        仅公开作品允许元数据准备，不下载视频、不保证可播，不计热门点击或活跃。私密即使已有双准入也不进行后台存储，本期 scope 与未知作品统一同构404且无元数据。
+        公开可选 Bearer 不是可信客户ID；caller 仅按平台可信IP哈希，12次/60秒请求上限（含重复请求），不能由 requestId、Bearer 或客户端输入绕过。
+        拒绝查询参数；JSON 原始请求体最多4096 bytes，严格三键 requestId/episodeNumbers/reason；所有类型、范围、重复集号与 max-min<=3 窗口校验失败及 body too large 均400 VALIDATION_ERROR，不额外开放413。
+        已有完整事实目录且所有目标集 lines 非空返回200 already_ready，不触上游；仅候选card cold 才在后台实际准备完整事实，不宣称 target-only 上游。
+        同 work 原子lease30秒；同 work 并发合并返回202 accepted=0/deduped=true；每集30秒窗口去重。accepted 是本次接受的集号数量0..4，不是准备完成数量。
+        202 只表示 ctx.waitUntil 已登记或同 work 合并，不等于完成或持久化成功。无 ctx 或 DB 临时故障返回503，不同步准备阻塞请求；后台失败记录并释锁。
+        provider 单次预算24次请求/25秒；最终发布必须复核 owner + candidate/current manifest guard，不能覆盖已变化、撤片或私密事实。所有响应 no-store；限流429 RATE_LIMITED并带 Retry-After。
+      security:
+        - BearerAuth: []
+        - {}
+      parameters:
+        - name: titleId
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TitlePrefetchRequest'
+      responses:
+        '200':
+          description: 完整事实目录及目标集非空，already_ready且不触上游
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TitlePrefetchReadyResponse'
+        '202':
+          description: 后台登记或去重合并，不等于完成
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TitlePrefetchAcceptedResponse'
+        '400':
+          description: 参数或JSON非法、超4096 bytes，VALIDATION_ERROR且无元数据
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: 未知或私密作品（即使已有双准入），同构 NOT_FOUND 且无元数据
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: 平台可信IP哈希caller超过12次/60秒，RATE_LIMITED
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+            Retry-After:
+              description: 距离允许重试的秒数
+              schema: {type: integer, minimum: 1}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: 无 ctx 或 DB 临时故障，SERVICE_UNAVAILABLE，不伪装已登记
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /api/titles/{titleId}:
     get:

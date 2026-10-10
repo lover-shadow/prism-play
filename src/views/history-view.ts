@@ -109,7 +109,7 @@ export interface HistoryApi { related(contentId: string): Promise<RelatedRespons
 export interface HistoryViewDeps {
   api: HistoryApi; history: HistoryReader; cache?: CacheUsage; credentials: CredentialWriter;
   following?: Pick<FollowingStore, 'list' | 'remove'>;
-  onOpenTitle(contentId: string): void; onResume(row: WatchHistoryRow): void; root: HTMLElement;
+  onOpenTitle(contentId: string, item?: ContentItem): void; onResume(row: WatchHistoryRow): void; root: HTMLElement;
   /** 注入时钟（Unix 秒），使秒级断点与相对时间文案可测。 */ now?(): number;
   /** AC-30 拉取口（§1.9.4 接口 B）：进入本 Tab 即静默合并云端断点；缺席时视图纯本地照常工作。 */ pullRemote?(): Promise<MergeReport | null>;
 }
@@ -210,7 +210,7 @@ export function createHistoryView(deps: HistoryViewDeps): HistoryView {
     card.type = 'button'; card.dataset.el = 'related-card'; card.dataset.contentId = item.id;
     coverInto(poster, item.coverUrl, item.title, 'image', 16);
     card.append(poster, make('span', 'pv-rail-label', item.title), make('span', 'pv-meta', item.category));
-    card.addEventListener('click', () => deps.onOpenTitle(item.id));
+    card.addEventListener('click', () => deps.onOpenTitle(item.id, item));
     return card;
   }
 

@@ -10,66 +10,18 @@
  */
 
 import type { Clock } from './sleep-timer';
-
-/** R26-03: left brightness, right volume; central reserve and double-tap seek unchanged. */
-export const BRIGHTNESS_ZONE_MAX = 0.48;
-export const VOLUME_ZONE_MIN = 0.52;
-export const DOUBLE_TAP_WINDOW_MS = 300;
-export const SEEK_STEP_SECONDS = 10;
-/** 控件条像素带：其中的点按属于按钮本身，绝不驱动手势（SPEC §10 的 ≥44px 触点即落在此带内）。 */
-export const DEFAULT_TOP_BAND_PX = 48;
-export const DEFAULT_BOTTOM_BAND_PX = 64;
-export const MOVE_SLOP_PX = 8;
-export const DOUBLE_TAP_SLOP_PX = 44;
-
-export type GestureZone = 'volume' | 'brightness' | 'dead-band' | 'control-band' | 'scrub';
-export type ValueChannel = 'volume' | 'brightness';
-
-export interface TouchGeometryInput {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  deltaY: number;
-  pointerCount: number;
-  topBandPx?: number;
-  bottomBandPx?: number;
-}
-
-export interface TouchClassification {
-  zone: GestureZone;
-  /** Horizontal position inside the play surface, 0..1. */
-  xFraction: number;
-  /** Vertical travel as a fraction of the full height: a full-height swipe spans the whole 0..1 range. */
-  deltaRatio: number;
-}
-
-export function clamp(value: number, min: number, max: number): number {
-  return value < min ? min : value > max ? max : value;
-}
-
-export function clamp01(value: number): number {
-  return clamp(value, 0, 1);
-}
-
-/**
- * The one geometry authority. Outside the surface, multi-touch and non-vertical travel come back as
- * `scrub`, which owns neither HUD; inside the control bands nothing is emitted either.
- */
-export function classifyTouch(input: TouchGeometryInput): TouchClassification {
-  const { x, y, width, height, deltaY, pointerCount } = input;
-  const inside = pointerCount === 1 && width > 0 && height > 0 && x >= 0 && x <= width && y >= 0 && y <= height;
-  if (!inside) return { zone: 'scrub', xFraction: 0, deltaRatio: 0 };
-  const xFraction = clamp01(x / width);
-  const top = input.topBandPx ?? DEFAULT_TOP_BAND_PX;
-  const bottom = input.bottomBandPx ?? DEFAULT_BOTTOM_BAND_PX;
-  if (y < top || y > height - bottom) return { zone: 'control-band', xFraction, deltaRatio: 0 };
-  // Dragging up lowers clientY, so the sign flip is what makes "swipe up" mean "more".
-  const deltaRatio = clamp(-deltaY / height, -1, 1);
-  if (xFraction < BRIGHTNESS_ZONE_MAX) return { zone: 'brightness', xFraction, deltaRatio };
-  if (xFraction > VOLUME_ZONE_MIN) return { zone: 'volume', xFraction, deltaRatio };
-  return { zone: 'dead-band', xFraction, deltaRatio };
-}
+import {
+  BRIGHTNESS_ZONE_MAX, VOLUME_ZONE_MIN, DOUBLE_TAP_WINDOW_MS, SEEK_STEP_SECONDS,
+  DEFAULT_TOP_BAND_PX, DEFAULT_BOTTOM_BAND_PX, MOVE_SLOP_PX, DOUBLE_TAP_SLOP_PX,
+  clamp, clamp01, classifyTouch, type GestureZone, type ValueChannel,
+  type TouchGeometryInput, type TouchClassification
+} from './gestures-geometry';
+export {
+  BRIGHTNESS_ZONE_MAX, VOLUME_ZONE_MIN, DOUBLE_TAP_WINDOW_MS, SEEK_STEP_SECONDS,
+  DEFAULT_TOP_BAND_PX, DEFAULT_BOTTOM_BAND_PX, MOVE_SLOP_PX, DOUBLE_TAP_SLOP_PX,
+  clamp, clamp01, classifyTouch, type GestureZone, type ValueChannel,
+  type TouchGeometryInput, type TouchClassification
+};
 
 export interface GestureBounds {
   width: number;
@@ -96,6 +48,14 @@ export interface GestureControllerOptions {
   onSeek(deltaSeconds: number): void;
   /** Deferred single tap: toggles the control chrome. */
   onTap(point: { x: number; y: number }): void;
+  /** Central tap (play/pause toggle) per SPEC §4.3 */
+  onCenterTap?(): void;
+  /** Horizontal scrub preview during drag (delta in seconds, target time) */
+  onScrubPreview?(preview: { deltaSeconds: number; targetSeconds: number; durationSeconds: number }): void;
+  /** Horizontal scrub commit on pointer up */
+  onScrubCommit?(targetSeconds: number): void;
+  /** Cancel any active scrub preview */
+  onScrubCancel?(): void;
   /** 全屏触摸锁：true 时所有手势回调被抑制。 */
   isLocked(): boolean;
   clock: Clock;
@@ -128,8 +88,9 @@ interface GestureSession {
   startX: number;
   startY: number;
   lastY: number;
-  zone: 'undecided' | ValueChannel | 'blocked';
+  zone: 'undecided' | ValueChannel | 'scrub' | 'blocked';
   travelled: boolean;
+  targetSeconds?: number;
 }
 
 const nextFrame = (callback: () => void): number => requestAnimationFrame(callback);
@@ -187,9 +148,9 @@ export function createGestureController(options: GestureControllerOptions): Gest
     if (session.zone === 'undecided') {
       if (Math.max(Math.abs(dx), Math.abs(dy)) < (options.moveSlopPx ?? MOVE_SLOP_PX)) return;
       session.travelled = true;
-      // Horizontal travel belongs to scrubbing: it must never raise either HUD.
-      if (Math.abs(dy) < Math.abs(dx)) session.zone = 'blocked';
-      else {
+      if (Math.abs(dy) < Math.abs(dx)) {
+        session.zone = options.duration() > 0 ? 'scrub' : 'blocked';
+      } else {
         const start = zoneAt({ x: point.x, y: session.startY }, 0).zone;
         session.zone = start === 'volume' || start === 'brightness' ? start : 'blocked';
       }
@@ -197,6 +158,18 @@ export function createGestureController(options: GestureControllerOptions): Gest
       // Fall through so the travel that decided the axis already counts: a short flick still moves the value.
     }
     if (session.zone === 'blocked') return;
+    if (session.zone === 'scrub') {
+      const duration = options.duration();
+      if (duration <= 0) return;
+      const b = options.measure();
+      const scaleSeconds = Math.min(Math.max(duration, 30), 180);
+      const deltaSeconds = Math.round((dx / (b.width || 400)) * scaleSeconds);
+      const current = options.currentTime();
+      const targetSeconds = clamp(current + deltaSeconds, 0, duration);
+      session.targetSeconds = targetSeconds;
+      options.onScrubPreview?.({ deltaSeconds, targetSeconds, durationSeconds: duration });
+      return;
+    }
     const step = zoneAt({ x: session.startX, y: point.y }, point.y - session.lastY);
     session.lastY = point.y;
     // Leaving the channel (dead band, control band, a second finger) mutes output; re-entering resumes.
@@ -210,6 +183,10 @@ export function createGestureController(options: GestureControllerOptions): Gest
     if (zoneAt(point, 0, 1).zone === 'control-band') return;
     const now = clock.now();
     const window = options.doubleTapWindowMs ?? DOUBLE_TAP_WINDOW_MS;
+    const b = options.measure();
+    const xFrac = b.width > 0 ? point.x / b.width : 0.5;
+    const yFrac = b.height > 0 ? point.y / b.height : 0.5;
+    const isCenter = xFrac >= 0.3 && xFrac <= 0.7 && yFrac >= 0.2 && yFrac <= 0.8;
     const near = lastTap !== null && now - lastTap.at < window &&
       Math.abs(point.x - lastTap.x) < DOUBLE_TAP_SLOP_PX && Math.abs(point.y - lastTap.y) < DOUBLE_TAP_SLOP_PX;
     if (!near) {
@@ -218,13 +195,21 @@ export function createGestureController(options: GestureControllerOptions): Gest
       singleTap = clock.setTimer(() => {
         singleTap = null;
         lastTap = null;
-        options.onTap(point);
+        if (isCenter && options.onCenterTap) {
+          options.onCenterTap();
+        } else {
+          options.onTap(point);
+        }
       }, window);
       return;
     }
     // The second tap killed the pending single tap, so the chrome never flickers on a double-tap.
     clearSingleTap();
     lastTap = null;
+    if (isCenter && options.onCenterTap) {
+      options.onCenterTap();
+      return;
+    }
     const duration = options.duration();
     if (duration <= 0) return;
     const position = options.currentTime();
@@ -248,6 +233,7 @@ export function createGestureController(options: GestureControllerOptions): Gest
     pointerUp: (event) => {
       const mine = session !== null && session.id === event.pointerId;
       const travelled = session?.travelled ?? false;
+      const currentSession = session;
       pointers.delete(event.pointerId);
       if (frame !== null) {
         (options.cancelFrame ?? stopFrame)(frame);
@@ -255,9 +241,20 @@ export function createGestureController(options: GestureControllerOptions): Gest
         flush();
       }
       session = null;
+      if (mine && travelled && currentSession?.zone === 'scrub') {
+        if (currentSession.targetSeconds !== undefined) {
+          options.onScrubCommit?.(currentSession.targetSeconds);
+        } else {
+          options.onScrubCancel?.();
+        }
+        return;
+      }
       if (mine && !travelled && !options.isLocked()) handleTap(event);
     },
-    cancel: () => { session = null; clearSingleTap(); lastTap = null; },
+    cancel: () => {
+      if (session?.zone === 'scrub') options.onScrubCancel?.();
+      session = null; clearSingleTap(); lastTap = null;
+    },
     seed: (channel, value) => void (values[channel] = clamp01(value)),
     values: () => ({ ...values }),
     destroy: () => {

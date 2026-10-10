@@ -22,7 +22,7 @@ artifact GET完整流式200，HEAD空body，APK MIME/Content-Length/文件名正
 - **响应形状**：JSON 接口成功返回业务字段本体，失败统一返回 `ErrorResponse`（`success: false` + 机器可判别 `code` + 人读 `message`）。
 - **错误码枚举 (全量 16 项闭集)**：
   `COUPON_NOT_FOUND`、`COUPON_REVOKED`、`COUPON_DEVICE_LIMIT_EXCEEDED`、`COUPON_INVALID_FORMAT`、`DEVICE_ID_INVALID`、`RATE_LIMITED`、`PRIVATE_SESSION_REQUIRED`、`TIER_INSUFFICIENT`、`NOT_FOUND`、`SERVICE_UNAVAILABLE`、`PLATFORM_UNSUPPORTED`、`CREDENTIAL_EXPIRED`、`VALIDATION_ERROR`、`PROXY_SIGNATURE_INVALID`、`CATALOG_REVISION_CONFLICT`、`CATALOG_CURSOR_EXPIRED`。
-- **限流唯一口径**：`/api/redeem` 单 IP **1 分钟最多 10 次**，超限返回 429。全工程不得出现第二个数值。
+- **限流唯一口径**：`/api/redeem` 单 IP **1 分钟最多 10 次**，超限返回 429。该兑换口径不得出现第二个数值；prefetch 使用§一.3.2的独立具名限流，不改变兑换上限。
 - **上游地址零暴露（2026-10-03 v2 修订）**：目录分片、频道/源拓扑、错误体、HTML 页面源码与一切 UI 文案**永不得**包含真实上游域名；海报与需要云端转发的资源仍走 `play.prismos.org/proxy/*`。**唯一例外**：剧集清单 `GET /api/titles/{titleId}` 的 `episodes[].lines[].mediaUrl` 携带真实播放地址，用于 App 与分享页**运行时直连**上游 CDN（实测 CORS `*` 开放；决策依据 SPEC-CLOUD-REFACTOR v2 §3.2、SPEC-APP-REFACTOR v2 A-7、SPEC-STATIC-PAGES v2 S-1）。该地址只存在于运行时网络层与内存，不得渲染进任何可见文案、DOM 静态结构或日志；`/proxy/media/*` 保留为旧客户端兼容通道直至退役。
 - **失效即关闭**：私密相关接口在缺少当次会话凭据时一律按“不存在”处理（404 或空集），不返回“被拒绝”的差异化提示。
 
@@ -51,6 +51,23 @@ artifact GET完整流式200，HEAD空body，APK MIME/Content-Length/文件名正
 - 实现边界：Android 本地 CENC DataSource + ExoPlayer 单集已获 Master 播放正常反馈；完整 HUD 集成代码已写并编译，但未真机通过。云端授权绑定的播放解析 handle 尚未实现，**Stage A 未完成**；旧生产 fact 无 native，需要刷新，本轮未部署。Web/native cast 对 native 线路须诚实拒绝，不把候选地址当明文流；不带 native 的合法普通线路保持既有能力。
 - 本次只同步上述实现事实，不修改 OpenAPI 机读正本；新增字段的机读同步由主会话负责，未完成前不宣称全链路契约门禁通过。AGENTS authority、私密双准入与 SPEC-v2.0 AC-02 的 FLAG_SECURE 范围保持，不扩展到其他内容。
 - 未同时具备有效 B/Y/S 授权与有效 `X-Private-Session` 的私密剧目、以及不存在或未发布的剧目一律返回 404，不区分差异以防探测；公开剧目或已获双重准入者正常返回详情。
+
+### 3.1 目标集 bootstrap（2026-10-10 W3 现行契约）
+- **`GET /api/titles/{titleId}/bootstrap?ep=`**｜认证：公开可选 Bearer，私密必须有效 B/Y/S Bearer + 有效 `X-Private-Session` 双准入。旧 title 完整响应不变。
+- 查询只允许 `ep`，整数1..5000、缺省1，拒绝重复 ep、额外参数与 videoId/URL 等注入；未知、未准入及目标集不存在同构404（NOT_FOUND）且无元数据；非法、重复或额外参数400（VALIDATION_ERROR）且无作品信息。目标集空 lines 或完整事实不可用503（SERVICE_UNAVAILABLE）。所有响应 `Cache-Control: no-store`。
+- 200 为正式 `TitleBootstrapResponse`：必填 `schema:1/workId/revision/factVersion/item/targetEpisode/catalogStatus/persistenceStatus/generatedAt/servedAt`。`revision` 是公开 manifest 版本；`factVersion` 为已核验完整 title 投影 SHA-256（64位小写hex），不是仅目标集摘要。`item` 是现行 ContentItem。
+- `targetEpisode: BootstrapTargetEpisode` 必含 `episodeNumber` 与非空真实 `lines`，可选 `title/durationSeconds`。每条 `BootstrapLine` 为实际 ManifestLine（既有 EpisodeLine 的 providerId、可选mediaUrl/native）加 `lineIndex` 整数0..31，保持完整事实原索引、不重新编号；不是 lineSummary-only。native 不等于已解码媒体，仍需既有 native-playback 原生身份复核，不下发密钥。
+- `catalogStatus='complete'` 表示当前已取得完整目录，不是持久化成功。`persistenceStatus='stored'` 表示完整事实已存；`'scheduled'` 只表示 `ctx.waitUntil` 已登记完整事实发布，不保证已持久化或未来必成。无 ctx 冷结果只能503，禁止同步存储阻塞首集。
+- `generatedAt` 保留源事实生成UTC Unix秒；`servedAt` 是本次服务UTC Unix秒。provider 仍一次获取全目录，仅优化返回体与存储 critical path，不宣称 target-only 上游或秒起；聚合/季发现未实现；prefetch 使用以下独立公开契约。本节落约不证明部署、APP接入或验收。
+
+### 3.2 公开元数据 prefetch（2026-10-10 W3 现行契约）
+- **`POST /api/titles/{titleId}/prefetch`**｜公开可选 Bearer，但 Bearer 不是可信客户ID。仅公开作品；私密即使已有双准入也不进行后台存储，本期 scope 与未知作品统一同构404（NOT_FOUND），无元数据。旧接口不变。
+- `TitlePrefetchRequest` 严格仅三键 `{requestId, episodeNumbers, reason}`，拒绝查询参数。requestId 为8..128位 ASCII `[A-Za-z0-9_-]`；episodeNumbers 是唯一1..4项整数1..5000，且 `max-min<=3`，只允许 `[K,K+3]` lookahead 或 resume 窗口；reason 仅 `lookahead|resume`。JSON 原始请求体≤4096 bytes；缺失/未知键、类型或窗口非法、body too large均400（VALIDATION_ERROR），不新增413。
+- caller 只来自平台可信IP哈希，不信客户端ID/requestId/Bearer；每caller最多12次/60秒（重复请求也计数），429（RATE_LIMITED）带 `Retry-After` 秒数。同work原子lease30秒、每集30秒窗口去重；同work并发合并为202 `accepted:0/deduped:true`。
+- 已有核验完整事实目录且所有目标集真实lines非空：200 `TitlePrefetchReadyResponse = {schema:1, requestId, accepted:0, deduped:false, reason:'already_ready', servedAt}`，不触上游，不代表媒体可播。
+- 202 `TitlePrefetchAcceptedResponse = {schema:1, requestId, accepted:0..4, deduped:boolean, servedAt}`；accepted 是本次接受集号数量，不是准备完成数。只表示 `ctx.waitUntil` 已登记或请求已合并，不等于完成、持久化成功或保证可播；无ctx/DB临时故障503（SERVICE_UNAVAILABLE），不能同步准备挡请求或伪装成功。
+- 仅候选card cold在后台实际准备完整事实；provider单次预算24次请求/25秒，最后保持owner + candidate/current manifest guard，禁止覆盖已变化/撤片/私密事实。后台失败记录并释锁。不下载视频，不计热门点击或活跃，与端侧媒体缓存分层。
+- 所有响应 `Cache-Control: no-store`；servedAt为UTC Unix秒整数。响应schema严格闭集；登记不证明部署、APP接入或验收。
 
 ### 4. 分集播放解析（仅真实旧全局 episode ID 兼容，不是 native 主链）
 - **`GET /api/episodes/{episodeId}/playback`**｜认证：可选 Bearer

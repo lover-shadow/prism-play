@@ -75,7 +75,9 @@ function createFactsBackedStore(facts: TitleFactsStore): TitleManifestStore {
   return {
     load: (workId, options) => facts.loadManifest(workId, options),
     linesFor: async (workId, episodeNumber) =>
-      (await facts.loadManifest(workId))?.episodes.find((entry) => entry.episodeNumber === episodeNumber)?.lines ?? [],
+      typeof facts.linesFor === 'function'
+        ? await facts.linesFor(workId, episodeNumber)
+        : (await facts.loadManifest(workId))?.episodes.find((entry) => entry.episodeNumber === episodeNumber)?.lines ?? [],
     cached: (workId) => facts.cachedManifest(workId),
     size: () => facts.size()
   };

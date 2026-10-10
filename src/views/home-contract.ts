@@ -36,7 +36,7 @@ export interface HomeViewDeps {
   headerAccessory?: HTMLElement | null;
   posterMode: () => PosterMode;
   onPosterModeChange: (mode: PosterMode) => void;
-  onOpenTitle: (contentId: string) => void;
+  onOpenTitle: (contentId: string, item?: ContentItem) => void;
   onResume: (row: WatchHistoryRow) => void;
   historyPreview: () => Promise<WatchHistoryRow[]>;
   /** 回传当前频道供宿主挂/摘 FLAG_SECURE（AC-02-4）；综合首页不是频道，回 null 即公开态。 */

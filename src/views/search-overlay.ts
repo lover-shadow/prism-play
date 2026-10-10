@@ -20,7 +20,7 @@ export interface SearchOverlayDeps {
   /** 端侧榜单与热词的数据源（本机公开快照读面）：Overlay 自己不碰存储域。 */
   localItems: () => readonly ContentItem[];
   hotWords: () => string[];
-  onOpenTitle(contentId: string): void;
+  onOpenTitle(contentId: string, item?: ContentItem): void;
   /** 「回【精选】浏览」的去处：由宿主切 Tab，本模块只负责先把这层关掉。 */
   onBrowse?(target: BrowseTarget): void;
 }
@@ -84,10 +84,10 @@ export function createSearchOverlay(deps: SearchOverlayDeps): SearchOverlay {
       root: host,
       localItems: deps.localItems,
       hotWords: deps.hotWords(),
-      onOpenTitle: (contentId) => {
+      onOpenTitle: (contentId, item) => {
         // 起播前必须先关掉这层：播放器的 Layer handler 才能在返回栈里干净地接手。
         close();
-        deps.onOpenTitle(contentId);
+        deps.onOpenTitle(contentId, item);
       },
       onClose: close,
       onBrowse: (target) => {

@@ -32,12 +32,13 @@ describe('player observed season switching', () => {
     expect(h.mount.textContent).toContain(other.title); h.player.close();
   });
   it('switches to the chosen work without assuming season continuity', () => {
-    const open = vi.fn(), current = item('s1', '示例故事');
-    const root = createSeasonSwitcher(current, [current, item('s7', '示例故事第七季')], open)!;
+    const open = vi.fn(), current = item('s1', '示例故事'), next = item('s7', '示例故事第七季');
+    const root = createSeasonSwitcher(current, [current, next], open)!;
     const select = root.querySelector('select')!;
     expect(select.options).toHaveLength(2); expect(select.value).toBe('s1');
     select.value = 's7'; select.dispatchEvent(new Event('change'));
-    expect(open).toHaveBeenCalledWith('s7');
+    expect(open).toHaveBeenCalledWith('s7', next);
+    expect(open.mock.calls[0][1]).toBe(next);
   });
   it('retains the same host stage and fullscreen while switching seasons', async () => {
     const first = item('s1', '故事第一季'), next = item('s2', '故事第二季');
@@ -65,7 +66,8 @@ describe('player observed season switching', () => {
     const select = h.mount.querySelector<HTMLSelectElement>('[data-prism-ui="season-switcher"] select')!;
     select.value = 's2'; select.dispatchEvent(new Event('change'));
     for (let i = 0; i < 20; i++) await Promise.resolve();
-    expect(h.mount.querySelector('.prism-player-host__title')!.textContent).toBe('');
+    expect(h.mount.querySelector('.prism-player-host__title')!.textContent).toBe(second.title);
+    expect(h.mount.querySelector('.detail-main-title')!.textContent).toBe(second.title);
     expect(h.mount.textContent).not.toContain('故事第一季');
     h.player.close(); resolve(detailOf(second));
     for (let i = 0; i < 30; i++) await Promise.resolve();

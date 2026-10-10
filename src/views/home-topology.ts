@@ -49,7 +49,7 @@ export interface HomeTopologyDeps {
   onSelectHome(): void;
   onSelectCategory(category: string): void;
   items?: () => readonly ContentItem[];
-  onOpenTitle?: (id: string) => void;
+  onOpenTitle?: (id: string, item?: ContentItem) => void;
   onNavigate?: () => void;
 }
 
@@ -92,7 +92,7 @@ export function createHomeTopology(deps: HomeTopologyDeps): HomeTopology {
     channel: () => selectedId,
     category: () => currentCategory,
     channelName: () => painted?.find((entry) => entry.id === selectedId)?.name ?? null,
-    onOpenTitle: (id) => { deps.onNavigate?.(); deps.onOpenTitle?.(id); }
+    onOpenTitle: (id, item) => { deps.onNavigate?.(); deps.onOpenTitle?.(id, item); }
   }) : null;
   /** HP-02：展开区只在返回栈上留**一条** handler；计数能不能回到基线，全看 `closeRankings` 的几条来路。 */
   let rankingsOpen = false, releaseBack: (() => void) | null = null;

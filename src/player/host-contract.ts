@@ -16,12 +16,17 @@ import type { ProgressContext } from './progress-reporter';
 
 export interface PlayerHostApi extends PlayerApi {
   related?(titleId: string): Promise<RelatedResponse>;
+  titleBootstrap?(titleId: string, ep?: number, signal?: AbortSignal): Promise<unknown>;
+  titlePrefetch?(titleId: string, payload: { requestId: string; episodeNumbers: number[]; reason: 'lookahead' | 'resume' }, signal?: AbortSignal): Promise<unknown>;
 }
 
 /** W1 渐进详情：卡片预填仅允许携带卡片已展示的合法公开字段，不伪造分集/线路。 */
 export interface OpenCandidate {
   title?: string;
   coverUrl?: string;
+  category?: string;
+  synopsis?: string;
+  episodeCount?: number;
 }
 
 export interface OpenOptions {

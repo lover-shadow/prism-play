@@ -14,15 +14,17 @@ describe('series aggregate result card', () => {
     const select = root.querySelector('select')!;
     expect(select.options).toHaveLength(2);
     select.value = 's7'; root.querySelector<HTMLButtonElement>('[data-el="series-open"]')!.click();
-    expect(open).toHaveBeenCalledWith('s7');
+    expect(open).toHaveBeenCalledWith('s7', second);
+    expect(open.mock.calls[0][1]).toBe(second);
     expect(root.getAttribute('aria-label')).toContain('已找到 2');
   });
   it('merges seasons across exact and related result buckets', async () => {
     const root = document.createElement('div'), open = vi.fn(); document.body.append(root);
+    const second = item('s7', '故事第七季');
     const view = createSearchView({ root, onOpenTitle: open, api: {
       search: async () => ({ items: [
         { item: item('s1', '故事'), matchType: 'exact' },
-        { item: item('s7', '故事第七季'), matchType: 'related' }
+        { item: second, matchType: 'related' }
       ], page: 1 }), suggestions: async () => ({ query: '', suggestions: [] })
     } });
     await view.mount(); root.querySelector('input')!.value = '故事';
@@ -31,7 +33,7 @@ describe('series aggregate result card', () => {
     expect(root.querySelectorAll('[data-el="series-card"]')).toHaveLength(1);
     const select = root.querySelector('select')!; expect(select.options).toHaveLength(2);
     select.value = 's7'; root.querySelector<HTMLButtonElement>('[data-el="series-open"]')!.click();
-    expect(open).toHaveBeenCalledWith('s7'); view.destroy(); root.remove();
+    expect(open).toHaveBeenCalledWith('s7', second); expect(open.mock.calls[0][1]).toBe(second); view.destroy(); root.remove();
   });
   it('merges a season arriving on a later result page without dropping either identity', async () => {
     const root = document.createElement('div'), open = vi.fn(); document.body.append(root);

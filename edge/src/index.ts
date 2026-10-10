@@ -26,6 +26,8 @@ import { handleSearchSuggestions } from './routes/search-suggestions';
 import { handleShare } from './routes/share';
 import { handleSources } from './routes/sources';
 import { handleTitles } from './routes/titles';
+import { handleTitleBootstrap } from './routes/title-bootstrap';
+import { handleTitlePrefetch } from './routes/title-prefetch';
 import { handleUserSync } from './routes/user-sync';
 import { handleTelemetryLines } from './routes/telemetry';
 import { handleVersion } from './routes/version';
@@ -62,6 +64,8 @@ const ROUTES: readonly Route[] = [
   { pattern: ['api', 'search'], allow: ['GET'], handle: handleSearch },
   { pattern: ['api', 'titles', '{titleId}', 'episodes', '{episodeNumber}', 'native-playback'], allow: ['GET'], handle: handleNativePlayback },
   { pattern: ['api', 'titles', '{titleId}', 'related'], allow: ['GET'], handle: handleRelated },
+  { pattern: ['api', 'titles', '{titleId}', 'bootstrap'], allow: ['GET'], handle: handleTitleBootstrap },
+  { pattern: ['api', 'titles', '{titleId}', 'prefetch'], allow: ['POST'], handle: handleTitlePrefetch },
   { pattern: ['api', 'titles', '{titleId}'], allow: ['GET'], handle: handleTitles },
   { pattern: ['api', 'episodes', '{episodeId}', 'playback'], allow: ['GET'], handle: handlePlayback },
   { pattern: ['api', 'private-sessions'], allow: ['POST', 'DELETE'], handle: handlePrivateSessions },
@@ -117,7 +121,7 @@ function withCors(response: Response, origin: string | null): Response {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
-export function routeRequest(request: Request, env: Env, clock: Clock): Response | Promise<Response> {
+export function routeRequest(request: Request, env: Env, clock: Clock, ctx?: RequestContext): Response | Promise<Response> {
   const origin = request.headers.get('Origin');
   if (request.method === 'OPTIONS') {
     return withCors(new Response(null, { status: 204 }), origin);
@@ -127,7 +131,10 @@ export function routeRequest(request: Request, env: Env, clock: Clock): Response
   const route = ROUTES.find((candidate) => matches(candidate.pattern, segments));
   if (route === undefined) return withCors(notFound(), origin);
   if (!route.allow.includes(request.method)) return withCors(methodNotAllowed(route.allow), origin);
-  const outcome = route.handle(request, env, clock);
+  const outcome = route.handle === handleTitleBootstrap
+    ? handleTitleBootstrap(request, env, clock, ctx) : route.handle === handleNativePlayback
+      ? handleNativePlayback(request, env, clock, ctx) : route.handle === handleTitlePrefetch
+        ? handleTitlePrefetch(request, env, clock, ctx) : route.handle(request, env, clock);
   return outcome instanceof Promise ? outcome.then((r) => withCors(r, origin)) : withCors(outcome, origin);
 }
 
@@ -159,7 +166,7 @@ export default {
     if (path === '/privacy') return request.method === 'GET' ? privacyPage() : new Response(null, { status: 405 });
     const origin = request.headers.get('Origin');
     try {
-      const response = await routeRequest(request, env, systemClock);
+      const response = await routeRequest(request, env, systemClock, ctx);
       if (env.SEARCH_DISCOVERY_ENABLED === 'true' && env.DISCOVERY_BUCKET && /^\/api\/titles\/[^/]+$/.test(path) && response.status === 200) {
         ctx.waitUntil(refreshOpenedPublicWork(request, response.clone(), env, systemClock).catch(() => { console.error('opened work refresh failed'); }));
       }

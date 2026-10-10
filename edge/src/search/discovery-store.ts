@@ -4,7 +4,7 @@ import type { FactRead } from '../library/work-facts';
 import { factsHash } from '../library/work-facts';
 import { isSafeWorkId } from '../library/contract';
 import { discoveryJsonBytes, discoveryWorkId, discoveryCanonicalId, validateDiscoveryFact, MAX_DISCOVERY_FACT_BYTES, type ValidatedDiscoveryFact } from './discovery-facts';
-import { acquireDiscoveryLease, releaseDiscoveryLease, discoveryTime } from './discovery-query';
+import { acquireDiscoveryLease, releaseDiscoveryLease, discoveryTime, type DiscoveryLease } from './discovery-query';
 
 export interface DiscoveryIdentity { workId: string; providerId?: string; sourceId?: string }
 /** Authoritative even when withdrawn/private: never downgrade a baseline denial to a discovery fallback.
@@ -53,7 +53,8 @@ async function indexRow(db: D1Database, id: string): Promise<DiscoveryIndexRow |
 }
 /** Provider uses stable provider/source identity and supplies an ENTIRE validated public fact, not a card. */
 export async function publishDiscoveryFact(context: DiscoveryContext, providerId: string, sourceId: string,
-  raw: unknown, now: number, ttl = 86400, canonicalId?: string, expectedUpdatedAt?: number, expectedFactHash?: string): Promise<DiscoveryPublish> {
+  raw: unknown, now: number, ttl = 86400, canonicalId?: string, expectedUpdatedAt?: number, expectedFactHash?: string,
+  parentLease?: DiscoveryLease, expectedCardJson?: string): Promise<DiscoveryPublish> {
   discoveryTime(now);
   if (!Number.isSafeInteger(ttl) || ttl < 1 || ttl > 604800) throw new Error('Invalid fact TTL');
   const workId = canonicalId ?? await discoveryWorkId(providerId, sourceId), identity = { workId, providerId, sourceId };
@@ -64,7 +65,9 @@ export async function publishDiscoveryFact(context: DiscoveryContext, providerId
   if (!validated || (canonicalId && !canonicalId.startsWith(`${validated.asset.channelId}_${providerId === 'provider_s1' ? 's' : 'm'}_`)) ||
     !safeOverlay(baseline, validated)) return { status: 'rejected', workId };
   const bucket = privateBucket(context.bindings), db = context.bindings.DB;
-  const lease = await acquireDiscoveryLease(db, `work:${workId}`, now, 300);
+  if (parentLease && !await db.prepare('SELECT 1 AS live FROM discovery_leases WHERE lease_key = ? AND owner_token = ? AND expires_at > ?')
+    .bind(parentLease.key, parentLease.token, context.nowSeconds()).first()) return { status: 'superseded', workId };
+  const lease = await acquireDiscoveryLease(db, `work:${workId}`, context.nowSeconds(), 30);
   if (!lease) return { status: 'busy', workId };
   try {
     const bytes = discoveryJsonBytes(validated.stored), hash = await factsHash(bytes);
@@ -91,6 +94,9 @@ export async function publishDiscoveryFact(context: DiscoveryContext, providerId
         updated_at, expires_at, fact_key, fact_hash, fact_bytes)
         SELECT ?, ?, ?, ?, 1, ?, ?, ?, ?, ? WHERE EXISTS
           (SELECT 1 FROM discovery_leases WHERE lease_key = ? AND owner_token = ? AND expires_at > ?)
+          AND (? IS NULL OR EXISTS (SELECT 1 FROM discovery_leases WHERE lease_key = ? AND owner_token = ? AND expires_at > ?))
+          AND (? IS NULL OR (EXISTS (SELECT 1 FROM discovery_cards WHERE work_id = ? AND candidate_json = ?)
+            AND NOT EXISTS (SELECT 1 FROM discovery_works WHERE work_id = ? AND enabled = 0)))
           AND (? IS NULL OR EXISTS (SELECT 1 FROM discovery_works WHERE work_id = ? AND enabled = 1 AND updated_at = ? AND fact_hash = ?))
         ON CONFLICT(work_id) DO UPDATE SET card_json = excluded.card_json, enabled = 1,
           updated_at = excluded.updated_at, expires_at = excluded.expires_at, fact_key = excluded.fact_key,
@@ -99,7 +105,10 @@ export async function publishDiscoveryFact(context: DiscoveryContext, providerId
           (? IS NULL OR (discovery_works.enabled = 1 AND discovery_works.updated_at = ?)) AND
           (? IS NULL OR discovery_works.fact_hash = ?)`)
         .bind(workId, providerId, sourceId, JSON.stringify(validated.card), now, now + ttl, key, hash,
-          bytes.length, lease.key, lease.token, completedAt, expectedUpdatedAt ?? null, workId, expectedUpdatedAt ?? null, expectedFactHash ?? null,
+          bytes.length, lease.key, lease.token, completedAt,
+          parentLease?.key ?? null, parentLease?.key ?? null, parentLease?.token ?? null, completedAt,
+          expectedCardJson ?? null, workId, expectedCardJson ?? null, workId,
+          expectedUpdatedAt ?? null, workId, expectedUpdatedAt ?? null, expectedFactHash ?? null,
           expectedUpdatedAt ?? null, expectedUpdatedAt ?? null, expectedFactHash ?? null, expectedFactHash ?? null),
       db.prepare('DELETE FROM discovery_leases WHERE lease_key = ? AND owner_token = ?').bind(lease.key, lease.token)
     ]);

@@ -14,7 +14,7 @@
  * 消费语义分离：`loadDetail` 失败抛出（宿主落错误卡）；`loadManifest` 任何失败/不支持都返回 null
  * （播放器静默回退代理链，不落错误卡）——与两个既有消费点的行为逐条对齐。
  */
-import type { TitleDetail, TitleManifest } from '../../../edge/src/types/api';
+import type { PlaybackLine, TitleDetail, TitleManifest } from '../../../edge/src/types/api';
 import type { CacheDisk } from '../storage/public-cache';
 import { assertWritable } from '../storage/storage-domains';
 import { adaptTitleDetail } from './title-detail';
@@ -50,6 +50,8 @@ export interface TitleFactsDeps {
   fetchDetail?(workId: string, signal?: AbortSignal): Promise<TitleDetail>;
   /** 清单原始获取直通（旧式注入，如 `api.titleManifest`）：返回值仍过 `parseTitleManifest`。 */
   fetchManifest?(workId: string): Promise<unknown>;
+  /** 快速当前集起播（W3 部署接口 /api/titles/{id}/bootstrap） */
+  fetchBootstrap?(workId: string, ep?: number, signal?: AbortSignal): Promise<unknown>;
   /** 显式 null = 只要内存缓存（Web 构建与单测）；不传 = 按需解析原生缓存盘。 */
   disk?: CacheDisk | null;
   nowSeconds?(): number;
@@ -72,6 +74,8 @@ export interface TitleFactsStore {
   peek(workId: string): TitleFactEntry | null;
   /** 上游事实变化（revision/撤片）时使单条失效（W3 接 revision 渠道的锚点）。 */
   invalidate(workId: string): void;
+  /** 快速线路直通：优先缓存，未命中时优先走 bootstrap 单集，后台补全清单。 */
+  linesFor?(workId: string, episodeNumber: number, signal?: AbortSignal): Promise<PlaybackLine[]>;
   size(): number;
 }
 
@@ -224,8 +228,25 @@ export function createTitleFactsStore(deps: TitleFactsDeps): TitleFactsStore {
     loadDetail,
     loadManifest,
     cachedManifest: (workId) => memory.get(workId)?.manifest ?? null,
-    peek: (workId) => memory.get(workId) ?? null,
+    peek: (workId) => fresh(workId),
     invalidate: (workId) => void memory.delete(workId),
+    linesFor: async (workId, episodeNumber, signal) => {
+      const cached = (memory.get(workId)?.manifest ?? null)?.episodes.find((ep) => ep.episodeNumber === episodeNumber);
+      if (cached && cached.lines.length > 0) return cached.lines;
+      if (deps.fetchBootstrap !== undefined) {
+        try {
+          const raw = await deps.fetchBootstrap(workId, episodeNumber, signal);
+          if (record(raw) && record(raw.targetEpisode) && Array.isArray(raw.targetEpisode.lines)) {
+            if (!memory.has(workId)) void loadDetail(workId).catch(() => {});
+            return raw.targetEpisode.lines as PlaybackLine[];
+          }
+        } catch {
+          // fallback to manifest
+        }
+      }
+      const manifest = await loadManifest(workId);
+      return manifest?.episodes.find((ep) => ep.episodeNumber === episodeNumber)?.lines ?? [];
+    },
     size: () => memory.size
   };
 }

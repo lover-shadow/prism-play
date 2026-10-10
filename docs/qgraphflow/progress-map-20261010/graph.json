@@ -1,0 +1,281 @@
+{
+  "meta": {
+    "title": "光影Play｜修订1.2真实进度与交付地图",
+    "diagramType": "architecture",
+    "architectureView": "relations",
+    "viewId": "progress-consolidation-20261010",
+    "sourceRef": "计划修订1.2 §4.7及§10.3；2026-10-10状态校准",
+    "locale": "zh-CN",
+    "scope": "保留六节点阶段视图与工作包身份；计划为证据来源，不是运行调用图。区分W0未闭环、W3已部署子集、阶段二未完成及后置范围。",
+    "notes": [
+      "W0凭据修复已验证，但正式日更失败、真机基线缺失；父包未完成。",
+      "W3三批子集已部署，不能据接口样本推断旧APK全部兼容或W3全量完成。",
+      "阶段二W1/W2/W3-client统一交付；内部可多次构建，不交零碎验收包。",
+      "五痛点约束与失败矩阵已写§4.7，逐项状态以§10.3.1为准。",
+      "缓存/热更待实施；统计后置但旧线上统计保持不变。"
+    ]
+  },
+  "nodes": [
+    {
+      "id": "w0",
+      "label": "W0｜契约、基线与正式日更",
+      "kind": "config",
+      "module": "基础设施",
+      "subtitle": "凭据已修复 · 父包未完成",
+      "source": {
+        "kind": "document",
+        "file": "outputs/w0-closeout-check.json",
+        "lineStart": 19,
+        "lineEnd": 49
+      },
+      "facts": [
+        "契约/时间基础与新Token验证通过。",
+        "38034959148静态R2上传成功后，私密隔离门禁失败，公开日更跳过。",
+        "仍缺新代KV/客户端回执与真实APK基线。"
+      ],
+      "overviewText": [
+        "状态：blocked，未缩减原Exit。",
+        "缺口留账，不用凭据成功冒充日更完成。"
+      ],
+      "badges": [
+        {
+          "label": "未完成",
+          "role": "status",
+          "evidence": "document"
+        }
+      ],
+      "position": {
+        "x": 32,
+        "y": 32
+      },
+      "size": {
+        "width": 300,
+        "height": 298
+      }
+    },
+    {
+      "id": "m1_cloud",
+      "label": "阶段一｜已实现服务端子集",
+      "kind": "business",
+      "module": "云端底座",
+      "subtitle": "已部署 · 兼容补验待做",
+      "source": {
+        "kind": "document",
+        "file": "docs/02-architecture/CLOUDFLARE-BACKEND-FACTS.md",
+        "lineStart": 324,
+        "lineEnd": 331
+      },
+      "facts": [
+        "Worker a05be1a0已部署租约/预算/bootstrap/prefetch三批子集。",
+        "7项样本符合预期，包括400/404，不是所有旧APK播放验收。",
+        "旧动态详情3s预算需兼容修复；SWR/清理/季关系等未完成。"
+      ],
+      "overviewText": [
+        "部署成立，W3父包未完成。",
+        "先补兼容风险，不保证秒起或绝对无影响。"
+      ],
+      "badges": [
+        {
+          "label": "deployed 子集",
+          "role": "status",
+          "evidence": "document"
+        }
+      ],
+      "position": {
+        "x": 32,
+        "y": 408
+      },
+      "size": {
+        "width": 300,
+        "height": 350
+      }
+    },
+    {
+      "id": "m2_app_core",
+      "label": "阶段二｜APP播放与交互",
+      "kind": "component",
+      "module": "端侧核心",
+      "subtitle": "端侧代码已收口 · 进入出包阶段",
+      "source": {
+        "kind": "document",
+        "file": "docs/plans/2026-10-10-system-perfection-and-live-update-spec-and-plan.md",
+        "lineStart": 591,
+        "lineEnd": 591
+      },
+      "facts": [
+        "W1/W2/W3-client端侧核心能力已全量合流实现并落地。",
+        "卡片秒显海报、首帧到达前骨架遮盖防黑底、切季事实复用、两阶段起播、三区手势与中央横滑时间HUD全绿。",
+        "全量182套单测/集成测试（1931用例）与98项Edge测试全绿，557文件守住P0红线。"
+      ],
+      "overviewText": [
+        "状态：review_ready，端侧核心闭环代码已全量就绪。",
+        "前端构建完成且Capacitor原生同步就绪，已进入CI云端出包阶段。"
+      ],
+      "badges": [
+        {
+          "label": "review_ready",
+          "role": "status",
+          "evidence": "document"
+        }
+      ],
+      "position": {
+        "x": 32,
+        "y": 836
+      },
+      "size": {
+        "width": 300,
+        "height": 378
+      }
+    },
+    {
+      "id": "apk_core",
+      "label": "交付出口｜完整集成验收APK",
+      "kind": "system",
+      "module": "交付产物",
+      "subtitle": "正在触发 CI 编译 · 产出后真机验收",
+      "source": {
+        "kind": "document",
+        "file": "docs/04-spec/RELEASE-SOP-AND-PIPELINE.md",
+        "lineStart": 1,
+        "lineEnd": 30
+      },
+      "facts": [
+        "端侧功能物理大合流集中收口，统一编译单一大包，绝不碎片化出包。",
+        "CI 触发 assembleDebug 构建 Android Debug APK 并归档 Artifacts。",
+        "用户真机验收通过后，再行决定官网下载入口发布。"
+      ],
+      "overviewText": [
+        "首个核心体验验收 APK 编译中。",
+        "待产出后获取构建产物并提供直连下载进行真机测试。"
+      ],
+      "badges": [
+        {
+          "label": "building",
+          "role": "status",
+          "evidence": "document"
+        }
+      ],
+      "position": {
+        "x": 32,
+        "y": 1292
+      },
+      "size": {
+        "width": 300,
+        "height": 380
+      }
+    },
+    {
+      "id": "m3_adv",
+      "label": "阶段三｜缓存与热更新",
+      "kind": "security",
+      "module": "演进架构",
+      "subtitle": "保留规格 · 未实施",
+      "source": {
+        "kind": "document",
+        "file": "docs/plans/2026-10-10-system-perfection-and-live-update-spec-and-plan.md",
+        "lineStart": 90,
+        "lineEnd": 114
+      },
+      "facts": [
+        "W4/W5真实媒体缓存与候选轮换，W9/W10签名分发/宿主回退。",
+        "与使用体验有关，后置不等于删除或已完成。"
+      ],
+      "overviewText": [
+        "待核心集成交付后推进。",
+        "预算：生产2500–4400/测试1400–2350/文档220–340LOC，95–160万Token（原规划非实耗）。"
+      ],
+      "badges": [
+        {
+          "label": "pending",
+          "role": "status",
+          "evidence": "document"
+        }
+      ],
+      "position": {
+        "x": 32,
+        "y": 1750
+      },
+      "size": {
+        "width": 300,
+        "height": 300
+      }
+    },
+    {
+      "id": "m4_ops",
+      "label": "后置｜统计与Admin看板",
+      "kind": "component",
+      "module": "运营支撑",
+      "subtitle": "W6/W7/W8后置",
+      "source": {
+        "kind": "document",
+        "file": "docs/plans/2026-10-10-system-perfection-and-live-update-spec-and-plan.md",
+        "lineStart": 145,
+        "lineEnd": 158
+      },
+      "facts": [
+        "新统计链不阻塞核心APK；保留原Admin/线上统计。",
+        "必要发布鉴权/审计/回退不属于可省略统计。"
+      ],
+      "overviewText": [
+        "生产1200–2200/测试700–1200/文档110–160LOC，45–80万Token（原规划）。"
+      ],
+      "badges": [
+        {
+          "label": "deferred",
+          "role": "status",
+          "evidence": "document"
+        }
+      ],
+      "position": {
+        "x": 32,
+        "y": 2128
+      },
+      "size": {
+        "width": 300,
+        "height": 326
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_w0_to_m1",
+      "source": "w0",
+      "target": "m1_cloud",
+      "kind": "provides",
+      "label": "已验证契约与凭据",
+      "evidence": "document"
+    },
+    {
+      "id": "e_m1_to_m2",
+      "source": "m1_cloud",
+      "target": "m2_app_core",
+      "kind": "provides",
+      "label": "目标集与预热接口",
+      "evidence": "document"
+    },
+    {
+      "id": "e_m2_to_apk",
+      "source": "m2_app_core",
+      "target": "apk_core",
+      "kind": "provides",
+      "label": "全部集成后交付",
+      "evidence": "document"
+    },
+    {
+      "id": "e_apk_to_m3",
+      "source": "apk_core",
+      "target": "m3_adv",
+      "kind": "provides",
+      "label": "验收后的演进基线",
+      "evidence": "document"
+    },
+    {
+      "id": "e_m3_to_m4",
+      "source": "m3_adv",
+      "target": "m4_ops",
+      "kind": "optional",
+      "label": "后续运营演进",
+      "evidence": "document"
+    }
+  ]
+}

@@ -89,6 +89,8 @@
 .prism-hud.is-visible { opacity: 1; transform: translateY(-50%) scale(1); }
 .prism-hud--volume { right: var(--space-6); }
 .prism-hud--brightness { left: var(--space-6); }
+.prism-hud--seek { left: 50%; transform: translate(-50%, -50%) scale(0.96); }
+.prism-hud--seek.is-visible { transform: translate(-50%, -50%) scale(1); }
 .prism-rate-sheet { position: absolute; inset: var(--prism-chrome-h) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); z-index: var(--prism-z-rate); display: flex; flex-wrap: wrap; align-content: center; justify-content: center; gap: var(--space-2); padding: var(--space-4); background: var(--surface-overlay); overflow-y: auto; }
 .prism-rate-sheet[hidden] { display: none; }
 .prism-hud__icon { display: block; line-height: 0; color: var(--player-vol-accent); }

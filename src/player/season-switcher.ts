@@ -1,7 +1,7 @@
 import type { ContentItem } from '../../edge/src/types/api';
 import { groupSeries } from '../core/series';
 
-export function createSeasonSwitcher(current: ContentItem, items: readonly ContentItem[], open: (workId: string) => void): HTMLElement | null {
+export function createSeasonSwitcher(current: ContentItem, items: readonly ContentItem[], open: (workId: string, item?: ContentItem) => void): HTMLElement | null {
   if (current.isPrivate || current.channelId === 'private') return null;
   const candidates = items.filter((item) => !item.isPrivate && item.channelId !== 'private' && item.id !== current.id);
   const group = groupSeries([current, ...candidates]).find((entry) => entry.items.some((item) => item.id === current.id));
@@ -17,7 +17,10 @@ export function createSeasonSwitcher(current: ContentItem, items: readonly Conte
     select.append(option);
   }
   select.value = current.id;
-  select.addEventListener('change', () => { if (select.value !== current.id) open(select.value); });
+  select.addEventListener('change', () => {
+    const target = group.items.find(item => item.id === select.value);
+    if (target && target.id !== current.id) open(target.id, target);
+  });
   label.append(select); root.append(label);
   return root;
 }

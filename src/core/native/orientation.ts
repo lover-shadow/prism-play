@@ -14,16 +14,22 @@ import type { PrismNativeBridge } from './bridge';
 
 /** Serialize entry/exit so a late lock can never outlive its queued restoration. */
 export function createFullscreenPolicy(orientation: OrientationPort, bridge: PrismNativeBridge) {
-  let desired = false, locked = false;
+  let desiredFullscreen = false, desiredLock = false, locked = false;
   let queue = Promise.resolve();
-  return (on: boolean): Promise<void> => {
-    if (desired === on) return queue;
-    desired = on;
+  return (fullscreen: boolean, lockLandscape = false): Promise<void> => {
+    if (desiredFullscreen === fullscreen && desiredLock === lockLandscape) return queue;
+    desiredFullscreen = fullscreen;
+    desiredLock = lockLandscape;
     queue = queue.then(async () => {
       try {
-        if (on) {
+        if (fullscreen) {
           await bridge.setImmersiveMode?.(true);
-          locked = await orientation.lock('landscape');
+          if (lockLandscape && !locked) {
+            locked = await orientation.lock('landscape');
+          } else if (!lockLandscape && locked) {
+            locked = false;
+            await orientation.unlock();
+          }
         } else {
           if (locked) { locked = false; await orientation.unlock(); }
           await bridge.setImmersiveMode?.(false);

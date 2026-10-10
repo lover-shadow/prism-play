@@ -74,7 +74,7 @@ export function sharePathFor(contentId: string): string {
 export interface PosterGridDeps {
   root: HTMLElement;
   mode: () => PosterMode;
-  onOpenTitle: (contentId: string) => void;
+  onOpenTitle: (contentId: string, item?: ContentItem) => void;
 }
 
 export interface PosterGrid {
@@ -245,7 +245,7 @@ export function createPosterGrid(deps: PosterGridDeps): PosterGrid {
     open.setAttribute('aria-label', `《${item.title}》`);
     open.appendChild(media(item, badge));
     open.appendChild(infoBlock(item));
-    open.addEventListener('click', () => deps.onOpenTitle(item.id));
+    open.addEventListener('click', () => deps.onOpenTitle(item.id, item));
     box.appendChild(open);
 
     // A-5：此处不再挂任何分享入口（私密与公开都不挂）——卡片只保留"进详情"这一个动作。

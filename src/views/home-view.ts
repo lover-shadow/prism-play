@@ -140,7 +140,7 @@ export function createHomeView(deps: HomeViewDeps): HomeView {
       ...(deps.exposure === undefined ? {} : { exposure: deps.exposure })
     });
 
-    const grid = createPosterGrid({ root: hosts.gridHost, mode: deps.posterMode, onOpenTitle: (id) => { controller.interrupt(); deps.onOpenTitle(id); } });
+    const grid = createPosterGrid({ root: hosts.gridHost, mode: deps.posterMode, onOpenTitle: (id, item) => { controller.interrupt(); deps.onOpenTitle(id, item); } });
     const card = createContinueCard({ root: hosts.continueHost, onResume: (row) => { controller.interrupt(); deps.onResume(row); } });
     const modeSwitch = createModeSwitch({ root: hosts.switchHost, mode: deps.posterMode, onChange: setMode });
 

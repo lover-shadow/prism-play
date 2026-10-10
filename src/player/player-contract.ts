@@ -23,6 +23,8 @@ export interface PlayerApi {
   playback(episodeId: number): Promise<PlaybackInfo>; title(titleId: string, signal?: AbortSignal): Promise<TitleDetail>; titleManifest?(workId: string): Promise<TitleManifest>;
   /** W1 统一事实缓存的取数口（原始响应；形状与适配由消费者负责）。 */
   titleRaw?(titleId: string, signal?: AbortSignal): Promise<unknown>;
+  titleBootstrap?(titleId: string, ep?: number, signal?: AbortSignal): Promise<unknown>;
+  titlePrefetch?(titleId: string, payload: { requestId: string; episodeNumbers: number[]; reason: 'lookahead' | 'resume' }, signal?: AbortSignal): Promise<unknown>;
   nativePlayback?(workId: string, episodeNumber: number, lineIndex: number): Promise<{
     workId: string; episodeNumber: number; lineIndex: number; native: { kind: 's1-cenc'; videoId: string }; checkedAt: number;
   }>;
@@ -52,6 +54,8 @@ export interface PrismPlayerOptions {
   /** Host accounting resets before replacing a source; auto-next is distinct from manual selection. */
   onSourceChange?(): void;
   onNaturalBoundary?(): Promise<void>;
+  /** 视频首帧呈现回调（P2-02）：首帧出画面后宿主才淡出骨架海报，杜绝黑底断档。 */
+  onFirstFrame?(): void;
 }
 
 export interface PlayerState {

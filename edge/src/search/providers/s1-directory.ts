@@ -1,14 +1,15 @@
-import type { DiscoveryCandidate, DiscoveryConfig, DiscoveryPublicFact } from '../discovery-provider';
+import type { DiscoveryBudget, DiscoveryCandidate, DiscoveryConfig, DiscoveryPublicFact } from '../discovery-provider';
 import { factBase, record, router, publicText } from './parse';
 import { fetchAllowed, numericId, serverUrl } from './transport';
 
-export async function resolveS1Directory(candidate: DiscoveryCandidate, config: DiscoveryConfig): Promise<DiscoveryPublicFact> {
+export async function resolveS1Directory(candidate: DiscoveryCandidate, config: DiscoveryConfig,
+  budget: DiscoveryBudget = { maxRequests: 4, timeoutMs: 15000 }): Promise<DiscoveryPublicFact> {
   const sid = numericId(candidate.sourceItemId);
   if (candidate.providerId !== 'provider_s1' || candidate.id !== `drama_s_${sid}` || candidate.channelId !== 'drama') {
     throw new Error('Invalid directory identity');
   }
   const text = await fetchAllowed(config, serverUrl(config, `/detail?series_id=${sid}`).href,
-    { maxRequests: 4, timeoutMs: 15000 });
+    budget);
   const detail = router(text, 'detail_', (value) => {
     const row = record(value.seriesDetail), id = row.series_id_str ?? row.series_id;
     return typeof id === 'string' && numericId(id) === sid;
